@@ -1,0 +1,41 @@
+# Dependencies
+vendor/
+node_modules/
+
+# Build output
+.next/
+dist/
+build/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Logs
+*.log
+storage/logs/*.log
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/views/*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Laravel
+laravel-app/storage/app/public/
+laravel-app/bootstrap/cache/*.php
+
+# PHPUnit
+!/phpunit.xml
+.phpunit.result.cache
+
+# Coverage
+coverage/
