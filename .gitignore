@@ -14,6 +14,11 @@ build/
 
 # Logs
 *.log
+
+# Backups
+*.sql
+*.sql.gz
+backups/
 storage/logs/*.log
 storage/framework/cache/data/*
 storage/framework/sessions/*
