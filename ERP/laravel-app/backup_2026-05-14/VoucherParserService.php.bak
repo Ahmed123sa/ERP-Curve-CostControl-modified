@@ -1,0 +1,171 @@
+<?php
+
+namespace App\Services;
+
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use Illuminate\Support\Carbon;
+
+/**
+ * VoucherParserService
+ * نفس منطق inventory_parser.py بس في PHP
+ *
+ * يقرأ ملفات Excel بالشكل:
+ *   م | الصنف | الوحدة | الكمية | cost
+ *   --- 9/4 | وارد مخزن ---
+ *   1  | فرايز | كيلو | 200 | 10300
+ *
+ * ويرجع array من الأذون
+ */
+class VoucherParserService
+{
+    private const HEADER_PATTERN = '/^\s*-{0,3}\s*(\d{1,2}\/\d{1,2})\s*\|\s*(.*?)\s*-{0,3}\s*$/u';
+
+    /**
+     * اقرأ ملف Excel وارجع الأذون
+     *
+     * @return array{vouchers: array, errors: array}
+     */
+    public function parse(string $filePath, int $year = null): array
+    {
+        $year ??= now()->year;
+        $spreadsheet = IOFactory::load($filePath);
+        $vouchers    = [];
+        $errors      = [];
+
+        foreach ($spreadsheet->getAllSheets() as $sheet) {
+            $result = $this->parseSheet($sheet, $year);
+            $vouchers = array_merge($vouchers, $result['vouchers']);
+            $errors   = array_merge($errors, $result['errors']);
+        }
+
+        return ['vouchers' => $vouchers, 'errors' => $errors];
+    }
+
+    private function parseSheet($sheet, int $year): array
+    {
+        $vouchers = [];
+        $errors   = [];
+        $rows     = $sheet->toArray(null, true, true, false);
+
+        $currentHeader   = null;
+        $qtyColIndex     = 3; // default
+        $costColIndex    = 4; // default
+
+        foreach ($rows as $rowIndex => $row) {
+            if (empty(array_filter($row, fn($v) => $v !== null && $v !== ''))) {
+                continue;
+            }
+
+            // 1. هل السطر ده header إذن؟
+            $headerFound = false;
+            foreach ($row as $cell) {
+                $cellStr = trim((string) ($cell ?? ''));
+                if (preg_match(self::HEADER_PATTERN, $cellStr, $matches)) {
+                    $currentHeader = [
+                        'date_str'    => $matches[1],
+                        'location'    => trim($matches[2]),
+                        'date'        => $this->parseDate($matches[1], $year),
+                        'items'       => [],
+                    ];
+                    $vouchers[] = &$currentHeader;
+                    $headerFound = true;
+
+                    // محاولة اكتشاف الأعمدة من الأسطر التالية (look ahead)
+                    for ($look = 1; $look <= 5; $look++) {
+                        if (!isset($rows[$rowIndex + $look])) break;
+                        $nextRow = $rows[$rowIndex + $look];
+                        foreach ($nextRow as $ci => $c) {
+                            $txt = mb_strtolower(trim((string) $c));
+                            if (in_array($txt, ['الكمية', 'كمية', 'qty', 'quantity'])) $qtyColIndex = $ci;
+                            if (in_array($txt, ['cost', 'تكلفة', 'التكلفة', 'إجمالي'])) $costColIndex = $ci;
+                        }
+                    }
+                    break;
+                }
+            }
+
+            if ($headerFound) continue;
+
+            // 2. هل السطر ده بيانات صنف؟
+            if ($currentHeader !== null) {
+                $seq  = $row[0] ?? null;
+                $name = trim((string) ($row[1] ?? ''));
+                $qty  = $row[$qtyColIndex] ?? null;
+                $cost = $row[$costColIndex] ?? null;
+
+                // التأكد إن 'م' هو رقم (بداية سطر البيانات)
+                if ($seq !== null && is_numeric(trim((string)$seq)) && $name !== '') {
+                    $qtyVal   = $this->cleanNumber($qty);
+                    $costVal  = $this->cleanNumber($cost);
+                    $unitCost = ($qtyVal > 0 && $costVal > 0) ? round($costVal / $qtyVal, 4) : 0.0;
+
+                    if ($qtyVal > 0 || $costVal > 0) {
+                        $currentHeader['items'][] = [
+                            'seq'       => (int) $seq,
+                            'name'      => $name,
+                            'unit'      => trim((string) ($row[2] ?? '')),
+                            'qty'       => $qtyVal,
+                            'cost'      => $costVal,
+                            'unit_cost' => $unitCost,
+                        ];
+                    }
+                }
+            }
+        }
+
+        // تنظيف المصفوفة
+        $cleaned = array_filter($vouchers, fn($v) => !empty($v['items']));
+
+        return ['vouchers' => array_values($cleaned), 'errors' => $errors];
+    }
+
+    private function cleanNumber($val): float
+    {
+        if ($val === null || $val === '') return 0.0;
+        if (is_numeric($val)) return (float) $val;
+        
+        // إزالة الكوما والمسافات
+        $clean = str_replace([',', ' '], ['', ''], (string)$val);
+        return is_numeric($clean) ? (float) $clean : 0.0;
+    }
+
+    /**
+     * تحويل "9/4" إلى Carbon date
+     */
+    private function parseDate(string $dateStr, int $year): Carbon
+    {
+        [$day, $month] = array_map('intval', explode('/', $dateStr));
+
+        // لو اليوم > 12 يبقا مش ممكن يكون شهر — تأكيد d/m
+        try {
+            return Carbon::createFromDate($year, $month, $day);
+        } catch (\Exception) {
+            // جرب العكس m/d
+            return Carbon::createFromDate($year, $day, $month);
+        }
+    }
+
+    /**
+     * تحديد نوع الإذن من اسم الموقع
+     * "وارد مخزن" → purchase
+     * "ماي بروست"  → dispatch
+     */
+    public function detectVoucherType(string $locationName): string
+    {
+        $lower = mb_strtolower($locationName);
+        if (str_contains($lower, 'وارد') || str_contains($lower, 'مخزن')) {
+            return 'purchase';
+        }
+        if (str_contains($lower, 'مبيعات')) {
+            return 'external_sale';
+        }
+        if (str_contains($lower, 'مسحوبات')) {
+            return 'withdrawal';
+        }
+        if (str_contains($lower, 'انتاج') || str_contains($lower, 'إنتاج')) {
+            return 'production';
+        }
+        // أي اسم تاني → إذن صرف لفرع
+        return 'dispatch';
+    }
+}

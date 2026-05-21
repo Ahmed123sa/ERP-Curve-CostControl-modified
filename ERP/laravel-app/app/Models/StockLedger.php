@@ -1,0 +1,25 @@
+<?php
+namespace App\Models;
+
+use App\Traits\HasTenant;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class StockLedger extends Model
+{
+    use HasTenant;
+    protected $table = 'stock_ledger';
+    protected $keyType = 'string';
+    public $incrementing = false;
+    protected $fillable = [
+        'id', 'client_id', 'warehouse_id', 'item_id',
+        'date', 'movement_type', 'voucher_type', 'qty',
+        'unit_cost', 'total_cost',
+        'ref_type', 'ref_id',
+    ];
+    protected $casts = ['date'=>'date','qty'=>'float','unit_cost'=>'float','total_cost'=>'float'];
+
+    public function client(): BelongsTo    { return $this->belongsTo(Client::class); }
+    public function warehouse(): BelongsTo { return $this->belongsTo(Warehouse::class); }
+    public function item(): BelongsTo      { return $this->belongsTo(Item::class); }
+}
