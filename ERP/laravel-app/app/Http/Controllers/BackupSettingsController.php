@@ -28,6 +28,10 @@ class BackupSettingsController extends Controller
             'email_to' => 'nullable|email',
             'google_drive_enabled' => 'sometimes|boolean',
             'retention_days' => 'sometimes|integer|min:1|max:365',
+            'auto_backup_enabled' => 'sometimes|boolean',
+            'auto_backup_time' => 'nullable|string',
+            'auto_backup_frequency' => 'nullable|string|in:daily,weekly',
+            'auto_backup_days' => 'nullable|string',
         ]);
 
         $settings = BackupSetting::first();
@@ -38,7 +42,11 @@ class BackupSettingsController extends Controller
         $settings->update($request->only([
             'local_path', 'email_enabled', 'email_to',
             'google_drive_enabled', 'retention_days',
+            'auto_backup_enabled', 'auto_backup_time', 'auto_backup_frequency', 'auto_backup_days',
         ]));
+
+        // Sync Windows Task Scheduler
+        Artisan::call('backup:sync-schedule');
 
         return response()->json(['message' => 'تم حفظ الإعدادات', 'settings' => $settings->makeHidden('google_drive_token')]);
     }
