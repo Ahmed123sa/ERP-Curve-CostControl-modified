@@ -329,6 +329,85 @@ Older copy. Do NOT modify. Changes go into `ERP/laravel-app/`.
 - **Fix**: Before creating the recipe, if `output_warehouse_id` is not provided, look up the output item's `default_warehouse_id` and use that as the recipe's output warehouse.
 - **Impact**: New recipes auto-inherit the output item's default warehouse. Existing recipes are not affected.
 
+## Surgical Changes Applied (2026-05-21 — Branding + RBAC + Backup + Settings)
+
+### 22. Branding: Cost Pro → Curve
+- **Files**:
+  - `ERP/laravel-app/.env` — `APP_NAME=Laravel` → `APP_NAME=Curve`
+  - `ERP/frontend/src/app/layout.tsx` — `Cost Pro — نظام كوست كنترول` → `Curve — نظام إدارة التكاليف`
+  - `ERP/frontend/src/app/login/page.tsx` — Branding text + logo placeholder
+  - `ERP/frontend/src/components/ui/AppShell.tsx` — Branding text + logo placeholder
+  - `ERP/laravel-app/app/Services/ReportExportService.php` — Footer (PDF + Excel) branded with Curve
+  - `ERP/README.md` — Updated title
+- **Note**: All `Cost Pro` references replaced with `Curve`. Logo loaded dynamically from API.
+
+### 23. Logo Settings (UI Upload)
+- **Migration**: `2026_05_21_000000_add_logo_to_clients.php` — added `logo` column (nullable string) to `clients` table
+- **Controller**: `app/Http/Controllers/SettingsController.php` — `POST /api/settings/logo`, `GET /api/settings/logo`, `DELETE /api/settings/logo`
+- **Storage**: Uploaded to `storage/app/public/logos/` — served via `Storage::url()`
+- **Frontend**: `src/app/(app)/settings/page.tsx` — upload + preview + delete logo
+- **UX**: AppShell sidebar + login page fetch logo dynamically on mount/client change
+
+### 24. RBAC: Spatie Permissions + Users Management
+- **Package**: `spatie/laravel-permission ^7.4` — activated (was previously installed but unused)
+- **Migration**: `2026_05_21_150443_create_permission_tables.php` — permissions, roles, model_has_*, role_has_* tables (with varchar(125) for name/guard_name to fit index limits with utf8mb4)
+- **Roles**: `super-admin`, `cost-controller`, `viewer` — 23 module permissions seeded
+- **Sync**: Existing users auto-assigned Spatie roles based on legacy `users.role` column
+- **Middleware**: `app/Http/Middleware/CheckPermission.php` — `permission:{module}` middleware, registered in `bootstrap/app.php` as `permission` alias. Super-admin bypasses all checks.
+- **Routes**: All route groups in `api.php` wrapped with `middleware('permission:module')`
+- **AuthController**: Login/me response now includes `permissions` array
+- **Users API**: `UserController` — CRUD with client assignment + role/permission sync
+- **Frontend Users Page**: `src/app/(app)/users/page.tsx` — table + create/edit modal with role + client checkboxes
+- **Frontend Sidebar Filtering**: `AppShell.tsx` — NAV items filtered by `user.permissions` using `PERMISSION_MAP`
+- **User model**: Added `HasRoles` trait (Spatie)
+
+### 25. Backup System
+- **Migration**: `2026_05_21_200000_create_backup_settings_table.php` — `backup_settings` singleton table
+- **Command**: `app/Console/Commands/DatabaseBackup.php` — `php artisan backup:run` — mysqldump → gzip → local path + optional email + cleanup old
+- **Mail**: `app/Mail/BackupMail.php` — Mailable with gzip attachment
+- **Controller**: `BackupSettingsController` — `GET/PUT /api/settings/backup`, `POST /api/settings/backup/run`
+- **Frontend**: Backup tab in `/settings` — configure local path, email, retention, Google Drive (placeholder), run button
+
+### 26. Name Correction
+- `ERP/backend/database/seeders/DatabaseSeeder.php:29` — `أحمد محمود` → `أحمد علي`
+- `ERP/README.md:99` — `أحمد محمود` → `أحمد علي`
+
+### 27. FullSystemSeeder update
+- Added `$user->assignRole('super-admin')` after user creation in seeder
+
+--- 
+
+## Files Created (2026-05-21)
+- `database/migrations/2026_05_21_000000_add_logo_to_clients.php`
+- `database/migrations/2026_05_21_150443_create_permission_tables.php`
+- `database/migrations/2026_05_21_200000_create_backup_settings_table.php`
+- `database/seeders/PermissionSeeder.php`
+- `app/Http/Controllers/SettingsController.php`
+- `app/Http/Controllers/BackupSettingsController.php`
+- `app/Http/Controllers/UserController.php`
+- `app/Http/Middleware/CheckPermission.php`
+- `app/Console/Commands/DatabaseBackup.php`
+- `app/Mail/BackupMail.php`
+- `app/Models/BackupSetting.php`
+- `config/permission.php`
+- `frontend/src/app/(app)/settings/page.tsx`
+- `frontend/src/app/(app)/users/page.tsx`
+
+## Files Modified (2026-05-21)
+- `ERP/laravel-app/.env` — APP_NAME
+- `ERP/laravel-app/app/Models/User.php` — added HasRoles trait
+- `ERP/laravel-app/app/Http/Controllers/AuthController.php` — added permissions to login/me response
+- `ERP/laravel-app/app/Services/ReportExportService.php` — Curve branding in exports
+- `ERP/laravel-app/bootstrap/app.php` — registered CheckPermission middleware as `permission`
+- `ERP/laravel-app/routes/api.php` — permission middleware on all route groups + user + backup routes
+- `ERP/laravel-app/database/seeders/FullSystemSeeder.php` — assign super-admin role
+- `ERP/frontend/src/app/layout.tsx` — title change
+- `ERP/frontend/src/app/login/page.tsx` — Curve + logo
+- `ERP/frontend/src/components/ui/AppShell.tsx` — Curve + logo + permission-based nav filtering
+- `ERP/frontend/src/lib/store.ts` — added `permissions` to User interface
+- `ERP/README.md` — title + name fix
+- `ERP/backend/database/seeders/DatabaseSeeder.php` — name fix
+
 ### 21. `ProductionPostController` — Post date uses current date instead of month end
 - **File**: `ERP/laravel-app/app/Http/Controllers/Production/ProductionPostController.php:79`
 - **Root cause**: `$postDate = $end->toDateString()` (end of month, e.g., 2026-05-31). When today is before month-end (e.g., May 17), the DispatchOrder gets a future date. The `update()` form on the frontend validates `date <= today`, so editing/updating the posted production order fails with "The date field must be a date before or equal to today."

@@ -8,60 +8,30 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/lib/store';
 import clsx from 'clsx';
 
-const NAV = [
-  {
-    section: 'الرئيسية',
-    items: [
-      { href: '/dashboard',    icon: '▦',  label: 'لوحة التحكم' },
-    ],
-  },
-  {
-    section: 'الحركة اليومية',
-    items: [
-      { href: '/vouchers/purchase', icon: '📥',  label: 'وارد مخزن' },
-      { href: '/vouchers/dispatch', icon: '📤',  label: 'إذن صرف' },
-      { href: '/vouchers/upload',   icon: '☁',   label: 'رفع Excel' },
-      { href: '/vouchers/history',  icon: '📋',  label: 'سجل الحركات' },
-      { href: '/closing', icon: '📊', label: 'التقفيل الشهري' },
-      { href: '/clients', icon: '🏢', label: 'إدارة الشركات' },
-      { href: '/production',         icon: '⚙',  label: 'الإنتاج اليومي' },
-    ],
-  },
-  {
-    section: 'المخزون',
-    items: [
-      { href: '/stock',         icon: '◫',  label: 'الرصيد الحالي' },
-      { href: '/stock/movement',icon: '↔',  label: 'حركة الأصناف' },
-      { href: '/stock/opening', icon: '⚐',  label: 'الأرصدة الافتتاحية' },
-      { href: '/stock/closing', icon: '🏁',  label: 'جرد آخر المدة' },
-    ],
-  },
-  {
-    section: 'هندسة القائمة',
-    items: [
-      { href: '/menu-engineering', icon: '📝',  label: 'Menu Engineering' },
-    ],
-  },
-  {
-    section: 'التقارير',
-    items: [
-      { href: '/reports/financial-details', icon: '₿',  label: 'التفاصيل المالية' },
-      { href: '/reports/grand-summary', icon: '▦',  label: 'التقرير الشامل (Matrix)' },
-      { href: '/reports/diffs', icon: '!',  label: 'الفروق والهدر' },
-      { href: '/reports/cost',  icon: '%',  label: 'Food Cost %' },
-    ],
-  },
-  {
-    section: 'الإعداد',
-    items: [
-      { href: '/clients',         icon: '🏢',  label: 'الشركات' },
-      { href: '/items',         icon: '☰',  label: 'الأصناف والأسعار' },
-      { href: '/warehouses',    icon: '▣',  label: 'المخازن والفروع' },
-      { href: '/mappings',      icon: '⇌',  label: 'ربط الأسماء' },
-      { href: '/users',         icon: '◉',  label: 'المستخدمين' },
-    ],
-  },
-];
+const PERMISSION_MAP: Record<string, string> = {
+  '/dashboard': 'dashboard',
+  '/vouchers/purchase': 'vouchers.purchase',
+  '/vouchers/dispatch': 'vouchers.dispatch',
+  '/vouchers/upload': 'vouchers.upload',
+  '/vouchers/history': 'vouchers.history',
+  '/closing': 'closing',
+  '/clients': 'clients',
+  '/production': 'production',
+  '/stock': 'stock.current',
+  '/stock/movement': 'stock.movement',
+  '/stock/opening': 'stock.opening',
+  '/stock/closing': 'stock.closing',
+  '/menu-engineering': 'menu-engineering',
+  '/reports/financial-details': 'reports.financial',
+  '/reports/grand-summary': 'reports.grand-summary',
+  '/reports/diffs': 'reports.diffs',
+  '/reports/cost': 'reports.food-cost',
+  '/items': 'items',
+  '/warehouses': 'warehouses',
+  '/mappings': 'mappings',
+  '/users': 'users',
+  '/settings': 'settings',
+};
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -69,6 +39,80 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const qc = useQueryClient();
   const [clientMenuOpen, setClientMenuOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+
+  const permissions = user?.permissions ?? [];
+  const hasPerm = (href: string) => {
+    const perm = PERMISSION_MAP[href];
+    return !perm || permissions.includes(perm);
+  };
+
+  const NAV = [
+    {
+      section: 'الرئيسية',
+      items: [
+        { href: '/dashboard',    icon: '▦',  label: 'لوحة التحكم' },
+      ].filter((i) => hasPerm(i.href)),
+    },
+    {
+      section: 'الحركة اليومية',
+      items: [
+        { href: '/vouchers/purchase', icon: '📥',  label: 'وارد مخزن' },
+        { href: '/vouchers/dispatch', icon: '📤',  label: 'إذن صرف' },
+        { href: '/vouchers/upload',   icon: '☁',   label: 'رفع Excel' },
+        { href: '/vouchers/history',  icon: '📋',  label: 'سجل الحركات' },
+        { href: '/closing', icon: '📊', label: 'التقفيل الشهري' },
+        { href: '/clients', icon: '🏢', label: 'إدارة الشركات' },
+        { href: '/production',         icon: '⚙',  label: 'الإنتاج اليومي' },
+      ].filter((i) => hasPerm(i.href)),
+    },
+    {
+      section: 'المخزون',
+      items: [
+        { href: '/stock',         icon: '◫',  label: 'الرصيد الحالي' },
+        { href: '/stock/movement',icon: '↔',  label: 'حركة الأصناف' },
+        { href: '/stock/opening', icon: '⚐',  label: 'الأرصدة الافتتاحية' },
+        { href: '/stock/closing', icon: '🏁',  label: 'جرد آخر المدة' },
+      ].filter((i) => hasPerm(i.href)),
+    },
+    {
+      section: 'هندسة القائمة',
+      items: [
+        { href: '/menu-engineering', icon: '📝',  label: 'Menu Engineering' },
+      ].filter((i) => hasPerm(i.href)),
+    },
+    {
+      section: 'التقارير',
+      items: [
+        { href: '/reports/financial-details', icon: '₿',  label: 'التفاصيل المالية' },
+        { href: '/reports/grand-summary', icon: '▦',  label: 'التقرير الشامل (Matrix)' },
+        { href: '/reports/diffs', icon: '!',  label: 'الفروق والهدر' },
+        { href: '/reports/cost',  icon: '%',  label: 'Food Cost %' },
+      ].filter((i) => hasPerm(i.href)),
+    },
+    {
+      section: 'الإعداد',
+      items: [
+        { href: '/clients',         icon: '🏢',  label: 'الشركات' },
+        { href: '/items',         icon: '☰',  label: 'الأصناف والأسعار' },
+        { href: '/warehouses',    icon: '▣',  label: 'المخازن والفروع' },
+        { href: '/mappings',      icon: '⇌',  label: 'ربط الأسماء' },
+        { href: '/users',         icon: '◉',  label: 'المستخدمين' },
+        { href: '/settings',      icon: '⚙',  label: 'الإعدادات' },
+      ].filter((i) => hasPerm(i.href)),
+    },
+  ];
+
+  useEffect(() => {
+    if (currentClient?.id) {
+      fetch(`http://localhost:8000/api/settings/logo`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('erp_token')}` },
+      })
+        .then((r) => r.ok ? r.json() : null)
+        .then((d) => { if (d?.logo_url) setLogoUrl(d.logo_url); })
+        .catch(() => {});
+    }
+  }, [currentClient?.id]);
 
   // Invalidate all queries when client changes (data is scoped per client)
   useEffect(() => {
@@ -84,8 +128,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       )}>
         {/* Logo */}
         <div className="px-4 py-4 border-b border-gray-100 flex-shrink-0">
-          <div className="font-semibold text-gray-900 text-sm whitespace-nowrap">Cost Pro</div>
-          <div className="text-xs text-gray-400 mt-0.5 whitespace-nowrap">نظام كوست كنترول</div>
+          {logoUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={logoUrl} alt="Curve" className="h-8 mb-1" />
+          )}
+          <div className="font-semibold text-gray-900 text-sm whitespace-nowrap">Curve</div>
+          <div className="text-xs text-gray-400 mt-0.5 whitespace-nowrap">نظام إدارة التكاليف</div>
         </div>
 
         {/* Client Switcher */}

@@ -65,6 +65,7 @@ class FullSystemSeeder extends Seeder
             'current_client_id' => $client->id,
         ]);
         $user->clients()->syncWithoutDetaching([$client->id => ['is_primary' => true]]);
+        $user->assignRole('super-admin');
 
         // المخزن الرئيسي + فرعي
         $mainWarehouse = Warehouse::create([

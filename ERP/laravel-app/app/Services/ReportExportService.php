@@ -222,6 +222,7 @@ class ReportExportService
             .empty-row td { border: none; height: 5px; }
             .note { font-size: 8px; color: #6b7280; text-align: center; margin-top: 8px; }
         </style></head><body>';
+        $html .= '<div style="text-align:center;font-size:16px;font-weight:bold;color:#1e3a5f;margin-bottom:4px;">Curve — نظام إدارة التكاليف</div>';
         $html .= '<h2>' . $title . '</h2>';
         $html .= '<div class="subtitle">' . $month . '</div>';
         $html .= '<table>';
@@ -244,7 +245,7 @@ class ReportExportService
             $html .= '</tr>';
         }
         $html .= '</table>';
-        $html .= '<div class="note">تم التصدير بواسطة نظام ERP لإدارة المخزون والتكاليف</div>';
+        $html .= '<div class="note">تم التصدير بواسطة Curve — نظام إدارة التكاليف</div>';
         $html .= '</body></html>';
         return $html;
     }
@@ -255,11 +256,23 @@ class ReportExportService
         set_time_limit(120);
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet()->setRightToLeft(true);
+        // Branding row
+        $colCount = count($rows[0] ?? []);
+        $sheet->mergeCells(Coordinate::stringFromColumnIndex(1) . '1:' . Coordinate::stringFromColumnIndex(max($colCount, 1)) . '1');
+        $sheet->setCellValue('A1', 'Curve — نظام إدارة التكاليف');
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14)->getColor()->setARGB('FF1e3a5f');
+        $sheet->getRowDimension(1)->setRowHeight(30);
+        $dataStart = 2;
         foreach ($rows as $ri => $row) {
             foreach ($row as $ci => $val) {
-                $sheet->setCellValue(Coordinate::stringFromColumnIndex($ci + 1) . ($ri + 1), $val);
+                $sheet->setCellValue(Coordinate::stringFromColumnIndex($ci + 1) . ($ri + $dataStart), $val);
             }
         }
+        // Footer branding
+        $footerRow = count($rows) + $dataStart;
+        $sheet->mergeCells(Coordinate::stringFromColumnIndex(1) . $footerRow . ':' . Coordinate::stringFromColumnIndex(max($colCount, 1)) . $footerRow);
+        $sheet->setCellValue('A' . $footerRow, 'تم التصدير بواسطة Curve — نظام إدارة التكاليف');
+        $sheet->getStyle('A' . $footerRow)->getFont()->setItalic(true)->setSize(9)->getColor()->setARGB('FF999999');
         $writer = new Xlsx($spreadsheet);
         return response()->streamDownload(function () use ($writer) {
             $writer->save('php://output');

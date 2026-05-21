@@ -25,77 +25,118 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/switch-client/{clientId}', [AuthController::class, 'switchClient']);
 
     // ── Dashboard ─────────────────────────────────────────
-    Route::get('/dashboard', [DashboardController::class, 'index']);
-    Route::get('/dashboard/kpis', [DashboardController::class, 'kpis']);
-    Route::get('/dashboard/diffs', [DashboardController::class, 'topDiffs']);
-    Route::get('/dashboard/monthly-trend', [DashboardController::class, 'monthlyTrend']);
-    Route::get('/dashboard/warehouse-summary', [DashboardController::class, 'warehouseSummary']);
-    Route::get('/dashboard/export', [DashboardController::class, 'export']);
+    Route::middleware('permission:dashboard')->group(function () {
+        Route::get('/dashboard', [DashboardController::class, 'index']);
+        Route::get('/dashboard/kpis', [DashboardController::class, 'kpis']);
+        Route::get('/dashboard/diffs', [DashboardController::class, 'topDiffs']);
+        Route::get('/dashboard/monthly-trend', [DashboardController::class, 'monthlyTrend']);
+        Route::get('/dashboard/warehouse-summary', [DashboardController::class, 'warehouseSummary']);
+        Route::get('/dashboard/export', [DashboardController::class, 'export']);
+    });
 
-    // ── Clients (admin only) ──────────────────────────────
-    Route::apiResource('clients', ClientController::class);
+    // ── Clients ───────────────────────────────────────────
+    Route::middleware('permission:clients')->group(function () {
+        Route::apiResource('clients', ClientController::class);
+    });
 
     // ── Items (الأصناف) ───────────────────────────────────
-    Route::delete('/items/bulk', [ItemController::class, 'bulkDelete']);
-    Route::apiResource('items', ItemController::class);
-    Route::post('/items/import', [ItemController::class, 'import']); // رفع قائمة أصناف من Excel
+    Route::middleware('permission:items')->group(function () {
+        Route::delete('/items/bulk', [ItemController::class, 'bulkDelete']);
+        Route::apiResource('items', ItemController::class);
+        Route::post('/items/import', [ItemController::class, 'import']);
+    });
 
     // ── Warehouses ────────────────────────────────────────
-    Route::apiResource('warehouses', WarehouseController::class);
-
-    // ── Branches ─────────────────────────────────────────
-    Route::apiResource('branches', BranchController::class);
-    // ربط فرع بمخازنه
-    Route::post('/branches/{branch}/sources', [BranchController::class, 'updateSources']);
-    Route::get('/branches/{branch}/sources', [BranchController::class, 'sources']);
+    Route::middleware('permission:warehouses')->group(function () {
+        Route::apiResource('warehouses', WarehouseController::class);
+        Route::apiResource('branches', BranchController::class);
+        Route::post('/branches/{branch}/sources', [BranchController::class, 'updateSources']);
+        Route::get('/branches/{branch}/sources', [BranchController::class, 'sources']);
+    });
 
     // ── Vouchers (الأذون) ─────────────────────────────────
-    Route::get('/vouchers', [VoucherController::class, 'index']);
-    Route::post('/vouchers/upload', [VoucherController::class, 'upload']);    // رفع Excel
-    Route::post('/vouchers/confirm', [VoucherController::class, 'confirm']);  // تأكيد بعد المراجعة
-    Route::post('/vouchers/manual', [VoucherController::class, 'manual']);    // إدخال يدوي
-    Route::get('/vouchers/{order}', [VoucherController::class, 'show']);
-    Route::put('/vouchers/{order}', [VoucherController::class, 'update']);     // تعديل (بيعكس الـ ledger وبيحفظ من تاني)
-    Route::delete('/vouchers/{order}', [VoucherController::class, 'destroy']); // حذف (بيعكس الـ ledger)
+    Route::prefix('vouchers')->middleware('permission:vouchers.purchase')->group(function () {
+        Route::get('/', [VoucherController::class, 'index']);
+        Route::post('/upload', [VoucherController::class, 'upload']);
+        Route::post('/confirm', [VoucherController::class, 'confirm']);
+        Route::post('/manual', [VoucherController::class, 'manual']);
+        Route::get('/{order}', [VoucherController::class, 'show']);
+        Route::put('/{order}', [VoucherController::class, 'update']);
+        Route::delete('/{order}', [VoucherController::class, 'destroy']);
+    });
 
     // ── Stock ─────────────────────────────────────────────
-    Route::get('/stock/current', [StockController::class, 'current']);            // رصيد حالي
-    Route::get('/stock/movement', [StockController::class, 'movement']);          // حركة صنف
-    Route::get('/stock/opening', [StockController::class, 'opening']);            // أرصدة افتتاحية لموقع/تاريخ
-    Route::get('/stock/warehouse-summary', [StockController::class, 'warehouseSummary']); // ملخص مخزن
+    Route::middleware('permission:stock.current')->group(function () {
+        Route::get('/stock/current', [StockController::class, 'current']);
+        Route::get('/stock/movement', [StockController::class, 'movement']);
+        Route::get('/stock/opening', [StockController::class, 'opening']);
+        Route::get('/stock/warehouse-summary', [StockController::class, 'warehouseSummary']);
+    });
 
-// ── Closing (التقفيل الشهري) ──────────────────────────
-     Route::get('/closing', [ClosingController::class, 'index']);
-     Route::get('/closing/all', [ClosingController::class, 'allWarehouses']);      // ← جديد: تقفيل شامل
-     Route::post('/closing/generate', [ClosingController::class, 'generate']);
-     Route::post('/closing/bulk-actual', [ClosingController::class, 'bulkUpdateActual']); // ← جديد: جرد فعلي بالجملة
-     Route::post('/closing/sync-physical', [ClosingController::class, 'syncPhysicalToActual']); // ← جديد: مزامنة الجرد النهائي للماتريكس
-     Route::patch('/closing/{closing}/actual', [ClosingController::class, 'updateActual']);
-     Route::post('/closing/lock', [ClosingController::class, 'lock']);
-     Route::get('/closing/export', [ClosingController::class, 'export']);
-    Route::get('/closing/export-pdf', [ClosingController::class, 'exportPdf']);
+    // ── Closing (التقفيل الشهري) ──────────────────────────
+    Route::middleware('permission:closing')->group(function () {
+        Route::get('/closing', [ClosingController::class, 'index']);
+        Route::get('/closing/all', [ClosingController::class, 'allWarehouses']);
+        Route::post('/closing/generate', [ClosingController::class, 'generate']);
+        Route::post('/closing/bulk-actual', [ClosingController::class, 'bulkUpdateActual']);
+        Route::post('/closing/sync-physical', [ClosingController::class, 'syncPhysicalToActual']);
+        Route::patch('/closing/{closing}/actual', [ClosingController::class, 'updateActual']);
+        Route::post('/closing/lock', [ClosingController::class, 'lock']);
+        Route::get('/closing/export', [ClosingController::class, 'export']);
+        Route::get('/closing/export-pdf', [ClosingController::class, 'exportPdf']);
+    });
 
     // ── Mappings (إدارة ربط الأسماء) ─────────────────────
-    Route::get('/mappings', [MappingController::class, 'index']);
-    Route::post('/mappings/item', [MappingController::class, 'updateItem']);
-    Route::post('/mappings/location', [MappingController::class, 'updateLocation']);
-    Route::delete('/mappings/item/{id}', [MappingController::class, 'deleteItem']);
+    Route::middleware('permission:mappings')->group(function () {
+        Route::get('/mappings', [MappingController::class, 'index']);
+        Route::post('/mappings/item', [MappingController::class, 'updateItem']);
+        Route::post('/mappings/location', [MappingController::class, 'updateLocation']);
+        Route::delete('/mappings/item/{id}', [MappingController::class, 'deleteItem']);
+    });
 
-    // ── Reports (التقارير الاحترافية) ─────────────────────
-    Route::get('/reports/grand-summary', [\App\Http\Controllers\ReportController::class, 'grandSummary']);
-    Route::get('/reports/grand-summary/export', [\App\Http\Controllers\ReportController::class, 'exportMatrix']);
-    Route::get('/reports/grand-summary/export-pdf', [\App\Http\Controllers\ReportController::class, 'exportMatrixPdf']);
-    Route::get('/reports/branch-performance', [\App\Http\Controllers\ReportController::class, 'branchPerformance']);
-    Route::get('/reports/financial-details', [\App\Http\Controllers\ReportController::class, 'financialDetails']);
-    Route::get('/reports/financial-details/export', [\App\Http\Controllers\ReportController::class, 'exportFinancialDetails']);
-    Route::get('/reports/financial-details/export-pdf', [\App\Http\Controllers\ReportController::class, 'exportFinancialPdf']);
+    // ── Users (المستخدمين والصلاحيات) ───────────────────
+    Route::middleware('permission:users')->group(function () {
+        Route::get('/users', [\App\Http\Controllers\UserController::class, 'index']);
+        Route::post('/users', [\App\Http\Controllers\UserController::class, 'store']);
+        Route::put('/users/{id}', [\App\Http\Controllers\UserController::class, 'update']);
+        Route::delete('/users/{id}', [\App\Http\Controllers\UserController::class, 'destroy']);
+        Route::get('/permissions', function () {
+            return response()->json(\Spatie\Permission\Models\Permission::pluck('name'));
+        });
+        Route::get('/roles', function () {
+            return response()->json(\Spatie\Permission\Models\Role::pluck('name'));
+        });
+    });
 
-    // جرد من إكسيل (أول وآخر المدة)
-    Route::post('/inventory/parse', [\App\Http\Controllers\InventoryUploadController::class, 'parse']);
-    Route::post('/inventory/confirm', [\App\Http\Controllers\InventoryUploadController::class, 'confirm']);
+    // ── Reports (التقارير) ──────────────────────────────
+    Route::middleware('permission:reports.financial')->group(function () {
+        Route::get('/reports/grand-summary', [\App\Http\Controllers\ReportController::class, 'grandSummary']);
+        Route::get('/reports/grand-summary/export', [\App\Http\Controllers\ReportController::class, 'exportMatrix']);
+        Route::get('/reports/grand-summary/export-pdf', [\App\Http\Controllers\ReportController::class, 'exportMatrixPdf']);
+        Route::get('/reports/branch-performance', [\App\Http\Controllers\ReportController::class, 'branchPerformance']);
+        Route::get('/reports/financial-details', [\App\Http\Controllers\ReportController::class, 'financialDetails']);
+        Route::get('/reports/financial-details/export', [\App\Http\Controllers\ReportController::class, 'exportFinancialDetails']);
+        Route::get('/reports/financial-details/export-pdf', [\App\Http\Controllers\ReportController::class, 'exportFinancialPdf']);
+    });
 
-    // ── Production Module (الإنتاج اليومي والوصفات) ────────
-    Route::prefix('production')->group(function () {
+    // ── Settings (الإعدادات) ──────────────────────────────
+    Route::middleware('permission:settings')->group(function () {
+        Route::get('/settings/logo', [\App\Http\Controllers\SettingsController::class, 'getLogo']);
+        Route::post('/settings/logo', [\App\Http\Controllers\SettingsController::class, 'logo']);
+        Route::delete('/settings/logo', [\App\Http\Controllers\SettingsController::class, 'deleteLogo']);
+        Route::get('/settings/backup', [\App\Http\Controllers\BackupSettingsController::class, 'show']);
+        Route::put('/settings/backup', [\App\Http\Controllers\BackupSettingsController::class, 'update']);
+        Route::post('/settings/backup/run', [\App\Http\Controllers\BackupSettingsController::class, 'run']);
+    });
+
+    // جرد من إكسيل
+    Route::middleware('permission:items')->group(function () {
+        Route::post('/inventory/parse', [\App\Http\Controllers\InventoryUploadController::class, 'parse']);
+        Route::post('/inventory/confirm', [\App\Http\Controllers\InventoryUploadController::class, 'confirm']);
+    });
+
+    // ── Production Module ──────────────────────────────
+    Route::prefix('production')->middleware('permission:production')->group(function () {
         Route::apiResource('recipes', \App\Http\Controllers\Production\RecipeController::class);
         Route::get('daily', [\App\Http\Controllers\Production\DailyProductionController::class, 'index']);
         Route::post('daily', [\App\Http\Controllers\Production\DailyProductionController::class, 'store']);
@@ -104,7 +145,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // ── Menu Engineering Module ──────────────────────────
-    Route::prefix('menu-engineering')->group(function () {
+    Route::prefix('menu-engineering')->middleware('permission:menu-engineering')->group(function () {
         Route::apiResource('menus', \App\Http\Controllers\MenuEngineering\MenuEngineeringMenuController::class);
         Route::apiResource('categories', \App\Http\Controllers\MenuEngineering\MenuCategoryController::class);
         Route::get('/ingredients', [\App\Http\Controllers\MenuEngineering\MenuIngredientController::class, 'index']);

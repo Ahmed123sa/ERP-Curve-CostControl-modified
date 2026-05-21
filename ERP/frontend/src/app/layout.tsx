@@ -3,7 +3,7 @@ import './globals.css';
 import { Providers } from './providers';
 
 export const metadata: Metadata = {
-  title: 'Cost Pro — نظام كوست كنترول',
+  title: 'Curve — نظام إدارة التكاليف',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

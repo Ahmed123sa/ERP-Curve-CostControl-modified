@@ -8,13 +8,22 @@ export default function LoginPage() {
   const [email, setEmail]       = useState('admin@erp.local');
   const [password, setPassword] = useState('admin123');
   const [loading, setLoading]   = useState(false);
+  const [logoUrl, setLogoUrl]   = useState<string | null>(null);
   const { user, token, login }  = useAuthStore();
   const router                  = useRouter();
 
-  // Auto-redirect if already authenticated (e.g. session restored from new tab)
   useEffect(() => {
     if (user && token) router.replace('/dashboard');
   }, [user, token, router]);
+
+  useEffect(() => {
+    fetch('http://localhost:8000/api/settings/logo', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d?.logo_url) setLogoUrl(d.logo_url); })
+      .catch(() => {});
+  }, [token]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,8 +42,12 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">Cost Pro</h1>
-          <p className="text-gray-500 text-sm mt-1">نظام كوست كنترول الداخلي</p>
+          {logoUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={logoUrl} alt="Curve" className="h-14 mx-auto mb-3" />
+          )}
+          <h1 className="text-2xl font-bold text-gray-900">Curve</h1>
+          <p className="text-gray-500 text-sm mt-1">نظام إدارة التكاليف</p>
         </div>
         <form onSubmit={handleLogin} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-4">
           <div>

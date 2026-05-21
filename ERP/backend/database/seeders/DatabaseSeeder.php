@@ -26,7 +26,7 @@ class DatabaseSeeder extends Seeder
         $costUserId = Str::uuid();
         DB::table('users')->insert([
             'id'         => $costUserId,
-            'name'       => 'أحمد محمود',
+            'name'       => 'أحمد علي',
             'email'      => 'ahmed@erp.local',
             'password'   => Hash::make('123456'),
             'role'       => 'cost_controller',

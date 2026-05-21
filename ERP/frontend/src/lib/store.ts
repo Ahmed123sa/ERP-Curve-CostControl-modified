@@ -16,6 +16,7 @@ interface User {
   name: string;
   email: string;
   role: 'admin' | 'cost_controller' | 'viewer';
+  permissions?: string[];
   clients: Client[];
   current_client_id: string;
 }

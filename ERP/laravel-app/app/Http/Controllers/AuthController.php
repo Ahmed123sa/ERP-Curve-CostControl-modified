@@ -33,6 +33,9 @@ class AuthController extends Controller
         }
 
         $token = $user->createToken('erp-token')->plainTextToken;
+        $permissions = $user->hasRole('super-admin')
+            ? \Spatie\Permission\Models\Permission::pluck('name')
+            : $user->getAllPermissions()->pluck('name');
 
         return response()->json([
             'token' => $token,
@@ -41,6 +44,7 @@ class AuthController extends Controller
                 'name'              => $user->name,
                 'email'             => $user->email,
                 'role'              => $user->role,
+                'permissions'       => $permissions,
                 'clients'           => $user->clients,
                 'current_client_id' => $primaryClient?->id,
             ],
@@ -55,7 +59,13 @@ class AuthController extends Controller
 
     public function me(Request $request): JsonResponse
     {
-        return response()->json($request->user()->load('clients'));
+        $user = $request->user()->load('clients');
+        $permissions = $user->hasRole('super-admin')
+            ? \Spatie\Permission\Models\Permission::pluck('name')
+            : $user->getAllPermissions()->pluck('name');
+        $data = $user->toArray();
+        $data['permissions'] = $permissions;
+        return response()->json($data);
     }
 
     public function switchClient(Request $request, string $clientId): JsonResponse
