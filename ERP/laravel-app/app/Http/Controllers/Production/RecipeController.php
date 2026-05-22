@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Production;
 use App\Http\Controllers\Controller;
 use App\Models\Production\Recipe;
 use App\Models\Production\RecipeIngredient;
+use App\Models\Item;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -35,12 +36,15 @@ class RecipeController extends Controller
             'ingredients.*.item_id' => 'required|exists:items,id',
             'ingredients.*.qty'    => 'required|numeric|min:0',
             'ingredients.*.unit_cost' => 'nullable|numeric|min:0',
+            'sizes'               => 'nullable|array',
+            'sizes.*.grams'       => 'required|numeric|min:1',
+            'sizes.*.selling_price' => 'nullable|numeric|min:0',
+            'sizes.*.item_id'     => 'required|exists:items,id',
         ]);
 
-        // لو المستخدم محددش مخزن استلام — نستخدم المخزن الافتراضي للصنف
         $outputWarehouseId = $data['output_warehouse_id'] ?? null;
         if (!$outputWarehouseId && ($data['item_id'] ?? null)) {
-            $item = \App\Models\Item::find($data['item_id']);
+            $item = Item::find($data['item_id']);
             $outputWarehouseId = $item?->default_warehouse_id;
         }
 
@@ -53,6 +57,7 @@ class RecipeController extends Controller
             'selling_price'      => $data['selling_price'] ?? null,
             'output_warehouse_id'=> $outputWarehouseId,
             'notes'              => $data['notes'] ?? null,
+            'sizes'              => $data['sizes'] ?? null,
         ]);
 
         foreach ($data['ingredients'] as $ing) {
@@ -92,6 +97,10 @@ class RecipeController extends Controller
             'ingredients.*.item_id' => 'required|exists:items,id',
             'ingredients.*.qty'    => 'required|numeric|min:0',
             'ingredients.*.unit_cost' => 'nullable|numeric|min:0',
+            'sizes'               => 'nullable|array',
+            'sizes.*.grams'       => 'required|numeric|min:1',
+            'sizes.*.selling_price' => 'nullable|numeric|min:0',
+            'sizes.*.item_id'     => 'required|exists:items,id',
         ]);
 
         $recipe->update($data);
@@ -131,6 +140,28 @@ class RecipeController extends Controller
         return response()->json($recipe);
     }
 
+    public function syncCosts(Request $request): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+        $recipes = Recipe::where('client_id', $clientId)->with('ingredients')->get();
+        $updated = 0;
+
+        foreach ($recipes as $recipe) {
+            $data = [
+                'production_qty' => $recipe->production_qty ?? 1,
+            ];
+            $data['ingredients'] = $recipe->ingredients->toArray();
+
+            $this->syncOutputCost($recipe, $data);
+            $updated++;
+        }
+
+        return response()->json([
+            'message' => "تم تحديث تكاليف {$updated} وصفة",
+            'updated' => $updated,
+        ]);
+    }
+
     private function syncOutputCost(Recipe $recipe, array $data): void
     {
         $productionQty = $data['production_qty'] ?? $recipe->production_qty ?? 1;
@@ -144,12 +175,27 @@ class RecipeController extends Controller
             $qty = (float) ($ing['qty'] ?? 0);
             $unitCost = isset($ing['unit_cost']) && $ing['unit_cost'] !== null
                 ? (float) $ing['unit_cost']
-                : (\App\Models\Item::find($ing['item_id'])?->default_cost ?? 0);
+                : (Item::find($ing['item_id'])?->default_cost ?? 0);
             $totalCost += $qty * $unitCost;
         }
 
         $pricePerKgOutput = $totalCost / $productionQty;
-        \App\Models\Item::where('id', $recipe->item_id)->update(['default_cost' => $pricePerKgOutput]);
+
+        // تحديث المنتج الرئيسي
+        Item::where('id', $recipe->item_id)->update(['default_cost' => $pricePerKgOutput]);
+
+        // تحديث كل مقاس حسب وزنه
+        $sizes = $data['sizes'] ?? $recipe->sizes ?? [];
+        if (is_array($sizes) && count($sizes)) {
+            foreach ($sizes as $size) {
+                $grams = (float) ($size['grams'] ?? 0);
+                if ($grams <= 0) continue;
+                $variantPrice = ($grams / 1000) * $pricePerKgOutput;
+                if (!empty($size['item_id'])) {
+                    Item::where('id', $size['item_id'])->update(['default_cost' => round($variantPrice, 4)]);
+                }
+            }
+        }
     }
 
     public function destroy(Recipe $recipe): JsonResponse

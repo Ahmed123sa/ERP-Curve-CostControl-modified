@@ -138,6 +138,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ── Production Module ──────────────────────────────
     Route::prefix('production')->middleware('permission:production')->group(function () {
         Route::apiResource('recipes', \App\Http\Controllers\Production\RecipeController::class);
+        Route::post('recipes/sync-costs', [\App\Http\Controllers\Production\RecipeController::class, 'syncCosts']);
         Route::get('daily', [\App\Http\Controllers\Production\DailyProductionController::class, 'index']);
         Route::post('daily', [\App\Http\Controllers\Production\DailyProductionController::class, 'store']);
         Route::get('post-preview', [\App\Http\Controllers\Production\ProductionPostController::class, 'preview']);

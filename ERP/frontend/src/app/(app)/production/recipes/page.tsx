@@ -16,6 +16,7 @@ interface IngredientRow {
 interface CustomWeight {
   id: string;
   grams: string;
+  item_id: string;
 }
 
 interface RecipeForm {
@@ -49,6 +50,10 @@ export default function RecipesPage() {
   const [form, setForm] = useState<RecipeForm>(emptyForm());
   const [showForm, setShowForm] = useState(false);
   const [itemSearch, setItemSearch] = useState('');
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [newSizeItem, setNewSizeItem] = useState('');
+  const [newSizeGrams, setNewSizeGrams] = useState('');
 
   const { data: recipes, isLoading } = useQuery({
     queryKey: ['production-recipes'],
@@ -65,6 +70,12 @@ export default function RecipesPage() {
     queryFn: () => api.get('/warehouses').then(r => r.data),
   });
 
+  const invalidateAll = () => {
+    qc.invalidateQueries({ queryKey: ['production-recipes'] });
+    qc.invalidateQueries({ queryKey: ['daily-production'] });
+    qc.invalidateQueries({ queryKey: ['items'] });
+  };
+
   const saveMutation = useMutation({
     mutationFn: (payload: any) => {
       if (editingId) return api.put(`/production/recipes/${editingId}`, payload);
@@ -72,20 +83,39 @@ export default function RecipesPage() {
     },
     onSuccess: () => {
       toast.success(editingId ? 'تم تحديث الوصفة' : 'تم إضافة الوصفة');
-      qc.invalidateQueries({ queryKey: ['production-recipes'] });
+      invalidateAll();
       setShowForm(false);
       setEditingId(null);
       setForm(emptyForm());
     },
-    onError: () => toast.error('خطأ في الحفظ'),
+    onError: (err: any) => toast.error(err?.response?.data?.message || JSON.stringify(err?.response?.data?.errors) || 'خطأ في الحفظ'),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/production/recipes/${id}`),
     onSuccess: () => {
       toast.success('تم حذف الوصفة');
-      qc.invalidateQueries({ queryKey: ['production-recipes'] });
+      invalidateAll();
     },
+  });
+
+  const syncCostsMutation = useMutation({
+    mutationFn: () => api.post('/production/recipes/sync-costs'),
+    onSuccess: (r: any) => {
+      toast.success(r.data.message);
+      invalidateAll();
+    },
+    onError: () => toast.error('خطأ في تحديث التكاليف'),
+  });
+
+  const renameMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) => api.put(`/production/recipes/${id}`, { name }),
+    onSuccess: () => {
+      toast.success('تم تعديل الاسم');
+      setRenamingId(null);
+      invalidateAll();
+    },
+    onError: () => toast.error('خطأ في تعديل الاسم'),
   });
 
   const itemsById = useMemo(() => {
@@ -153,7 +183,11 @@ export default function RecipesPage() {
       notes: recipe.notes || '',
       production_qty: String(recipe.production_qty || 1),
       selling_price: String(recipe.selling_price || ''),
-      customWeights: [],
+      customWeights: (recipe.sizes || []).map((s: any) => ({
+        id: Math.random().toString(36).slice(2),
+        grams: String(s.grams),
+        item_id: s.item_id || '',
+      })),
       ingredients: recipe.ingredients?.length
         ? recipe.ingredients.map((ing: any) => ({
             tempId: ing.id || Math.random().toString(36).slice(2),
@@ -184,6 +218,13 @@ export default function RecipesPage() {
           qty: parseFloat(ing.qty) || 0,
           unit_cost: ing.price > 0 ? ing.price : null,
         })),
+      sizes: form.customWeights
+        .filter(w => w.grams && w.item_id)
+        .map(w => ({
+          grams: parseFloat(w.grams) || 0,
+          selling_price: null,
+          item_id: w.item_id,
+        })),
     };
     if (!payload.ingredients.length) {
       toast.error('أضف مكون واحد على الأقل');
@@ -200,12 +241,16 @@ export default function RecipesPage() {
     <div className="space-y-4" dir="rtl">
       <div className="flex justify-between items-center">
         <h2 className="text-lg font-semibold text-gray-800">الوصفات التصنيعية</h2>
-        <button
-          onClick={() => { setShowForm(true); setEditingId(null); setForm(emptyForm()); }}
-          className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          + وصفة جديدة
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => syncCostsMutation.mutate()} disabled={syncCostsMutation.isPending}
+            className="px-4 py-2 text-sm border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 disabled:opacity-40">
+            {syncCostsMutation.isPending ? 'جاري...' : '🔄 تحديث التكاليف'}
+          </button>
+          <button onClick={() => { setShowForm(true); setEditingId(null); setForm(emptyForm()); }}
+            className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+            + وصفة جديدة
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -350,11 +395,12 @@ export default function RecipesPage() {
                 </tr>
                 {form.customWeights.map((w) => {
                   const grams = parseFloat(w.grams) || 0;
-                  const price = (grams / 1000) * pricePerKgOutput;
+                  const price = grams > 0 ? (grams / 1000) * pricePerKgOutput : 0;
+                  const item = itemsById[w.item_id];
                   return (
                     <tr key={w.id} className="border-t border-gray-50">
                       <td className="px-3 py-2 text-gray-700">
-                        وزن {grams} جم
+                        {item?.name || w.item_id.slice(0, 8) || '?'} — {grams} جم
                         <button onClick={() => setForm(prev => ({ ...prev, customWeights: prev.customWeights.filter(cw => cw.id !== w.id) }))}
                           className="mr-2 px-1.5 py-0.5 text-xs text-red-500 bg-red-50 rounded hover:bg-red-100">✕ حذف</button>
                       </td>
@@ -367,36 +413,48 @@ export default function RecipesPage() {
             </table>
           </div>
 
-          {/* إضافة وزن مخصص */}
-          <div className="flex gap-2">
-            <input type="number" id="newWeightInput" placeholder="الوزن بالجرام"
-              className="w-40 border border-gray-200 rounded-lg px-3 py-2 text-sm"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  const input = e.target as HTMLInputElement;
-                  const val = input.value.trim();
-                  if (val) {
-                    setForm(prev => ({
-                      ...prev,
-                      customWeights: [...prev.customWeights, { id: Math.random().toString(36).slice(2), grams: val }],
-                    }));
-                    input.value = '';
-                  }
+          {/* إضافة وزن مخصص مع اختيار الصنف */}
+          <div className="border border-gray-100 rounded-lg p-3 space-y-2">
+            <label className="text-xs text-gray-500 font-medium">أضف مقاس</label>
+            <div className="flex gap-2 items-end">
+              <div className="flex-1">
+                <label className="block text-xs text-gray-400 mb-1">الصنف</label>
+                <select value={newSizeItem} onChange={(e) => setNewSizeItem(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                  <option value="">اختر الصنف...</option>
+                  {filteredItems.map((item: any) => (
+                    <option key={item.id} value={item.id}>{item.name} ({item.unit})</option>
+                  ))}
+                </select>
+              </div>
+              <div className="w-32">
+                <label className="block text-xs text-gray-400 mb-1">الوزن (جرام)</label>
+                <input type="text" inputMode="numeric" value={newSizeGrams}
+                  onChange={(e) => setNewSizeGrams(e.target.value.replace(/[^0-9]/g, ''))}
+                  placeholder="مثال: 100"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <button onClick={() => {
+                const g = newSizeGrams.trim();
+                if (newSizeItem && g) {
+                  setForm(prev => ({
+                    ...prev,
+                    customWeights: [...prev.customWeights, {
+                      id: Math.random().toString(36).slice(2),
+                      grams: g,
+                      item_id: newSizeItem,
+                    }],
+                  }));
+                  setNewSizeItem('');
+                  setNewSizeGrams('');
+                } else {
+                  toast.error('اختر الصنف وأدخل الوزن');
                 }
-              }} />
-            <button onClick={() => {
-              const input = document.getElementById('newWeightInput') as HTMLInputElement;
-              if (input && input.value.trim()) {
-                setForm(prev => ({
-                  ...prev,
-                  customWeights: [...prev.customWeights, { id: Math.random().toString(36).slice(2), grams: input.value.trim() }],
-                }));
-                input.value = '';
-              }
-            }}
-              className="px-3 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">
-              + أضف وزن
-            </button>
+              }}
+                className="px-3 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">
+                + أضف
+              </button>
+            </div>
           </div>
 
           {/* الأزرار */}
@@ -423,7 +481,17 @@ export default function RecipesPage() {
               <div className="flex justify-between items-start">
                 <div>
                   <div className="font-medium text-gray-800">
-                    {recipe.name}
+                    {renamingId === recipe.id ? (
+                      <input type="text" value={renameValue} autoFocus
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onBlur={() => { if (renameValue.trim() && renameValue !== recipe.name) renameMutation.mutate({ id: recipe.id, name: renameValue.trim() }); else setRenamingId(null); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setRenamingId(null); }}
+                        className="border border-blue-300 rounded px-2 py-0.5 text-sm w-full" />
+                    ) : (
+                      <span onDoubleClick={() => { setRenamingId(recipe.id); setRenameValue(recipe.name); }} className="cursor-default hover:bg-gray-100 rounded px-1 -mx-1">
+                        {recipe.name}
+                      </span>
+                    )}
                     <span className="text-xs text-gray-400 mr-2">{recipe.unit}</span>
                   </div>
                   <div className="text-xs text-gray-400">
@@ -432,6 +500,15 @@ export default function RecipesPage() {
                   <div className="text-xs text-gray-400 mt-1">
                     المخزن: {recipe.outputWarehouse?.name || '—'} · مكونات: {recipe.ingredients?.length || 0}
                   </div>
+                  {recipe.sizes?.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {recipe.sizes.map((s: any, idx: number) => (
+                        <span key={idx} className="px-2 py-0.5 text-xs bg-purple-50 text-purple-600 rounded-full">
+                          {s.grams} جم
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => editRecipe(recipe)}

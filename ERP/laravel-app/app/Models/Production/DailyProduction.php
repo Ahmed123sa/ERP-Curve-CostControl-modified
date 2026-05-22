@@ -14,7 +14,7 @@ class DailyProduction extends Model
     public $incrementing = false;
 
     protected $fillable = [
-        'id', 'client_id', 'recipe_id', 'date', 'qty', 'notes',
+        'id', 'client_id', 'recipe_id', 'date', 'qty', 'notes', 'size_index',
     ];
 
     protected function casts(): array

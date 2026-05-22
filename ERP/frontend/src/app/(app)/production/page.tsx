@@ -35,7 +35,6 @@ export default function DailyProductionPage() {
       api.post('/production/daily', { month, entries }),
     onSuccess: () => {
       toast.success('تم حفظ الإنتاج اليومي');
-      // امسح editData نهائياً عشان يشوف المستخدم البيانات الفارغة فوراً
       setEditData({});
       qc.invalidateQueries({ queryKey: ['daily-production'] });
     },
@@ -129,10 +128,25 @@ export default function DailyProductionPage() {
             </thead>
             <tbody>
               {data.recipes.map((recipe: any) => (
-                <tr key={recipe.id} className="border-t border-gray-50 hover:bg-gray-50/50">
-                  <td className="px-3 py-1.5 font-medium text-gray-800 sticky right-0 bg-white">
-                    <span className="text-xs text-gray-400 ml-1">{recipe.outputItem?.unit}</span>
-                    {recipe.outputItem?.name || recipe.name}
+                <tr key={recipe.id}
+                  className={`border-t border-gray-50 hover:bg-gray-50/50 ${recipe.is_size ? 'bg-purple-50/30 text-xs' : ''}`}>
+                  <td className="px-3 py-1.5 sticky right-0 bg-white">
+                    {recipe.is_size ? (
+                      <>
+                        <div className="font-medium text-gray-700 pr-4">
+                          <span className="text-purple-500 ml-1">⊢</span>
+                          {recipe.name}
+                        </div>
+                        <div className="text-xs text-gray-400 pr-4">
+                          {recipe.grams} جم · {recipe.outputItem?.unit}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="font-medium text-gray-800">{recipe.name}</div>
+                        <div className="text-xs text-gray-400">{recipe.outputItem?.unit} · {recipe.outputItem?.name}</div>
+                      </>
+                    )}
                   </td>
                   <td className="px-3 py-1.5 text-xs text-gray-400">{recipe.outputWarehouse?.name || '—'}</td>
                   {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => (

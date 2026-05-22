@@ -17,8 +17,15 @@ class Recipe extends Model
     protected $fillable = [
         'id', 'client_id', 'item_id', 'name', 'unit',
         'qty_per_portion', 'production_qty', 'selling_price',
-        'output_warehouse_id', 'notes',
+        'output_warehouse_id', 'notes', 'sizes',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'sizes' => 'array',
+        ];
+    }
 
     public function ingredients(): HasMany
     {
