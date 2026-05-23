@@ -3,12 +3,18 @@ namespace App\Http\Controllers\MenuEngineering;
 
 use App\Http\Controllers\Controller;
 use App\Models\MenuEngineering\MenuRecipe;
+use App\Services\MenuEngineering\MenuExportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class MenuReportController extends Controller
 {
+    public function __construct(
+        private MenuExportService $export,
+    ) {}
+
     public function summary(Request $request): JsonResponse
     {
         $clientId = $request->user()->current_client_id;
@@ -73,5 +79,29 @@ class MenuReportController extends Controller
             ],
             'categories' => $categories,
         ]);
+    }
+
+    public function exportExcel(Request $request): StreamedResponse
+    {
+        $clientId = $request->user()->current_client_id;
+        $client = $request->user()->clients()->findOrFail($clientId);
+        return $this->export->streamReportExcel(
+            $clientId,
+            $request->branch_id,
+            $request->menu_id,
+            $client,
+        );
+    }
+
+    public function exportPdf(Request $request): StreamedResponse
+    {
+        $clientId = $request->user()->current_client_id;
+        $client = $request->user()->clients()->findOrFail($clientId);
+        return $this->export->streamReportPdf(
+            $clientId,
+            $request->branch_id,
+            $request->menu_id,
+            $client,
+        );
     }
 }

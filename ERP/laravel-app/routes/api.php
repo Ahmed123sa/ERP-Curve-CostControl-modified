@@ -148,14 +148,19 @@ Route::middleware('auth:sanctum')->group(function () {
     // ── Menu Engineering Module ──────────────────────────
     Route::prefix('menu-engineering')->middleware('permission:menu-engineering')->group(function () {
         Route::apiResource('menus', \App\Http\Controllers\MenuEngineering\MenuEngineeringMenuController::class);
+        Route::get('/menus/{menu}/export-excel', [\App\Http\Controllers\MenuEngineering\MenuExportController::class, 'exportMenuExcel']);
+        Route::get('/menus/{menu}/export-pdf', [\App\Http\Controllers\MenuEngineering\MenuExportController::class, 'exportMenuPdf']);
         Route::apiResource('categories', \App\Http\Controllers\MenuEngineering\MenuCategoryController::class);
         Route::get('/ingredients', [\App\Http\Controllers\MenuEngineering\MenuIngredientController::class, 'index']);
         Route::get('/unit-conversions', [\App\Http\Controllers\MenuEngineering\MenuUnitConversionController::class, 'index']);
+        Route::post('/recipes/bulk-update-item-quantity', [\App\Http\Controllers\MenuEngineering\MenuRecipeController::class, 'bulkUpdateItemQuantity']);
         Route::apiResource('recipes', \App\Http\Controllers\MenuEngineering\MenuRecipeController::class);
         Route::post('/recipes/{recipe}/sync-items', [\App\Http\Controllers\MenuEngineering\MenuRecipeController::class, 'syncItems']);
         Route::get('/recipes/{recipe}/versions', [\App\Http\Controllers\MenuEngineering\MenuRecipeController::class, 'versions']);
         Route::post('/recipes/{recipe}/versions', [\App\Http\Controllers\MenuEngineering\MenuRecipeController::class, 'createVersion']);
         Route::get('/report/summary', [\App\Http\Controllers\MenuEngineering\MenuReportController::class, 'summary']);
+        Route::get('/report/summary/export-excel', [\App\Http\Controllers\MenuEngineering\MenuReportController::class, 'exportExcel']);
+        Route::get('/report/summary/export-pdf', [\App\Http\Controllers\MenuEngineering\MenuReportController::class, 'exportPdf']);
         Route::get('/sales', [\App\Http\Controllers\MenuEngineering\MenuReconciliationController::class, 'indexSales']);
         Route::post('/sales', [\App\Http\Controllers\MenuEngineering\MenuReconciliationController::class, 'storeSale']);
         Route::post('/reconcile', [\App\Http\Controllers\MenuEngineering\MenuReconciliationController::class, 'detailedReconcile']);

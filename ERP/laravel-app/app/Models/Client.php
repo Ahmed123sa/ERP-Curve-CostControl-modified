@@ -7,7 +7,7 @@ class Client extends Model
 {
     protected $keyType = 'string';
     public $incrementing = false;
-    protected $fillable = ['id','name','slug','is_active'];
+    protected $fillable = ['id','name','slug','is_active','logo'];
 
     public function users(): BelongsToMany
     {

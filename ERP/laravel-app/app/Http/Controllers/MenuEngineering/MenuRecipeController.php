@@ -83,6 +83,16 @@ class MenuRecipeController extends Controller
         $data['created_by'] = $request->user()->id;
         $data['portions'] ??= 1;
 
+        $exists = MenuRecipe::where('client_id', $data['client_id'])
+            ->where('name', $data['name'])
+            ->where('branch_id', $data['branch_id'] ?? null)
+            ->where('menu_id', $data['menu_id'] ?? null)
+            ->withTrashed()->exists();
+
+        if ($exists) {
+            return response()->json(['message' => 'يوجد صنف بنفس الاسم لهذا الفرع/القائمة بالفعل'], 422);
+        }
+
         $recipe = MenuRecipe::create($data);
 
         return response()->json(['data' => $recipe->fresh()], 201);
@@ -153,6 +163,18 @@ class MenuRecipeController extends Controller
             'status' => 'nullable|string|in:draft,active,archived',
         ]);
 
+        if (isset($data['name']) && $data['name'] !== $recipe->name) {
+            $exists = MenuRecipe::where('client_id', $recipe->client_id)
+                ->where('name', $data['name'])
+                ->where('branch_id', $data['branch_id'] ?? $recipe->branch_id)
+                ->where('menu_id', $data['menu_id'] ?? $recipe->menu_id)
+                ->where('id', '!=', $recipe->id)
+                ->withTrashed()->exists();
+            if ($exists) {
+                return response()->json(['message' => 'يوجد صنف بنفس الاسم لهذا الفرع/القائمة بالفعل'], 422);
+            }
+        }
+
         if (isset($data['status']) && $data['status'] === 'active' && $recipe->status !== 'active') {
             $data['version'] = $recipe->version + 1;
             $this->createVersionSnapshot($recipe);
@@ -171,6 +193,51 @@ class MenuRecipeController extends Controller
         return response()->json(['message' => 'deleted']);
     }
 
+    // ── Bulk update ──
+
+    public function bulkUpdateItemQuantity(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'ingredient_id' => 'required|string',
+            'new_qty' => 'required|numeric|min:0',
+            'recipe_ids' => 'required|array|min:1',
+            'recipe_ids.*' => 'required|string',
+        ]);
+
+        $clientId = $request->user()->current_client_id;
+
+        $validRecipeIds = MenuRecipe::where('client_id', $clientId)
+            ->whereIn('id', $data['recipe_ids'])
+            ->pluck('id')
+            ->toArray();
+
+        if (empty($validRecipeIds)) {
+            return response()->json(['message' => 'لا توجد ريسبيات صالحة'], 404);
+        }
+
+        DB::transaction(function () use ($data, $validRecipeIds) {
+            $items = MenuRecipeItem::where('ingredient_id', $data['ingredient_id'])
+                ->whereIn('recipe_id', $validRecipeIds)
+                ->get();
+
+            foreach ($items as $item) {
+                $item->qty = $data['new_qty'];
+                $this->calc->calculateItem($item);
+                $item->save();
+            }
+
+            MenuRecipe::whereIn('id', $validRecipeIds)->update(['updated_at' => now()]);
+        });
+
+        $affectedCount = MenuRecipeItem::where('ingredient_id', $data['ingredient_id'])
+            ->whereIn('recipe_id', $validRecipeIds)->count();
+
+        return response()->json([
+            'affected_count' => $affectedCount,
+            'affected_recipe_ids' => $validRecipeIds,
+        ]);
+    }
+
     // ── Items ──
 
     public function syncItems(Request $request, string $id): JsonResponse
@@ -182,9 +249,9 @@ class MenuRecipeController extends Controller
             'items' => 'required|array',
             'items.*.ingredient_id' => 'required|string',
             'items.*.qty' => 'required|numeric|min:0',
-            'items.*.purchase_unit' => 'required|string|max:20',
+            'items.*.purchase_unit' => 'nullable|string|max:20',
             'items.*.purchase_unit_price' => 'required|numeric|min:0',
-            'items.*.recipe_unit' => 'required|string|max:20',
+            'items.*.recipe_unit' => 'nullable|string|max:20',
             'items.*.conversion_factor' => 'required|numeric|min:0',
             'items.*.yield_pct' => 'nullable|numeric|min:0|max:100',
             'items.*.sort_order' => 'nullable|integer',
@@ -194,6 +261,8 @@ class MenuRecipeController extends Controller
             $recipe->items()->delete();
             foreach ($items as $i => $item) {
                 $item['recipe_id'] = $recipe->id;
+                $item['purchase_unit'] ??= 'kg';
+                $item['recipe_unit'] ??= 'g';
                 $item['yield_pct'] ??= 100;
                 $item['sort_order'] ??= $i;
                 $calculated = $this->calc->calculateItemFromArray($item);

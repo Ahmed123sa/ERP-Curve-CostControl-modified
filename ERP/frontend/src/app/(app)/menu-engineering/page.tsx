@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef, useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/ui/AppShell';
@@ -17,6 +17,8 @@ export default function MenuEngineeringPage() {
   const qc = useQueryClient();
   const { currentClient } = useAuthStore();
   const hotRef = useRef<any>(null);
+  const selectedRowRef = useRef<number>(0);
+  const dragStartRowRef = useRef<number>(-1);
 
   const [level, setLevel] = useState<Level>('branches');
   const [selectedBranch, setSelectedBranch] = useState<any>(null);
@@ -149,6 +151,20 @@ export default function MenuEngineeringPage() {
     },
   });
 
+  const bulkUpdateMutation = useMutation({
+    mutationFn: (data: any) => api.post('/menu-engineering/recipes/bulk-update-item-quantity', data),
+    onSuccess: (res) => {
+      toast.success(`تم تحديث ${res.data.affected_count} بند في ${res.data.affected_recipe_ids.length} ريسبي`);
+      setShowBulkUpdateModal(false);
+      qc.invalidateQueries({ queryKey: ['menu-recipe', selectedRecipe?.id] });
+      qc.invalidateQueries({ queryKey: ['menu-recipes'] });
+      if (selectedRecipe?.id) loadRecipeSheet(selectedRecipe.id);
+    },
+    onError: () => {
+      toast.error('حدث خطأ أثناء التحديث');
+    },
+  });
+
   const [newItemName, setNewItemName] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState('name');
@@ -158,6 +174,10 @@ export default function MenuEngineeringPage() {
   const [editingName, setEditingName] = useState('');
   const [editingMenuId, setEditingMenuId] = useState<string | null>(null);
   const [editingMenuName, setEditingMenuName] = useState('');
+  const [showBulkUpdateModal, setShowBulkUpdateModal] = useState(false);
+  const [bulkUpdateIngredient, setBulkUpdateIngredient] = useState<{ name: string; id: string; currentQty: number } | null>(null);
+  const [bulkUpdateQty, setBulkUpdateQty] = useState<number>(0);
+  const [bulkRecipeIds, setBulkRecipeIds] = useState<string[]>([]);
 
   const renameRecipeMutation = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) => api.put(`/menu-engineering/recipes/${id}`, { name }),
@@ -169,6 +189,7 @@ export default function MenuEngineeringPage() {
 
   // ── Sheet data loading ──
   const loadRecipeSheet = (recipeId: string) => {
+    qc.invalidateQueries({ queryKey: ['menu-ingredients'] });
     api.get(`/menu-engineering/recipes/${recipeId}`).then((r) => {
       setRecipeData(r.data);
       setSelectedRecipe(r.data.data);
@@ -184,7 +205,7 @@ export default function MenuEngineeringPage() {
     return found ? parseFloat(found.factor) : 1;
   };
   const calcRow = (r: any) => {
-    const cf = getCF(r.purchase_unit || 'kg', r.recipe_unit || 'g');
+    const cf = r.conversion_factor || getCF(r.purchase_unit || 'kg', r.recipe_unit || 'g');
     const uc = (r.purchase_unit_price || 0) / (cf || 1);
     const y = (r.yield_pct || 100) / 100;
     const ep = uc > 0 && y > 0 ? parseFloat((uc / y).toFixed(4)) : 0;
@@ -200,6 +221,40 @@ export default function MenuEngineeringPage() {
     return { totalCost: tc, costPerPortion: tc / p, foodCostPct: sp > 0 ? (tc / sp) * 100 : 0, idealPrice: tc / ((recipeData?.data?.target_food_cost_pct || 30) / 100) };
   };
 
+  const getHotTotals = () => {
+    const hot = hotRef.current?.hotInstance;
+    if (!hot) return null;
+    const data = hot.getData();
+    const lineTotals = data
+      .filter((r: any[]) => r[0] && ingredientIdMap[r[0]])
+      .map((r: any[]) => calcRow({
+        ingredient_id: ingredientIdMap[r[0]], qty: parseFloat(r[1]) || 0, purchase_unit: r[2] || 'kg',
+        purchase_unit_price: parseFloat(r[3]) || 0, recipe_unit: r[4] || 'g',
+        conversion_factor: parseFloat(r[5]) || 1, yield_pct: parseFloat(r[6]) || 100,
+      }).line_total);
+    const tc = lineTotals.reduce((s: number, v: number) => s + v, 0);
+    const p = Math.max(1, recipeData?.data?.portions ?? 1);
+    const sp = recipeData?.data?.selling_price ?? 0;
+    const target = recipeData?.data?.target_food_cost_pct ?? 30;
+    return {
+      totalCost: tc,
+      costPerPortion: tc / p,
+      foodCostPct: sp > 0 ? (tc / sp) * 100 : 0,
+      idealPrice: target > 0 ? tc / (target / 100) : 0,
+    };
+  };
+
+  const downloadMenuExport = async (format: 'excel' | 'pdf') => {
+    if (!selectedMenu?.id) return;
+    try {
+      const res = await api.get(`/menu-engineering/menus/${selectedMenu.id}/export-${format}`, { responseType: 'blob' });
+      const blob = new Blob([res.data]);
+      const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
+      link.download = `menu_${selectedMenu.name}.${format === 'excel' ? 'xlsx' : 'pdf'}`;
+      link.click(); URL.revokeObjectURL(link.href);
+    } catch { toast.error('حدث خطأ أثناء التصدير'); }
+  };
+
   const ingredientNames = ingredients.map((i: any) => i.name);
   const unitCostMap = Object.fromEntries(ingredients.map((i: any) => [i.id, i.default_cost]));
   const ingredientNameMap = Object.fromEntries(ingredients.map((i: any) => [i.id, i.name]));
@@ -210,38 +265,42 @@ export default function MenuEngineeringPage() {
     const hot = hotRef.current?.hotInstance;
     if (!hot) return;
     const raw = hot.getData();
-    const items = raw.filter((r: any[]) => r[1] && r[0]).map((r: any[], i: number) => calcRow({
-      ingredient_id: r[0] || ingredientIdMap[r[1]] || '', qty: parseFloat(r[2]) || 0, purchase_unit: r[3] || 'kg',
-      purchase_unit_price: parseFloat(r[4]) || 0, recipe_unit: r[5] || 'g',
-      conversion_factor: 1, yield_pct: parseFloat(r[6]) || 100, sort_order: i,
+    const items = raw.filter((r: any[]) => r[0] && ingredientIdMap[r[0]]).map((r: any[], i: number) => calcRow({
+      ingredient_id: ingredientIdMap[r[0]], qty: parseFloat(r[1]) || 0, purchase_unit: r[2] || 'kg',
+      purchase_unit_price: parseFloat(r[3]) || 0, recipe_unit: r[4] || 'g',
+      conversion_factor: parseFloat(r[5]) || 1, yield_pct: parseFloat(r[6]) || 100, sort_order: i,
     }));
     saveItemsMutation.mutate(items);
   };
 
   // ── Sheet columns ──
   const sheetColumns = [
-    { data: 0, title: 'ID', type: 'text', visible: false },
-    { data: 1, title: 'Ingredient', type: 'autocomplete', source: ingredientNames, width: 180, strict: false },
-    { data: 2, title: 'Quantity', type: 'numeric', numericFormat: { minimumFractionDigits: 3, maximumFractionDigits: 3 }, width: 90 },
-    { data: 3, title: 'Purchase Unit', type: 'dropdown', source: unitsList, width: 110 },
-    { data: 4, title: 'Unit Price', type: 'numeric', numericFormat: { minimumFractionDigits: 2, maximumFractionDigits: 2 }, width: 100 },
-    { data: 5, title: 'Recipe Unit', type: 'dropdown', source: unitsList, width: 100 },
+    { data: 0, title: 'Ingredient', type: 'autocomplete', source: ingredientNames, width: 180, strict: false },
+    { data: 1, title: 'Quantity', type: 'numeric', numericFormat: { minimumFractionDigits: 3, maximumFractionDigits: 3 }, width: 90 },
+    { data: 2, title: 'Purchase Unit', type: 'dropdown', source: unitsList, width: 110 },
+    { data: 3, title: 'Unit Price', type: 'numeric', numericFormat: { minimumFractionDigits: 2, maximumFractionDigits: 2 }, width: 100 },
+    { data: 4, title: 'Recipe Unit', type: 'dropdown', source: unitsList, width: 100 },
+    { data: 5, title: 'CF', type: 'numeric', numericFormat: { minimumFractionDigits: 3, maximumFractionDigits: 3 }, width: 80 },
     { data: 6, title: 'Yield %', type: 'numeric', numericFormat: { minimumFractionDigits: 0, maximumFractionDigits: 0 }, width: 80 },
     { data: 7, title: 'EP Cost', type: 'numeric', readOnly: true, numericFormat: { minimumFractionDigits: 4, maximumFractionDigits: 4 }, width: 95 },
     { data: 8, title: 'Line Total', type: 'numeric', readOnly: true, numericFormat: { minimumFractionDigits: 2, maximumFractionDigits: 2 }, width: 95 },
   ];
 
-  const getSheetData = () => (selectedRecipe as any)?.items?.map((i: any) => [
-    i.ingredient_id, i.ingredient_name || ingredientNameMap[i.ingredient_id] || '', i.qty, i.purchase_unit,
-    i.purchase_unit_price, i.recipe_unit, i.yield_pct, i.ep_cost, i.line_total,
-  ]) || [];
+  const sheetData = useMemo(
+    () => (selectedRecipe as any)?.items?.map((i: any) => [
+      i.ingredient_name || ingredientNameMap[i.ingredient_id] || '', i.qty, i.purchase_unit,
+      unitCostMap[i.ingredient_id] ?? i.purchase_unit_price,
+      i.recipe_unit, i.conversion_factor, i.yield_pct, i.ep_cost, i.line_total,
+    ]) || [],
+    [selectedRecipe?.items, ingredients]
+  );
 
   const handleAfterChange = (changes: any[] | null) => {
     if (!changes) return;
     const hot = hotRef.current?.hotInstance;
     if (!hot) return;
     for (const [row, prop] of changes) {
-      const colMap: any = { 0: 'ingredient_id', 1: 'ingredient_name', 2: 'qty', 3: 'purchase_unit', 4: 'purchase_unit_price', 5: 'recipe_unit', 6: 'yield_pct' };
+      const colMap: any = { 0: 'ingredient_name', 1: 'qty', 2: 'purchase_unit', 3: 'purchase_unit_price', 4: 'recipe_unit', 5: 'conversion_factor', 6: 'yield_pct' };
       const field = colMap[prop];
       if (!field) continue;
       const raw = hot.getData();
@@ -249,16 +308,13 @@ export default function MenuEngineeringPage() {
       if (!r) continue;
 
       if (field === 'ingredient_name') {
-        const name = r[1];
+        const name = r[0];
         const id = ingredientIdMap[name];
-        if (id) {
-          hot.setDataAtCell(row, 0, id, 'auto');
-          if (unitCostMap[id]) hot.setDataAtCell(row, 4, unitCostMap[id], 'auto');
-        }
+        if (id && unitCostMap[id]) hot.setDataAtCell(row, 3, unitCostMap[id], 'auto');
       }
 
-      if (!r[0]) continue;
-      const item = { ingredient_id: r[0], qty: parseFloat(r[2]) || 0, purchase_unit: r[3] || 'kg', purchase_unit_price: parseFloat(r[4]) || 0, recipe_unit: r[5] || 'g', conversion_factor: 1, yield_pct: parseFloat(r[6]) || 100 };
+      if (!r[0] || !ingredientIdMap[r[0]]) continue;
+      const item = { ingredient_id: ingredientIdMap[r[0]], qty: parseFloat(r[1]) || 0, purchase_unit: r[2] || 'kg', purchase_unit_price: parseFloat(r[3]) || 0, recipe_unit: r[4] || 'g', conversion_factor: parseFloat(r[5]) || 1, yield_pct: parseFloat(r[6]) || 100 };
       const calc = calcRow(item);
       hot.setDataAtCell(row, 7, calc.ep_cost, 'auto');
       hot.setDataAtCell(row, 8, calc.line_total, 'auto');
@@ -392,7 +448,11 @@ export default function MenuEngineeringPage() {
           <h3 className="text-sm font-medium text-gray-500">
             {selectedBranch?.name} / {selectedMenu?.name} — اختر التصنيف
           </h3>
-          <button onClick={() => setShowCategoryModal(true)} className="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200">⚙ إدارة التصنيفات</button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowCategoryModal(true)} className="px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200">⚙ إدارة التصنيفات</button>
+            <button onClick={() => downloadMenuExport('excel')} className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">⬇ Excel</button>
+            <button onClick={() => downloadMenuExport('pdf')} className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">⬇ PDF</button>
+          </div>
         </div>
 
         {categories.length === 0 ? (
@@ -509,7 +569,7 @@ export default function MenuEngineeringPage() {
                   className="accent-blue-600 cursor-pointer" />
               </div>
               <div className="text-2xl mb-1">🍽️</div>
-              <div className="font-bold text-sm text-gray-800 mb-1" onClick={(e) => e.stopPropagation()}>
+              <div className="font-bold text-sm text-gray-800 mb-1">
                 {editingNameId === r.id ? (
                   <input autoFocus value={editingName} onChange={(e) => setEditingName(e.target.value)}
                     onBlur={() => { if (editingName.trim()) renameRecipeMutation.mutate({ id: r.id, name: editingName.trim() }); else setEditingNameId(null); }}
@@ -517,7 +577,7 @@ export default function MenuEngineeringPage() {
                     className="border border-blue-300 rounded px-1 py-0.5 text-sm w-full outline-none text-center" />
                 ) : (
                   <span className="cursor-pointer hover:text-blue-600 border-b border-dashed border-gray-300"
-                    onDoubleClick={() => { setEditingNameId(r.id); setEditingName(r.name); }}>
+                    onDoubleClick={(e) => { e.stopPropagation(); setEditingNameId(r.id); setEditingName(r.name); }}>
                     {r.name}
                   </span>
                 )}
@@ -563,7 +623,7 @@ export default function MenuEngineeringPage() {
                     <input type="checkbox" checked={selectedIds.has(r.id)} onChange={() => toggleSelect(r.id)}
                       className="accent-blue-600 cursor-pointer" />
                   </td>
-                  <td className="px-4 py-3 font-medium text-gray-800" onClick={(e) => e.stopPropagation()}>
+                  <td className="px-4 py-3 font-medium text-gray-800">
                     {editingNameId === r.id ? (
                       <input autoFocus value={editingName} onChange={(e) => setEditingName(e.target.value)}
                         onBlur={() => { if (editingName.trim()) renameRecipeMutation.mutate({ id: r.id, name: editingName.trim() }); else setEditingNameId(null); }}
@@ -571,7 +631,7 @@ export default function MenuEngineeringPage() {
                         className="border border-blue-300 rounded px-2 py-0.5 text-sm w-full outline-none" />
                     ) : (
                       <span className="cursor-pointer hover:text-blue-600 border-b border-dashed border-gray-300"
-                        onDoubleClick={() => { setEditingNameId(r.id); setEditingName(r.name); }}>
+                        onDoubleClick={(e) => { e.stopPropagation(); setEditingNameId(r.id); setEditingName(r.name); }}>
                         {r.name}
                       </span>
                     )}
@@ -603,7 +663,7 @@ export default function MenuEngineeringPage() {
   const renderSheet = () => {
     const d = selectedRecipe;
     if (!d || !recipeData) return null;
-    const totals = getTotals(d.items || []);
+    const totals = getHotTotals() || getTotals(d.items || []);
     return (
       <div>
         <button onClick={() => setLevel('items')} className="text-xs text-blue-600 hover:underline mb-3 block">→ العودة للأصناف</button>
@@ -623,13 +683,30 @@ export default function MenuEngineeringPage() {
               <button onClick={() => {
                 const hot = hotRef.current?.hotInstance;
                 if (!hot) return;
-                const sel = hot.getSelectedLast();
-                let idx = sel ? sel[0] : hot.countRows() - 1;
-                if (idx < 0) return;
+                let idx = selectedRowRef.current;
+                if (idx < 0 || idx >= hot.countRows()) return;
                 const data = hot.getSourceData();
                 data.splice(idx, 1);
                 hot.loadData(data);
+                selectedRowRef.current = Math.min(idx, hot.countRows() - 2);
               }} className="px-3 py-1.5 bg-red-100 text-red-700 rounded-lg text-sm hover:bg-red-200">🗑 حذف البند</button>
+              <button onClick={() => {
+                const hot = hotRef.current?.hotInstance;
+                if (!hot) return;
+                const sel = hot.getSelectedLast();
+                let row = sel ? sel[0] : selectedRowRef.current;
+                if (row < 0) row = 0;
+                const data = hot.getData();
+                const r = data[row];
+                if (!r || !r[0] || !ingredientIdMap[r[0]]) { toast.error('اختر صنفاً صحيحاً أولاً'); return; }
+                const name = r[0];
+                const id = ingredientIdMap[name];
+                const qty = parseFloat(r[1]) || 0;
+                setBulkUpdateIngredient({ name, id, currentQty: qty });
+                setBulkUpdateQty(qty);
+                setBulkRecipeIds(recipes.map((r: any) => r.id));
+                setShowBulkUpdateModal(true);
+              }} className="px-3 py-1.5 bg-amber-100 text-amber-700 rounded-lg text-sm hover:bg-amber-200">📊 تحديث الكمية للكل</button>
               <button onClick={handleSaveSheet} disabled={saveItemsMutation.isPending} className="px-4 py-1.5 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50">
                 {saveItemsMutation.isPending ? '...' : '💾 حفظ الشيت'}
               </button>
@@ -669,14 +746,62 @@ export default function MenuEngineeringPage() {
         <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden mb-4">
           <HotTable
             ref={hotRef}
-            data={getSheetData()}
+            data={sheetData}
             columns={sheetColumns}
-            colHeaders={['', 'الصنف', 'الكمية', 'وحدة الشراء', 'سعر الوحدة', 'وحدة الريسيبي', 'Yield %', 'EP Cost', 'الإجمالي']}
-            rowHeaders={true}
+            colHeaders={['الصنف', 'الكمية', 'وحدة الشراء', 'سعر الوحدة', 'وحدة الريسيبي', 'CF', 'Yield %', 'EP Cost', 'الإجمالي']}
+            rowHeaders={(index: number) => `<div style="cursor:grab;text-align:center;user-select:none;font-size:13px;color:#999;line-height:26px;" title="اسحب لإعادة الترتيب">⋮⋮</div>`}
             width="100%"
             height={400}
             licenseKey="non-commercial-and-evaluation"
             afterChange={handleAfterChange}
+            afterSelection={(row: number) => { selectedRowRef.current = row; }}
+            beforeOnCellMouseDown={(event, coords) => {
+              if (coords.col === -1 && coords.row >= 0) {
+                event.preventDefault();
+                const hot = hotRef.current?.hotInstance;
+                if (!hot) return false;
+                const startRow = coords.row;
+                let currentRow = startRow;
+                // Find first rendered row for position calculation
+                let firstRenderedRow = -1;
+                let rowHeight = 23;
+                for (let i = 0; i < hot.countRows(); i++) {
+                  const c = hot.getCell(i, 0);
+                  if (c) { firstRenderedRow = i; rowHeight = c.offsetHeight; break; }
+                }
+                if (firstRenderedRow < 0) return false;
+                const firstCell = hot.getCell(firstRenderedRow, 0);
+                if (!firstCell) return false;
+                const firstRowTop = firstCell.getBoundingClientRect().top;
+
+                const onMove = (e: MouseEvent) => {
+                  const h = hotRef.current?.hotInstance;
+                  if (!h) return;
+                  let target = firstRenderedRow + Math.floor((e.clientY - firstRowTop) / rowHeight);
+                  target = Math.max(0, Math.min(h.countRows() - 1, target));
+                  if (target !== currentRow) {
+                    currentRow = target;
+                    h.selectCell(currentRow, 0, currentRow, h.countCols() - 1, false, false);
+                  }
+                };
+                const onUp = () => {
+                  document.removeEventListener('mousemove', onMove);
+                  document.removeEventListener('mouseup', onUp);
+                  const h = hotRef.current?.hotInstance;
+                  if (!h) return;
+                  if (startRow !== currentRow) {
+                    const data = h.getSourceData();
+                    const [item] = data.splice(startRow, 1);
+                    data.splice(currentRow, 0, item);
+                    h.loadData(data);
+                    h.selectCell(currentRow, 0, currentRow, h.countCols() - 1, false, false);
+                  }
+                };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+                return false;
+              }
+            }}
             contextMenu={{
               items: {
                 'insert_row_below': { name: 'إدراج صف' },
@@ -684,6 +809,40 @@ export default function MenuEngineeringPage() {
                 'hsep1': '---------',
                 'undo': { name: 'تراجع' },
                 'redo': { name: 'إعادة' },
+                'hsep2': '---------',
+                'move_up': {
+                  name: '↑ رفع لأعلى',
+                  callback: () => {
+                    const hot = hotRef.current?.hotInstance;
+                    if (!hot) return;
+                    const sel = hot.getSelectedLast();
+                    if (!sel) return;
+                    const row = sel[0];
+                    if (row <= 0) return;
+                    const data = hot.getSourceData();
+                    const [item] = data.splice(row, 1);
+                    data.splice(row - 1, 0, item);
+                    hot.loadData(data);
+                    hot.selectCell(row - 1, 0, row - 1, hot.countCols() - 1, false, false);
+                  },
+                },
+                'move_down': {
+                  name: '↓ خفض لأسفل',
+                  callback: () => {
+                    const hot = hotRef.current?.hotInstance;
+                    if (!hot) return;
+                    const sel = hot.getSelectedLast();
+                    if (!sel) return;
+                    const row = sel[0];
+                    const rows = hot.countRows();
+                    if (row >= rows - 1) return;
+                    const data = hot.getSourceData();
+                    const [item] = data.splice(row, 1);
+                    data.splice(row + 1, 0, item);
+                    hot.loadData(data);
+                    hot.selectCell(row + 1, 0, row + 1, hot.countCols() - 1, false, false);
+                  },
+                },
               }
             }}
             fillHandle={true}
@@ -695,18 +854,83 @@ export default function MenuEngineeringPage() {
         {/* Totals */}
         <div className="grid grid-cols-4 gap-4">
           {[
-            { label: 'Total Cost', value: totals.totalCost, color: 'text-blue-700', bg: 'bg-blue-50' },
-            { label: 'Cost/Portion', value: totals.costPerPortion, color: 'text-green-700', bg: 'bg-green-50' },
-            { label: 'Food Cost %', value: totals.foodCostPct.toFixed(1), color: totals.foodCostPct > 35 ? 'text-red-600' : 'text-green-600', bg: 'bg-amber-50' },
-            { label: 'Ideal Price', value: totals.idealPrice, color: 'text-orange-700', bg: 'bg-orange-50' },
+            { label: 'Total Cost', value: totals.totalCost, suffix: ' ج', color: 'text-blue-700', bg: 'bg-blue-50' },
+            { label: 'Cost/Portion', value: totals.costPerPortion, suffix: ' ج', color: 'text-green-700', bg: 'bg-green-50' },
+            { label: 'Food Cost %', value: totals.foodCostPct.toFixed(1), suffix: ' %', color: totals.foodCostPct > 35 ? 'text-red-600' : 'text-green-600', bg: 'bg-amber-50' },
+            { label: 'Ideal Price', value: totals.idealPrice, suffix: ' ج', color: 'text-orange-700', bg: 'bg-orange-50' },
           ].map((k) => (
             <div key={k.label} className={`${k.bg} border border-gray-100 rounded-xl p-3 shadow-sm text-center`}>
               <div className="text-xs text-gray-500">{k.label}</div>
               <div className={`text-lg font-bold mt-1 ${k.color}`}>
-                {typeof k.value === 'number' ? k.value.toFixed(2) : k.value} ج
+                {typeof k.value === 'number' ? k.value.toFixed(2) : k.value}{k.suffix}
               </div>
             </div>
           ))}
+        </div>
+      </div>
+    );
+  };
+
+  // ── Bulk Update Modal ──
+  const renderBulkUpdateModal = () => {
+    if (!showBulkUpdateModal || !bulkUpdateIngredient) return null;
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setShowBulkUpdateModal(false)}>
+        <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <h3 className="text-lg font-bold mb-4">تحديث كمية الصنف</h3>
+
+          <div className="mb-4 p-3 bg-gray-50 rounded-lg">
+            <p className="text-sm"><span className="text-gray-500">الصنف:</span> <strong>{bulkUpdateIngredient.name}</strong></p>
+            <p className="text-sm"><span className="text-gray-500">الكمية الحالية:</span> <strong>{bulkUpdateIngredient.currentQty}</strong></p>
+          </div>
+
+          <div className="mb-4">
+            <label className="text-xs text-gray-500 block mb-1">الكمية الجديدة</label>
+            <input type="number" step="0.001" value={bulkUpdateQty}
+              onChange={(e) => setBulkUpdateQty(parseFloat(e.target.value) || 0)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none" />
+          </div>
+
+          <div className="mb-4">
+            <label className="text-xs text-gray-500 block mb-2">اختر الريسيبيات المطلوب تحديثها</label>
+            <div className="max-h-48 overflow-y-auto border border-gray-100 rounded-lg divide-y divide-gray-50">
+              {recipes.map((r: any) => (
+                <label key={r.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer text-sm">
+                  <input type="checkbox" checked={bulkRecipeIds.includes(r.id)}
+                    onChange={() => {
+                      setBulkRecipeIds(prev =>
+                        prev.includes(r.id) ? prev.filter(id => id !== r.id) : [...prev, r.id]
+                      );
+                    }}
+                    className="accent-blue-600" />
+                  {r.name}
+                </label>
+              ))}
+              {recipes.length === 0 && (
+                <p className="p-3 text-gray-400 text-sm text-center">لا توجد ريسبيات في هذا التصنيف</p>
+              )}
+            </div>
+            <button onClick={() => {
+              if (bulkRecipeIds.length === recipes.length) setBulkRecipeIds([]);
+              else setBulkRecipeIds(recipes.map((r: any) => r.id));
+            }} className="text-xs text-blue-600 hover:underline mt-1">
+              {bulkRecipeIds.length === recipes.length ? 'إلغاء تحديد الكل' : 'تحديد الكل'}
+            </button>
+          </div>
+
+          <div className="flex gap-2">
+            <button onClick={() => {
+              if (bulkRecipeIds.length === 0) { toast.error('اختر ريسيبي واحد على الأقل'); return; }
+              bulkUpdateMutation.mutate({
+                ingredient_id: bulkUpdateIngredient.id,
+                new_qty: bulkUpdateQty,
+                recipe_ids: bulkRecipeIds,
+              });
+            }} disabled={bulkUpdateMutation.isPending} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
+              {bulkUpdateMutation.isPending ? '...' : 'تطبيق'}
+            </button>
+            <button onClick={() => setShowBulkUpdateModal(false)} className="px-4 py-2 text-gray-500 border border-gray-200 rounded-lg text-sm hover:bg-gray-50">إلغاء</button>
+          </div>
         </div>
       </div>
     );
@@ -725,6 +949,7 @@ export default function MenuEngineeringPage() {
         {level === 'items' && renderItems()}
         {level === 'sheet' && renderSheet()}
         {renderCategoryModal()}
+        {renderBulkUpdateModal()}
       </div>
     </div>
   );

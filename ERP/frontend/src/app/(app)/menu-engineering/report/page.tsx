@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import toast from 'react-hot-toast';
 
 export default function MenuReportPage() {
   const [branchId, setBranchId] = useState<string>('');
@@ -19,6 +20,22 @@ export default function MenuReportPage() {
     queryFn: () => api.get('/menu-engineering/menus', { params: { branch_id: branchId } }).then((r) => r.data),
     enabled: !!branchId,
   });
+
+  const downloadExport = async (format: 'excel' | 'pdf') => {
+    try {
+      const res = await api.get(`/menu-engineering/report/summary/export-${format}`, {
+        params: { branch_id: branchId, menu_id: menuId || undefined },
+        responseType: 'blob',
+      });
+      const blob = new Blob([res.data]);
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      const ext = format === 'excel' ? 'xlsx' : 'pdf';
+      link.download = `تقرير_تكاليف_المنيو.${ext}`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch { toast.error('حدث خطأ أثناء التصدير'); }
+  };
 
   const { data: report, isLoading } = useQuery({
     queryKey: ['menu-report', branchId, menuId],
@@ -45,6 +62,18 @@ export default function MenuReportPage() {
               <option value="">-- كل المنيوهات --</option>
               {menus.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
+            {branchId && (
+              <div className="flex gap-2 mr-2 pr-2 border-r border-gray-200">
+                <button onClick={() => downloadExport('excel')}
+                  className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs hover:bg-green-700">
+                  ⬇ Excel
+                </button>
+                <button onClick={() => downloadExport('pdf')}
+                  className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs hover:bg-red-700">
+                  ⬇ PDF
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

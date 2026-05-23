@@ -30,6 +30,13 @@ class MenuEngineeringMenuController extends Controller
         ]);
         $data['client_id'] = $request->user()->current_client_id;
 
+        $exists = MenuEngineeringMenu::where('client_id', $data['client_id'])
+            ->where('branch_id', $data['branch_id'])
+            ->where('name', $data['name'])->exists();
+        if ($exists) {
+            return response()->json(['message' => 'القائمة موجودة بالفعل لهذا الفرع'], 409);
+        }
+
         $menu = MenuEngineeringMenu::create($data);
         return response()->json($menu, 201);
     }
@@ -41,6 +48,17 @@ class MenuEngineeringMenuController extends Controller
             'name' => 'sometimes|string|max:100',
             'sort_order' => 'nullable|integer',
         ]);
+
+        if (isset($data['name']) && $data['name'] !== $menu->name) {
+            $exists = MenuEngineeringMenu::where('client_id', $menu->client_id)
+                ->where('branch_id', $menu->branch_id)
+                ->where('name', $data['name'])
+                ->where('id', '!=', $menu->id)->exists();
+            if ($exists) {
+                return response()->json(['message' => 'القائمة موجودة بالفعل لهذا الفرع'], 409);
+            }
+        }
+
         $menu->update($data);
         return response()->json($menu);
     }
