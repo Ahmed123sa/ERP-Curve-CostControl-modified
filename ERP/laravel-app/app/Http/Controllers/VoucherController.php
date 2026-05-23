@@ -9,6 +9,7 @@ use App\Services\VoucherParserService;
 use App\Services\MappingService;
 use App\Services\StockLedgerService;
 use App\Services\ActivityLogger;
+use App\Models\ActivityLog;
 use App\Models\DispatchOrder;
 use App\Models\DispatchLine;
 use App\Models\Warehouse;
@@ -253,6 +254,7 @@ class VoucherController extends Controller
                         'qty'          => $qty,
                         'total_cost'   => $cost,
                         'unit_cost'    => $unitCost,
+                        'date'         => $line['date'] ?? null,
                     ]);
 
                     // تحديث default_cost بمتوسط السعر المرجح بعد ترحيل الحركة
@@ -478,6 +480,7 @@ class VoucherController extends Controller
                     'qty'          => $qty,
                     'total_cost'   => $cost,
                     'unit_cost'    => $unitCost,
+                    'date'         => $line['date'] ?? null,
                 ]);
 
                 $movementType = in_array($request->type, ['purchase', 'opening', 'adjustment', 'return']) ? 'in' : 'out';
@@ -579,6 +582,7 @@ class VoucherController extends Controller
                     'qty'          => $qty,
                     'total_cost'   => $cost,
                     'unit_cost'    => $unitCost,
+                    'date'         => $line['date'] ?? null,
                 ]);
 
                 $movementType = in_array($request->type, ['purchase', 'opening', 'adjustment', 'return']) ? 'in' : 'out';
@@ -628,7 +632,27 @@ class VoucherController extends Controller
                         $newCost = $avgCost > 0 ? $avgCost : $unitCost;
                         $item->default_cost = $newCost;
                         $item->save();
-                        if ((float) $oldCost !== $newCost) {
+
+                        // البحث عن لوج سابق لنفس الصنف + الفاتورة وتحديثه
+                        $existingLog = ActivityLog::where('entity_type', 'Item')
+                            ->where('entity_id', $item->id)
+                            ->where('action', 'price_updated')
+                            ->where('new_values->voucher_id', $order->id)
+                            ->latest()
+                            ->first();
+
+                        if ($existingLog) {
+                            $existingLog->update([
+                                'new_values' => [
+                                    'default_cost' => $newCost,
+                                    'avg_cost' => $avgCost,
+                                    'unit_cost' => $unitCost,
+                                    'source' => 'voucher_confirm',
+                                    'voucher_id' => $order->id,
+                                    'corrected' => true,
+                                ],
+                            ]);
+                        } elseif ((float) $oldCost !== $newCost) {
                             ActivityLogger::log(
                                 action:     'price_updated',
                                 entityType: 'Item',

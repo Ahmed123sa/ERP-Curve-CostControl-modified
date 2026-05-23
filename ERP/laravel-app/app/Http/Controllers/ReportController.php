@@ -6,9 +6,12 @@ use App\Models\Item;
 use App\Models\Warehouse;
 use App\Models\MonthlyClosing;
 use App\Models\StockLedger;
+use App\Models\DispatchLine;
+use App\Models\DispatchOrder;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Carbon;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use App\Services\ReportExportService;
@@ -390,5 +393,106 @@ class ReportController extends Controller
         return app(ReportExportService::class)->exportFinancialPdf(
             $request->user()->current_client_id, $request->month ?? now()->format('Y-m')
         );
+    }
+
+    /**
+     * تقرير وارد المخزن اليومي (جريد تواريخ)
+     * كل صف = صنف، كل عمود = يوم الشهر، الخلية = الكمية
+     */
+    public function warehouseDaily(Request $request): JsonResponse
+    {
+        $clientId    = $request->user()->current_client_id;
+        $warehouseId = $request->warehouse_id;
+        $month       = $request->month ?? now()->format('Y-m');
+        $start       = Carbon::parse($month . '-01');
+        $end         = $start->copy()->endOfMonth();
+        $daysInMonth = $start->daysInMonth;
+
+        $items = Item::where('client_id', $clientId)
+            ->where('is_active', true)
+            ->orderBy('sort_order')->orderBy('name')
+            ->get(['id', 'name', 'unit']);
+
+        $lines = DispatchLine::where('warehouse_id', $warehouseId)
+            ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
+            ->whereHas('order', fn($q) => $q->where('client_id', $clientId)->where('type', 'purchase'))
+            ->get(['item_id', 'date', 'qty']);
+
+        $perItem = $lines->groupBy('item_id');
+        $grid = [];
+        foreach ($items as $item) {
+            $days = array_fill(1, $daysInMonth, 0.0);
+            foreach ($perItem->get($item->id, collect()) as $line) {
+                $day = Carbon::parse($line->date)->day;
+                $days[$day] += (float) $line->qty;
+            }
+            $grid[] = [
+                'item_id'   => $item->id,
+                'item_name' => $item->name,
+                'unit'      => $item->unit,
+                'days'      => $days,
+                'total'     => round(array_sum($days), 3),
+            ];
+        }
+
+        return response()->json([
+            'month'         => $month,
+            'days_in_month' => $daysInMonth,
+            'warehouse_id'  => $warehouseId,
+            'items'         => $grid,
+        ]);
+    }
+
+    /**
+     * تقرير وارد الفرع اليومي (جريد تواريخ)
+     */
+    public function branchDaily(Request $request): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+        $branchId = $request->branch_id;
+        $month    = $request->month ?? now()->format('Y-m');
+        $start    = Carbon::parse($month . '-01');
+        $end      = $start->copy()->endOfMonth();
+        $daysInMonth = $start->daysInMonth;
+
+        $branch = Warehouse::find($branchId);
+        if (!$branch || $branch->client_id !== $clientId) {
+            return response()->json(['message' => 'الفرع غير موجود'], 404);
+        }
+
+        $items = Item::where('client_id', $clientId)
+            ->where('is_active', true)
+            ->orderBy('sort_order')->orderBy('name')
+            ->get(['id', 'name', 'unit']);
+
+        $lines = DispatchLine::where('warehouse_id', $branchId)
+            ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
+            ->whereHas('order', fn($q) => $q->where('client_id', $clientId)->where('type', 'purchase'))
+            ->get(['item_id', 'date', 'qty']);
+
+        $perItem = $lines->groupBy('item_id');
+        $grid = [];
+        foreach ($items as $item) {
+            $days = array_fill(1, $daysInMonth, 0.0);
+            foreach ($perItem->get($item->id, collect()) as $line) {
+                $day = Carbon::parse($line->date)->day;
+                $days[$day] += (float) $line->qty;
+            }
+            $grid[] = [
+                'item_id'   => $item->id,
+                'item_name' => $item->name,
+                'unit'      => $item->unit,
+                'days'      => $days,
+                'total'     => round(array_sum($days), 3),
+            ];
+        }
+
+        return response()->json([
+            'month'         => $month,
+            'days_in_month' => $daysInMonth,
+            'branch_id'     => $branchId,
+            'branch_name'   => $branch->name,
+            'items'         => $grid,
+        ]);
     }
 }

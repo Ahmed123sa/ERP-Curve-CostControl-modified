@@ -40,6 +40,7 @@ class VoucherParserService
         $currentHeader   = null;
         $qtyColIndex     = 3;
         $costColIndex    = 4;
+        $dateColIndex    = null;
 
         foreach ($rows as $rowIndex => $row) {
             if (empty(array_filter($row, fn($v) => $v !== null && $v !== ''))) {
@@ -68,12 +69,14 @@ class VoucherParserService
                     $headerFound = true;
 
                     // محاولة اكتشاف الأعمدة من الأسطر التالية
+                    $dateColIndex = null;
                     for ($look = 1; $look <= 3; $look++) {
                         if (!isset($rows[$rowIndex + $look])) break;
                         foreach ($rows[$rowIndex + $look] as $ci => $c) {
                             $txt = mb_strtolower(trim((string) $c));
                             if (in_array($txt, ['الكمية', 'كمية', 'qty', 'quantity'])) $qtyColIndex = $ci;
                             if (in_array($txt, ['cost', 'تكلفة', 'التكلفة', 'إجمالي'])) $costColIndex = $ci;
+                            if (in_array($txt, ['التاريخ', 'تاريخ', 'date', 'day'])) $dateColIndex = $ci;
                         }
                     }
                     break;
@@ -92,6 +95,11 @@ class VoucherParserService
                     $costVal  = $this->cleanNumber($row[$costColIndex] ?? 0);
                     $unitCost = ($qtyVal > 0 && $costVal > 0) ? round($costVal / $qtyVal, 4) : 0.0;
 
+                    $lineDate = null;
+                    if ($dateColIndex !== null && !empty($row[$dateColIndex])) {
+                        $lineDate = $this->parseDate((string) $row[$dateColIndex], $year)->toDateString();
+                    }
+
                     $currentHeader['items'][] = [
                         'seq'       => (int) $seq,
                         'name'      => $name,
@@ -99,6 +107,7 @@ class VoucherParserService
                         'qty'       => $qtyVal,
                         'cost'      => $costVal,
                         'unit_cost' => $unitCost,
+                        'date'      => $lineDate,
                     ];
                 }
             }

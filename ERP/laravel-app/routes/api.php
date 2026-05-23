@@ -118,6 +118,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/reports/financial-details', [\App\Http\Controllers\ReportController::class, 'financialDetails']);
         Route::get('/reports/financial-details/export', [\App\Http\Controllers\ReportController::class, 'exportFinancialDetails']);
         Route::get('/reports/financial-details/export-pdf', [\App\Http\Controllers\ReportController::class, 'exportFinancialPdf']);
+        Route::get('/reports/warehouse-daily', [\App\Http\Controllers\ReportController::class, 'warehouseDaily']);
+        Route::get('/reports/branch-daily', [\App\Http\Controllers\ReportController::class, 'branchDaily']);
     });
 
     // ── Settings (الإعدادات) ──────────────────────────────

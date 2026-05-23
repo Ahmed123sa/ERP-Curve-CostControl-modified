@@ -24,6 +24,7 @@ class VoucherConfirmRequest extends FormRequest
             'vouchers.*.lines.*.warehouse_id'       => 'nullable|uuid',
             'vouchers.*.lines.*.qty'                => 'required|numeric',
             'vouchers.*.lines.*.cost'               => 'nullable|numeric|min:0',
+            'vouchers.*.lines.*.date'               => 'nullable|date',
         ];
     }
 }

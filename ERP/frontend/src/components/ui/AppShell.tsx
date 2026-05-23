@@ -24,6 +24,8 @@ const PERMISSION_MAP: Record<string, string> = {
   '/menu-engineering': 'menu-engineering',
   '/reports/financial-details': 'reports.financial',
   '/reports/grand-summary': 'reports.grand-summary',
+  '/reports/daily/warehouse': 'reports.financial',
+  '/reports/daily/branch': 'reports.financial',
   '/reports/diffs': 'reports.diffs',
   '/reports/cost': 'reports.food-cost',
   '/items': 'items',
@@ -86,6 +88,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       items: [
         { href: '/reports/financial-details', icon: '₿',  label: 'التفاصيل المالية' },
         { href: '/reports/grand-summary', icon: '▦',  label: 'التقرير الشامل (Matrix)' },
+        { href: '/reports/daily/warehouse', icon: '📅',  label: 'اليوميات - مخازن' },
+        { href: '/reports/daily/branch', icon: '📅',  label: 'اليوميات - فروع' },
         { href: '/reports/diffs', icon: '!',  label: 'الفروق والهدر' },
         { href: '/reports/cost',  icon: '%',  label: 'Food Cost %' },
       ].filter((i) => hasPerm(i.href)),

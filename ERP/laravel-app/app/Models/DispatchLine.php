@@ -14,13 +14,14 @@ class DispatchLine extends Model
 
     protected $fillable = [
         'id', 'client_id', 'order_id', 'item_id', 'warehouse_id',
-        'qty', 'total_cost', 'unit_cost'
+        'qty', 'total_cost', 'unit_cost', 'date'
     ];
 
     protected $casts = [
         'qty'        => 'float',
         'total_cost' => 'float',
-        'unit_cost'  => 'float'
+        'unit_cost'  => 'float',
+        'date'       => 'date:Y-m-d',
     ];
 
     public function order(): BelongsTo     { return $this->belongsTo(DispatchOrder::class, 'order_id'); }
