@@ -255,36 +255,30 @@ class VoucherController extends Controller
                         'unit_cost'    => $unitCost,
                     ]);
 
-                    // تحديث سعر الصنف لو ده وارد مخزن وفيه سعر — مع حماية من التغييرات غير المنطقية
+                    // تحديث default_cost بمتوسط السعر المرجح بعد ترحيل الحركة
                     if ($voucherData['type'] === 'purchase' && $unitCost > 0) {
                         $item = Item::where('id', $line['item_id'])
                             ->where('client_id', $clientId)
                             ->first();
                         if ($item) {
                             $oldCost = $item->default_cost;
-                            if ($oldCost > 0) {
-                                $deltaPct = abs(($unitCost - $oldCost) / $oldCost) * 100;
-                                if ($deltaPct > 30) {
-                                    $priceSkips[] = $item->name . ': ' . $oldCost . ' → ' . $unitCost . ' (' . round($deltaPct, 1) . '%)';
-                                    ActivityLogger::log(
-                                        action:     'price_update_skipped',
-                                        entityType: 'Item',
-                                        entityId:   $item->id,
-                                        oldValues:  ['default_cost' => $oldCost, 'reason' => 'تجاوز حد 30%'],
-                                        newValues:  ['default_cost' => $unitCost, 'voucher_id' => $order->id],
-                                    );
-                                    continue;
-                                }
+                            $calc = app(\App\Services\CostCalculationService::class);
+                            $whId = ($line['warehouse_id'] ?? null) ?: ($warehouseId ?? $branchId);
+                            if (!$whId) {
+                                $wh = Warehouse::where('client_id', $clientId)->where('type', 'main')->first();
+                                $whId = $wh ? $wh->id : null;
                             }
-                            $item->default_cost = $unitCost;
+                            $avgCost = $whId ? $calc->weightedAverageCost($clientId, $whId, $item->id) : 0;
+                            $newCost = $avgCost > 0 ? $avgCost : $unitCost;
+                            $item->default_cost = $newCost;
                             $item->save();
-                            if ((float) $oldCost !== $unitCost) {
+                            if ((float) $oldCost !== $newCost) {
                                 ActivityLogger::log(
                                     action:     'price_updated',
                                     entityType: 'Item',
                                     entityId:   $item->id,
                                     oldValues:  ['default_cost' => $oldCost],
-                                    newValues:  ['default_cost' => $unitCost, 'source' => 'purchase_voucher', 'voucher_id' => $order->id],
+                                    newValues:  ['default_cost' => $newCost, 'avg_cost' => $avgCost, 'unit_cost' => $unitCost, 'source' => 'purchase_voucher', 'voucher_id' => $order->id],
                                 );
                             }
                         }
@@ -624,28 +618,23 @@ class VoucherController extends Controller
                     $item = Item::where('id', $line['item_id'])->where('client_id', $clientId)->first();
                     if ($item) {
                         $oldCost = $item->default_cost;
-                        if ($oldCost > 0) {
-                            $deltaPct = abs(($unitCost - $oldCost) / $oldCost) * 100;
-                            if ($deltaPct > 30) {
-                                ActivityLogger::log(
-                                    action:     'price_update_skipped',
-                                    entityType: 'Item',
-                                    entityId:   $item->id,
-                                    oldValues:  ['default_cost' => $oldCost, 'reason' => 'تجاوز حد 30%'],
-                                    newValues:  ['default_cost' => $unitCost, 'voucher_id' => $order->id],
-                                );
-                                continue;
-                            }
+                        $calc = app(\App\Services\CostCalculationService::class);
+                        $whId = $line['warehouse_id'];
+                        if (!$whId) {
+                            $wh = Warehouse::where('client_id', $clientId)->where('type', 'main')->first();
+                            $whId = $wh ? $wh->id : null;
                         }
-                        $item->default_cost = $unitCost;
+                        $avgCost = $whId ? $calc->weightedAverageCost($clientId, $whId, $item->id) : 0;
+                        $newCost = $avgCost > 0 ? $avgCost : $unitCost;
+                        $item->default_cost = $newCost;
                         $item->save();
-                        if ((float) $oldCost !== $unitCost) {
+                        if ((float) $oldCost !== $newCost) {
                             ActivityLogger::log(
                                 action:     'price_updated',
                                 entityType: 'Item',
                                 entityId:   $item->id,
                                 oldValues:  ['default_cost' => $oldCost],
-                                newValues:  ['default_cost' => $unitCost, 'source' => 'voucher_confirm', 'voucher_id' => $order->id],
+                                newValues:  ['default_cost' => $newCost, 'avg_cost' => $avgCost, 'unit_cost' => $unitCost, 'source' => 'voucher_confirm', 'voucher_id' => $order->id],
                             );
                         }
                     }

@@ -41,9 +41,12 @@ class ClosingController extends Controller
         $rows = $items->map(function ($item) use ($closings) {
             $r = $closings->get($item->id);
 
-            $avgCost = (float) ($item->default_cost ?? 0);
-            if ($avgCost <= 0 && $r) {
-                $avgCost = (float) ($r->avg_cost ?? 0);
+            $avgCost = 0;
+            if ($r && $r->avg_cost > 0) {
+                $avgCost = (float) $r->avg_cost;
+            }
+            if ($avgCost <= 0) {
+                $avgCost = (float) ($item->default_cost ?? 0);
             }
 
             $openingQty = (float) ($r->opening_qty ?? 0);

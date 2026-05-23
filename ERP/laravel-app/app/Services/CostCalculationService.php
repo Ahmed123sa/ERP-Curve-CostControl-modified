@@ -161,7 +161,7 @@ class CostCalculationService
         $defaultCost = (float) ($item->default_cost ?? 0);
         $calcAvg = $totalQty > 0 ? round($totalValue / $totalQty, 4) : 0;
 
-        $avgCost = $defaultCost > 0 ? $defaultCost : $calcAvg;
+        $avgCost = $calcAvg > 0 ? $calcAvg : $defaultCost;
 
         // لو لسه صفر — نجيب آخر متوسط مسجل
         if ($avgCost <= 0 && $totalQty > 0) {
