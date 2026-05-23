@@ -110,10 +110,11 @@ class VoucherController extends Controller
     {
         $clientId = $request->user()->current_client_id;
         $userId   = $request->user()->id;
-        $saved    = [];
-        $skipped  = [];
+        $saved      = [];
+        $skipped    = [];
+        $priceSkips = [];
 
-        DB::transaction(function () use ($request, $clientId, $userId, &$saved, &$skipped) {
+        DB::transaction(function () use ($request, $clientId, $userId, &$saved, &$skipped, &$priceSkips) {
             foreach ($request->vouchers as $voucherIndex => $voucherData) {
                 // استخراج المخزن أو الفرع من كائن location
                 $loc = $voucherData['location'] ?? [];
@@ -254,13 +255,27 @@ class VoucherController extends Controller
                         'unit_cost'    => $unitCost,
                     ]);
 
-                    // تحديث سعر الصنف لو ده وارد مخزن وفيه سعر
+                    // تحديث سعر الصنف لو ده وارد مخزن وفيه سعر — مع حماية من التغييرات غير المنطقية
                     if ($voucherData['type'] === 'purchase' && $unitCost > 0) {
                         $item = Item::where('id', $line['item_id'])
                             ->where('client_id', $clientId)
                             ->first();
                         if ($item) {
                             $oldCost = $item->default_cost;
+                            if ($oldCost > 0) {
+                                $deltaPct = abs(($unitCost - $oldCost) / $oldCost) * 100;
+                                if ($deltaPct > 30) {
+                                    $priceSkips[] = $item->name . ': ' . $oldCost . ' → ' . $unitCost . ' (' . round($deltaPct, 1) . '%)';
+                                    ActivityLogger::log(
+                                        action:     'price_update_skipped',
+                                        entityType: 'Item',
+                                        entityId:   $item->id,
+                                        oldValues:  ['default_cost' => $oldCost, 'reason' => 'تجاوز حد 30%'],
+                                        newValues:  ['default_cost' => $unitCost, 'voucher_id' => $order->id],
+                                    );
+                                    continue;
+                                }
+                            }
                             $item->default_cost = $unitCost;
                             $item->save();
                             if ((float) $oldCost !== $unitCost) {
@@ -301,6 +316,7 @@ class VoucherController extends Controller
             'message' => 'تم حفظ الأذون بنجاح',
             'order_ids' => $saved,
             'skipped' => $skipped,
+            'price_skipped' => $priceSkips,
         ]);
     }
 
@@ -608,6 +624,19 @@ class VoucherController extends Controller
                     $item = Item::where('id', $line['item_id'])->where('client_id', $clientId)->first();
                     if ($item) {
                         $oldCost = $item->default_cost;
+                        if ($oldCost > 0) {
+                            $deltaPct = abs(($unitCost - $oldCost) / $oldCost) * 100;
+                            if ($deltaPct > 30) {
+                                ActivityLogger::log(
+                                    action:     'price_update_skipped',
+                                    entityType: 'Item',
+                                    entityId:   $item->id,
+                                    oldValues:  ['default_cost' => $oldCost, 'reason' => 'تجاوز حد 30%'],
+                                    newValues:  ['default_cost' => $unitCost, 'voucher_id' => $order->id],
+                                );
+                                continue;
+                            }
+                        }
                         $item->default_cost = $unitCost;
                         $item->save();
                         if ((float) $oldCost !== $unitCost) {
