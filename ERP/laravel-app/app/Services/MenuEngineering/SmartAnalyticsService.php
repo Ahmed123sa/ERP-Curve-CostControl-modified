@@ -180,10 +180,29 @@ class SmartAnalyticsService
                 'delta_pct' => $deltaPct,
                 'direction' => $delta > 0 ? 'up' : ($delta < 0 ? 'down' : 'same'),
                 'is_unusual' => $isUnusual,
+                'is_stale' => false,
                 'warehouse' => $warehouseName,
                 'changed_by' => $userNames[$log->user_id] ?? '—',
                 'date' => $log->created_at->toDateTimeString(),
             ];
+        }
+
+        // كشف التغييرات الملغية: لو في أودرين متتاليين لنفس الصنف
+        // والتاني old_cost مختلف عن الأول new_cost => الأول ملغي (اتصحح من بره اللوج)
+        $byItem = [];
+        foreach ($changes as $idx => $c) {
+            $byItem[$c['item_id']][] = $idx;
+        }
+        foreach ($byItem as $indices) {
+            if (count($indices) < 2) continue;
+            usort($indices, fn($a, $b) => strcmp($changes[$a]['date'], $changes[$b]['date']));
+            for ($i = 1; $i < count($indices); $i++) {
+                $prev = $changes[$indices[$i - 1]];
+                $curr = $changes[$indices[$i]];
+                if (abs($prev['new_cost'] - $curr['old_cost']) > 0.01) {
+                    $changes[$indices[$i - 1]]['is_stale'] = true;
+                }
+            }
         }
 
         return [

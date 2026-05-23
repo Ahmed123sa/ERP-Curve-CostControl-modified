@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 export default function ClosingPage() {
   const qc = useQueryClient();
   const [viewType, setViewType] = useState<'matrix' | 'single'>('matrix');
+  const [singleTab, setSingleTab] = useState<'closing' | 'daily'>('closing');
   const [warehouseId, setWarehouseId] = useState('');
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
 
@@ -23,12 +24,22 @@ export default function ClosingPage() {
   const { data: singleData = [], isLoading: singleLoading } = useQuery({
     queryKey: ['closing', warehouseId, month],
     queryFn: () => api.get('/closing', { params: { warehouse_id: warehouseId, month } }).then((r) => r.data.data),
-    enabled: viewType === 'single' && !!warehouseId,
+    enabled: viewType === 'single' && !!warehouseId && singleTab === 'closing',
   });
 
   const { data: warehouses = [] } = useQuery({
     queryKey: ['warehouses'],
     queryFn: () => api.get('/warehouses').then((r) => r.data),
+  });
+
+  // 3. بيانات اليوميات للموقع الواحد (بعد warehouses عشان isBranch)
+  const isBranch = (warehouses as any[]).find((w: any) => w.id === warehouseId)?.type === 'branch';
+  const { data: dailyData, isLoading: dailyLoading } = useQuery({
+    queryKey: ['daily', isBranch ? 'branch' : 'warehouse', warehouseId, month],
+    queryFn: () => api.get(isBranch ? '/reports/branch-daily' : '/reports/warehouse-daily', {
+      params: { [isBranch ? 'branch_id' : 'warehouse_id']: warehouseId, month },
+    }).then((r) => r.data),
+    enabled: viewType === 'single' && !!warehouseId && singleTab === 'daily',
   });
 
   const isBranchSelected = (() => {
@@ -165,6 +176,18 @@ export default function ClosingPage() {
                <option value="">اختر الموقع...</option>
                {warehouses.map((w: any) => <option key={w.id} value={w.id}>{w.name} ({w.type})</option>)}
              </select>
+             {warehouseId && (
+               <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
+                 <button onClick={() => setSingleTab('closing')}
+                   className={`px-3 py-1.5 text-xs rounded-md font-medium transition ${singleTab === 'closing' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}>
+                   التقفيل
+                 </button>
+                 <button onClick={() => setSingleTab('daily')}
+                   className={`px-3 py-1.5 text-xs rounded-md font-medium transition ${singleTab === 'daily' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}>
+                   اليوميات
+                 </button>
+               </div>
+             )}
           </div>
         )}
 
@@ -176,32 +199,21 @@ export default function ClosingPage() {
                   <tr>
                     <th rowSpan={2} className="p-2 border border-gray-700 min-w-[150px]">الصنف</th>
                     <th rowSpan={2} className="p-2 border border-gray-700">الوحدة</th>
-                    
-                    {/* قسم المخازن الرئيسية والفرعية */}
                     {[...mainWarehouses, ...subWarehouses].map((loc: any) => (
-                      <th key={loc.id} colSpan={2} className="p-1 border border-gray-700 text-center bg-blue-900/50">
-                        {loc.name} (مخزن)
-                      </th>
+                      <th key={loc.id} colSpan={2} className="p-1 border border-gray-700 text-center bg-blue-900/50">{loc.name} (مخزن)</th>
                     ))}
-
-                    {/* قسم الفروع */}
                     {branches.map((loc: any) => (
-                      <th key={loc.id} colSpan={2} className="p-1 border border-gray-700 text-center bg-orange-900/50">
-                        {loc.name} (فرع)
-                      </th>
+                      <th key={loc.id} colSpan={2} className="p-1 border border-gray-700 text-center bg-orange-900/50">{loc.name} (فرع)</th>
                     ))}
-
                     <th colSpan={4} className="p-1 border border-gray-700 text-center bg-gray-700 text-amber-400">الإجمالي العام</th>
                   </tr>
                   <tr className="bg-gray-700 text-[8px]">
-                    {/* مخازن: أول - وارد */}
                     {[...mainWarehouses, ...subWarehouses].map((loc: any) => (
                       <Fragment key={loc.id}>
                         <th className="p-1 border border-gray-600">أول</th>
                         <th className="p-1 border border-gray-600">وارد</th>
                       </Fragment>
                     ))}
-                    {/* فروع: مستلم - استهلاك */}
                     {branches.map((loc: any) => (
                       <Fragment key={loc.id}>
                         <th className="p-1 border border-gray-600 text-green-300">مستلم</th>
@@ -217,48 +229,33 @@ export default function ClosingPage() {
                 <tbody className="divide-y divide-gray-100">
                   {items.map((item: any) => (
                     <tr key={item.item_id} className="hover:bg-blue-50/30 transition-colors border-b border-gray-50">
-                      <td className="p-2 border-x border-gray-50 font-bold sticky right-0 bg-white z-20 shadow-sm">
-                        {item.item_name}
-                      </td>
+                      <td className="p-2 border-x border-gray-50 font-bold sticky right-0 bg-white z-20 shadow-sm">{item.item_name}</td>
                       <td className="p-2 border-x border-gray-50 text-gray-400">{item.unit}</td>
-                      
-                      {/* بيانات المخازن */}
                       {[...mainWarehouses, ...subWarehouses].map((loc: any) => {
                         const d = item.locations[loc.id] || {};
-                        return (
-                          <Fragment key={loc.id}>
-                            <td className="p-1 border-x border-gray-50 text-center bg-blue-50/5">{d.opening || '0'}</td>
-                            <td className="p-1 border-x border-gray-50 text-center text-green-600 font-medium">{d.purchases || '0'}</td>
-                          </Fragment>
-                        );
+                        return <Fragment key={loc.id}>
+                          <td className="p-1 border-x border-gray-50 text-center bg-blue-50/5">{d.opening || '0'}</td>
+                          <td className="p-1 border-x border-gray-50 text-center text-green-600 font-medium">{d.purchases || '0'}</td>
+                        </Fragment>;
                       })}
-
-                      {/* بيانات الفروع */}
                       {branches.map((loc: any) => {
                         const d = item.locations[loc.id] || {};
-                        return (
-                          <Fragment key={loc.id}>
-                            <td className="p-1 border-x border-gray-50 text-center text-blue-600 font-bold">{d.internal_in || '0'}</td>
-                            <td className="p-1 border-x border-gray-50 text-center text-gray-600">{d.consumption || '0'}</td>
-                          </Fragment>
-                        );
+                        return <Fragment key={loc.id}>
+                          <td className="p-1 border-x border-gray-50 text-center text-blue-600 font-bold">{d.internal_in || '0'}</td>
+                          <td className="p-1 border-x border-gray-50 text-center text-gray-600">{d.consumption || '0'}</td>
+                        </Fragment>;
                       })}
-
                       <td className="p-1 border-x border-gray-100 text-center bg-red-50 text-red-700 font-bold">{item.totals.dispatch_qty || '0'}</td>
                       <td className="p-1 border-x border-gray-100 text-center bg-amber-50 font-bold">{item.totals.theoretical || '0'}</td>
                       <td className="p-1 border-x border-gray-100 text-center bg-white p-0">
-                         <input 
-                           key={`${item.item_id}-${item.totals.actual}`}
-                           type="number"
-                           defaultValue={item.totals.actual}
-                           onBlur={(e) => {
-                             const val = parseFloat(e.target.value);
-                             if (!isNaN(val) && val !== item.totals.actual && item.totals.closing_id) {
-                                updateActualMutation.mutate({ id: item.totals.closing_id, actual: val });
-                             }
-                           }}
-                           className="w-full h-full bg-transparent text-center font-bold text-blue-700 outline-none focus:bg-blue-100"
-                         />
+                        <input key={`${item.item_id}-${item.totals.actual}`} type="number" defaultValue={item.totals.actual}
+                          onBlur={(e) => {
+                            const val = parseFloat(e.target.value);
+                            if (!isNaN(val) && val !== item.totals.actual && item.totals.closing_id) {
+                              updateActualMutation.mutate({ id: item.totals.closing_id, actual: val });
+                            }
+                          }}
+                          className="w-full h-full bg-transparent text-center font-bold text-blue-700 outline-none focus:bg-blue-100" />
                       </td>
                       <td className="p-1 border-x border-gray-100 text-center font-bold text-red-600">{item.totals.diff || '0'}</td>
                     </tr>
@@ -267,8 +264,7 @@ export default function ClosingPage() {
               </table>
             </div>
           )
-        ) : (
-          /* العرض التفصيلي للموقع الواحد */
+        ) : singleTab === 'closing' ? (
           singleLoading ? <div className="p-12 text-center text-gray-400">جاري التحميل...</div> : (
             <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
               <table className="w-full text-sm text-right" dir="rtl">
@@ -306,6 +302,42 @@ export default function ClosingPage() {
                 </tbody>
               </table>
             </div>
+          )
+        ) : (
+          /* اليوميات */
+          dailyLoading ? <div className="p-12 text-center text-gray-400">جاري التحميل...</div> : (
+            !dailyData || !dailyData.items || dailyData.items.filter((i: any) => i.total > 0).length === 0 ? (
+              <div className="p-12 text-center text-gray-400">لا توجد واردات في هذا الشهر</div>
+            ) : (
+              <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-auto">
+                <table className="w-full text-sm whitespace-nowrap">
+                  <thead>
+                    <tr className="bg-gray-50 text-xs text-gray-500 border-b">
+                      <th className="px-2 py-1.5 text-start font-medium sticky right-0 bg-gray-50 z-10">الصنف</th>
+                      {Array.from({ length: dailyData.days_in_month }, (_, i) => i + 1).map((d: number) => (
+                        <th key={d} className="px-2 py-1.5 text-center font-medium text-gray-400 min-w-[40px]">{d}</th>
+                      ))}
+                      <th className="px-2 py-1.5 text-center font-medium text-gray-700 min-w-[60px]">الإجمالي</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {dailyData.items.filter((i: any) => i.total > 0).map((item: any) => (
+                      <tr key={item.item_id} className="hover:bg-gray-50/30">
+                        <td className="px-2 py-1 text-start font-medium text-gray-800 sticky right-0 bg-white z-10">
+                          {item.item_name} <span className="text-xs text-gray-400">({item.unit})</span>
+                        </td>
+                        {Array.from({ length: dailyData.days_in_month }, (_, i) => i + 1).map((d: number) => (
+                          <td key={d} className="px-2 py-1 text-center font-mono text-xs">
+                            {item.days[d] > 0 ? item.days[d].toFixed(3) : ''}
+                          </td>
+                        ))}
+                        <td className="px-2 py-1 text-center font-mono font-bold text-sm">{item.total.toFixed(3)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
           )
         )}
       </div>

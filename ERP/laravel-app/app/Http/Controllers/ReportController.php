@@ -413,10 +413,12 @@ class ReportController extends Controller
             ->orderBy('sort_order')->orderBy('name')
             ->get(['id', 'name', 'unit']);
 
-        $lines = DispatchLine::where('warehouse_id', $warehouseId)
-            ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
+        $lines = DispatchLine::select('dispatch_lines.*')
+            ->where('dispatch_lines.warehouse_id', $warehouseId)
             ->whereHas('order', fn($q) => $q->where('client_id', $clientId)->where('type', 'purchase'))
-            ->get(['item_id', 'date', 'qty']);
+            ->leftJoin('dispatch_orders', 'dispatch_lines.order_id', '=', 'dispatch_orders.id')
+            ->whereBetween(DB::raw('COALESCE(dispatch_lines.date, dispatch_orders.date)'), [$start->toDateString(), $end->toDateString()])
+            ->get(['dispatch_lines.item_id', 'dispatch_lines.date', 'dispatch_lines.qty']);
 
         $perItem = $lines->groupBy('item_id');
         $grid = [];
@@ -465,10 +467,12 @@ class ReportController extends Controller
             ->orderBy('sort_order')->orderBy('name')
             ->get(['id', 'name', 'unit']);
 
-        $lines = DispatchLine::where('warehouse_id', $branchId)
-            ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
+        $lines = DispatchLine::select('dispatch_lines.*')
+            ->where('dispatch_lines.warehouse_id', $branchId)
             ->whereHas('order', fn($q) => $q->where('client_id', $clientId)->where('type', 'purchase'))
-            ->get(['item_id', 'date', 'qty']);
+            ->leftJoin('dispatch_orders', 'dispatch_lines.order_id', '=', 'dispatch_orders.id')
+            ->whereBetween(DB::raw('COALESCE(dispatch_lines.date, dispatch_orders.date)'), [$start->toDateString(), $end->toDateString()])
+            ->get(['dispatch_lines.item_id', 'dispatch_lines.date', 'dispatch_lines.qty']);
 
         $perItem = $lines->groupBy('item_id');
         $grid = [];

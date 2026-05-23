@@ -256,7 +256,10 @@ function TopPurchasesTab({ data }: { data: any }) {
 }
 
 function PriceChangesTab({ data, threshold }: { data: any; threshold: number }) {
+  const [hideStale, setHideStale] = useState(false);
   if (!data) return <Loading />;
+  const visibleChanges = hideStale ? data.changes.filter((c: any) => !c.is_stale) : data.changes;
+  const staleCount = data.changes.filter((c: any) => c.is_stale).length;
   return (
     <>
       <div className="flex items-center gap-3">
@@ -268,6 +271,22 @@ function PriceChangesTab({ data, threshold }: { data: any; threshold: number }) 
           <div className="text-xl font-bold text-red-600">{data.unusual_count}</div>
           <div className="text-xs text-red-500 mt-0.5">⚠️ غير طبيعي (&gt;{threshold}%)</div>
         </div>
+        {staleCount > 0 && (
+          <div className="bg-gray-100 border border-gray-200 rounded-xl p-3 text-center flex-1">
+            <div className="text-xl font-bold text-gray-500">{staleCount}</div>
+            <div className="text-xs text-gray-400 mt-0.5">تم التصحيح</div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 justify-end mb-2">
+        {staleCount > 0 && (
+          <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
+            <input type="checkbox" checked={hideStale} onChange={(e) => setHideStale(e.target.checked)}
+              className="rounded border-gray-300" />
+            إخفاء التغييرات الملغية ({staleCount})
+          </label>
+        )}
       </div>
 
       <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
@@ -283,10 +302,11 @@ function PriceChangesTab({ data, threshold }: { data: any; threshold: number }) 
             <th className="px-3 py-2 text-end font-medium">التاريخ</th>
           </tr></thead>
           <tbody className="divide-y divide-gray-50">
-            {data.changes.map((c: any, i: number) => (
-              <tr key={c.id || i} className={`hover:bg-gray-50/30 ${c.is_unusual ? 'bg-red-50/50' : ''}`}>
+            {visibleChanges.map((c: any, i: number) => (
+              <tr key={c.id || i} className={`hover:bg-gray-50/30 ${c.is_unusual ? 'bg-red-50/50' : ''} ${c.is_stale ? 'opacity-50 line-through' : ''}`}>
                 <td className="px-3 py-2 font-medium text-gray-800">
                   {c.is_unusual && <span className="ml-1">⚠️</span>}
+                  {c.is_stale && <span className="ml-1 text-gray-400">🗑️</span>}
                   {c.item_name}
                 </td>
                 <td className="px-3 py-2 text-end font-mono font-bold text-blue-700">{c.avg_cost.toFixed(2)}</td>
@@ -304,7 +324,7 @@ function PriceChangesTab({ data, threshold }: { data: any; threshold: number }) 
             ))}
           </tbody>
         </table>
-        {data.changes.length === 0 && (
+        {visibleChanges.length === 0 && (
           <div className="p-8 text-center text-gray-400">لا توجد تغيرات في الأسعار في هذه الفترة</div>
         )}
       </div>
