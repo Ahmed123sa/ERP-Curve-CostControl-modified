@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Item;
+use App\Services\ActivityLogger;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Str;
@@ -63,7 +64,19 @@ class ItemController extends Controller
             'sort_order' => 'sometimes|integer',
         ]);
 
+        $oldCost = $item->default_cost;
         $item->update($request->all());
+        $item->refresh();
+
+        if ($request->has('default_cost') && (float) $oldCost !== (float) $item->default_cost) {
+            ActivityLogger::log(
+                action:     'price_updated',
+                entityType: 'Item',
+                entityId:   $item->id,
+                oldValues:  ['default_cost' => $oldCost],
+                newValues:  ['default_cost' => (float) $item->default_cost, 'source' => 'manual_edit'],
+            );
+        }
 
         return response()->json($item);
     }
