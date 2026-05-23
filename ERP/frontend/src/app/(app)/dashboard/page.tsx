@@ -28,6 +28,12 @@ export default function DashboardPage() {
     enabled: !!currentClient,
   });
 
+  const { data: smart } = useQuery({
+    queryKey: ['smart-summary', currentClient?.id],
+    queryFn: () => api.get('/dashboard/smart-summary').then((r) => r.data),
+    enabled: !!currentClient,
+  });
+
   const kpiCards = [
     { label: 'إجمالي المشتريات', value: kpis?.total_purchases, unit: 'ج', color: 'text-blue-600' },
     { label: 'قيمة المنصرف',     value: kpis?.total_dispatched, unit: 'ج', color: 'text-gray-600' },
@@ -88,6 +94,30 @@ export default function DashboardPage() {
               </div>
             </div>
           ))}
+        </div>
+
+        {/* Smart Analytics Widgets */}
+        <div className="grid grid-cols-4 gap-4">
+          <a href="/menu-engineering/analytics" className="block bg-red-50 border border-red-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow">
+            <div className="text-sm text-red-600 font-medium">🚨 إنذار المخزون</div>
+            <div className="text-2xl font-bold text-red-700 mt-1">{smart?.critical_count ?? '...'}</div>
+            <div className="text-xs text-red-400">حرج · {smart?.warning_count ?? 0} إنذار</div>
+          </a>
+          <a href="/menu-engineering/analytics" className="block bg-orange-50 border border-orange-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow">
+            <div className="text-sm text-orange-600 font-medium">⚠️ تغيرات أسعار</div>
+            <div className="text-2xl font-bold text-orange-700 mt-1">{smart?.recent_price_changes?.length ?? '...'}</div>
+            <div className="text-xs text-orange-400">آخر تغير</div>
+          </a>
+          <a href="/menu-engineering/analytics" className="block bg-emerald-50 border border-emerald-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow">
+            <div className="text-sm text-emerald-600 font-medium">💰 قيمة المخزون</div>
+            <div className="text-2xl font-bold text-emerald-700 mt-1">{smart?.stock_value ? `${(smart.stock_value / 1000).toFixed(1)}k` : '...'}</div>
+            <div className="text-xs text-emerald-400">جنيه</div>
+          </a>
+          <a href="/menu-engineering/analytics" className="block bg-blue-50 border border-blue-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow">
+            <div className="text-sm text-blue-600 font-medium">📦 مشتريات الشهر</div>
+            <div className="text-2xl font-bold text-blue-700 mt-1">{smart?.monthly_purchase_count ?? '...'}</div>
+            <div className="text-xs text-blue-400">فاتورة شراء</div>
+          </a>
         </div>
 
         {/* Monthly Trend Chart */}

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\MonthlyClosing;
 use App\Models\StockLedger;
 use App\Models\Warehouse;
+use App\Services\MenuEngineering\SmartAnalyticsService;
 use App\Services\ReportExportService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -102,6 +103,17 @@ class DashboardController extends Controller
     {
         return app(ReportExportService::class)->exportDashboard(
             $request->user()->current_client_id, $request->month ?? now()->format('Y-m')
+        );
+    }
+
+    public function smartSummary(Request $request): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+        if (!$clientId) {
+            return response()->json(['critical_count' => 0, 'stock_value' => 0, 'recent_price_changes' => [], 'monthly_purchase_count' => 0]);
+        }
+        return response()->json(
+            app(SmartAnalyticsService::class)->smartSummary($clientId)
         );
     }
 }

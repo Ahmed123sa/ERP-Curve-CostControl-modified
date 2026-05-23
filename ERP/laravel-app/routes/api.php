@@ -32,6 +32,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/dashboard/monthly-trend', [DashboardController::class, 'monthlyTrend']);
         Route::get('/dashboard/warehouse-summary', [DashboardController::class, 'warehouseSummary']);
         Route::get('/dashboard/export', [DashboardController::class, 'export']);
+        Route::get('/dashboard/smart-summary', [DashboardController::class, 'smartSummary']);
     });
 
     // ── Clients ───────────────────────────────────────────
@@ -165,5 +166,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/sales', [\App\Http\Controllers\MenuEngineering\MenuReconciliationController::class, 'storeSale']);
         Route::post('/reconcile', [\App\Http\Controllers\MenuEngineering\MenuReconciliationController::class, 'detailedReconcile']);
         Route::post('/reconcile/detailed', [\App\Http\Controllers\MenuEngineering\MenuReconciliationController::class, 'detailedReconcile']);
+
+        // Smart Analytics
+        Route::prefix('analytics')->group(function () {
+            Route::get('/inventory-alerts', [\App\Http\Controllers\MenuEngineering\SmartAnalyticsController::class, 'inventoryAlerts']);
+            Route::get('/top-purchases', [\App\Http\Controllers\MenuEngineering\SmartAnalyticsController::class, 'topPurchases']);
+            Route::get('/price-changes', [\App\Http\Controllers\MenuEngineering\SmartAnalyticsController::class, 'priceChanges']);
+            Route::get('/cost-impact', [\App\Http\Controllers\MenuEngineering\SmartAnalyticsController::class, 'costImpact']);
+            Route::get('/cost-contribution', [\App\Http\Controllers\MenuEngineering\SmartAnalyticsController::class, 'costContribution']);
+            Route::get('/stock-value', [\App\Http\Controllers\MenuEngineering\SmartAnalyticsController::class, 'stockValue']);
+        });
     });
 });

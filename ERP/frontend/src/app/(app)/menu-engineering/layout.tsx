@@ -11,6 +11,7 @@ export default function MenuEngineeringLayout({ children }: { children: ReactNod
     { href: '/menu-engineering/ingredients', label: 'المكونات' },
     { href: '/menu-engineering/report', label: 'التقارير' },
     { href: '/menu-engineering/reconciliation', label: 'التسوية' },
+    { href: '/menu-engineering/analytics', label: '🔬 التحليلات الذكية' },
   ];
 
   return (

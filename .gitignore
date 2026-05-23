@@ -6,6 +6,7 @@ node_modules/
 .next/
 dist/
 build/
+*.tsbuildinfo
 
 # Environment
 .env
@@ -19,6 +20,7 @@ build/
 *.sql
 *.sql.gz
 backups/
+backup_*/
 storage/logs/*.log
 storage/framework/cache/data/*
 storage/framework/sessions/*
