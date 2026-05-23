@@ -274,11 +274,12 @@ function PriceChangesTab({ data, threshold }: { data: any; threshold: number }) 
         <table className="w-full text-sm">
           <thead><tr className="text-xs text-gray-500 border-b border-gray-50">
             <th className="px-3 py-2 text-start font-medium">الصنف</th>
+            <th className="px-3 py-2 text-end font-medium">متوسط السعر</th>
             <th className="px-3 py-2 text-end font-medium">السعر القديم</th>
             <th className="px-3 py-2 text-end font-medium">السعر الجديد</th>
             <th className="px-3 py-2 text-end font-medium">الفرق</th>
-            <th className="px-3 py-2 text-end font-medium">% التغير</th>
-            <th className="px-3 py-2 text-end font-medium">بواسطة</th>
+            <th className="px-3 py-2 text-end font-medium">%</th>
+            <th className="px-3 py-2 text-end font-medium">المخزن</th>
             <th className="px-3 py-2 text-end font-medium">التاريخ</th>
           </tr></thead>
           <tbody className="divide-y divide-gray-50">
@@ -288,7 +289,8 @@ function PriceChangesTab({ data, threshold }: { data: any; threshold: number }) 
                   {c.is_unusual && <span className="ml-1">⚠️</span>}
                   {c.item_name}
                 </td>
-                <td className="px-3 py-2 text-end font-mono">{c.old_cost.toFixed(2)}</td>
+                <td className="px-3 py-2 text-end font-mono font-bold text-blue-700">{c.avg_cost.toFixed(2)}</td>
+                <td className="px-3 py-2 text-end font-mono text-gray-500">{c.old_cost.toFixed(2)}</td>
                 <td className="px-3 py-2 text-end font-mono font-medium">{c.new_cost.toFixed(2)}</td>
                 <td className={`px-3 py-2 text-end font-mono font-medium ${c.direction === 'up' ? 'text-red-600' : c.direction === 'down' ? 'text-green-600' : ''}`}>
                   {c.delta > 0 ? '+' : ''}{c.delta.toFixed(2)}
@@ -296,7 +298,7 @@ function PriceChangesTab({ data, threshold }: { data: any; threshold: number }) 
                 <td className={`px-3 py-2 text-end font-mono font-medium ${c.direction === 'up' ? 'text-red-600' : c.direction === 'down' ? 'text-green-600' : ''}`}>
                   {c.delta_pct > 0 ? '+' : ''}{c.delta_pct}%
                 </td>
-                <td className="px-3 py-2 text-end text-gray-500 text-xs">{c.changed_by}</td>
+                <td className="px-3 py-2 text-end text-gray-500 text-xs">{c.warehouse || '—'}</td>
                 <td className="px-3 py-2 text-end text-gray-400 text-xs">{c.date ? new Date(c.date).toLocaleDateString('ar-EG') : '—'}</td>
               </tr>
             ))}
@@ -332,7 +334,10 @@ function CostImpactTab({ data }: { data: any }) {
           }`}>
             <span>
               {imp.direction === 'up' ? '🔴' : '🟢'} {imp.ingredient_name}
-              {' · '}{imp.old_cost} → {imp.new_cost} ج ({imp.delta_pct > 0 ? '+' : ''}{imp.delta_pct}%)
+              {' · قديم '}{imp.old_cost} → {'جديد '}{imp.new_cost} ج
+              {' · متوسط '}
+              <span className="text-blue-700 font-bold">{imp.avg_cost || '—'}</span> ج
+              {' ('}{imp.delta_pct > 0 ? '+' : ''}{imp.delta_pct}%)
               {imp.is_unusual && <span className="mr-2 text-xs bg-white px-1.5 py-0.5 rounded-full">⚠️ غير طبيعي</span>}
             </span>
             <span className="text-xs opacity-70">أثر على {imp.recipes_affected} ريسيبي</span>

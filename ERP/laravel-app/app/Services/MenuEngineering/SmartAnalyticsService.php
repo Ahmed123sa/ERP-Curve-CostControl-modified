@@ -2,6 +2,7 @@
 namespace App\Services\MenuEngineering;
 
 use App\Models\ActivityLog;
+use App\Models\DispatchOrder;
 use App\Models\Item;
 use App\Models\MenuEngineering\MenuEngineeringMenu;
 use App\Models\MenuEngineering\MenuRecipe;
@@ -127,6 +128,9 @@ class SmartAnalyticsService
     // ── 3. Price Change Detection ──
     public function priceChanges(string $clientId, float $thresholdPct = 10, ?string $from = null, ?string $to = null, int $limit = 50): array
     {
+        $warehouses = Warehouse::where('client_id', $clientId)->where('is_active', true)->pluck('id');
+        $clientMainWh = $warehouses->first();
+
         $query = ActivityLog::where('client_id', $clientId)
             ->where('action', 'price_updated');
 
@@ -136,28 +140,47 @@ class SmartAnalyticsService
         $logs = $query->orderByDesc('created_at')->limit($limit)->get();
 
         $itemIds = $logs->pluck('entity_id')->unique();
-        $itemNames = Item::whereIn('id', $itemIds)->pluck('name', 'id');
+        $items = Item::whereIn('id', $itemIds)->get()->keyBy('id');
         $userIds = $logs->pluck('user_id')->unique();
         $userNames = User::whereIn('id', $userIds)->pluck('name', 'id');
 
         $changes = [];
         foreach ($logs as $log) {
+            $item = $items->get($log->entity_id);
             $old = (float) ($log->old_values['default_cost'] ?? 0);
             $new = (float) ($log->new_values['default_cost'] ?? 0);
             $delta = $new - $old;
             $deltaPct = $old > 0 ? round(($delta / $old) * 100, 1) : 0;
             $isUnusual = abs($deltaPct) >= $thresholdPct;
 
+            $source = $log->new_values['source'] ?? '';
+            $voucherId = $log->new_values['voucher_id'] ?? null;
+            $warehouseName = null;
+            if ($voucherId) {
+                $order = DispatchOrder::find($voucherId);
+                $warehouseName = $order && $order->warehouse ? $order->warehouse->name : null;
+            } elseif ($source === 'manual_edit') {
+                $warehouseName = 'تعديل يدوي';
+            }
+
+            $avgCost = 0;
+            if ($item && $clientMainWh) {
+                $avgCost = $this->calc->weightedAverageCost($clientId, $clientMainWh, $item->id);
+            }
+
             $changes[] = [
                 'id' => $log->id,
                 'item_id' => $log->entity_id,
-                'item_name' => $itemNames[$log->entity_id] ?? '—',
+                'item_name' => $item->name ?? '—',
+                'unit' => $item->unit ?? null,
                 'old_cost' => $old,
                 'new_cost' => $new,
+                'avg_cost' => round($avgCost, 2),
                 'delta' => round($delta, 2),
                 'delta_pct' => $deltaPct,
                 'direction' => $delta > 0 ? 'up' : ($delta < 0 ? 'down' : 'same'),
                 'is_unusual' => $isUnusual,
+                'warehouse' => $warehouseName,
                 'changed_by' => $userNames[$log->user_id] ?? '—',
                 'date' => $log->created_at->toDateTimeString(),
             ];
@@ -170,9 +193,12 @@ class SmartAnalyticsService
         ];
     }
 
-    // ── 4. Cost Impact Analysis ──
+    // ── 4. Cost Impact Analysis (بمتوسط السعر المرجح) ──
     public function costImpact(string $clientId, ?string $from = null, ?string $to = null, int $limit = 50): array
     {
+        $warehouses = Warehouse::where('client_id', $clientId)->where('is_active', true)->pluck('id');
+        $clientMainWh = $warehouses->first();
+
         $priceChanges = $this->priceChanges($clientId, 0, $from, $to, $limit);
 
         $impacts = [];
@@ -180,7 +206,8 @@ class SmartAnalyticsService
 
         foreach ($priceChanges['changes'] as $change) {
             $itemId = $change['item_id'];
-            $newCost = $change['new_cost'];
+
+            $avgCost = $clientMainWh ? $this->calc->weightedAverageCost($clientId, $clientMainWh, $itemId) : 0;
 
             $recipes = MenuRecipeItem::where('ingredient_id', $itemId)
                 ->whereHas('recipe', fn($q) => $q->where('client_id', $clientId)->whereNull('deleted_at'))
@@ -194,7 +221,7 @@ class SmartAnalyticsService
             foreach ($recipes as $ri) {
                 $oldLineTotal = (float) $ri->line_total;
                 $data = $ri->toArray();
-                $data['purchase_unit_price'] = $newCost;
+                $data['purchase_unit_price'] = $avgCost > 0 ? $avgCost : $change['new_cost'];
                 $recalc = $this->recipeCalc->calculateItemFromArray($data);
                 $newLineTotal = $recalc['line_total'];
                 $delta = round($newLineTotal - $oldLineTotal, 4);
@@ -215,6 +242,7 @@ class SmartAnalyticsService
                 'ingredient_name' => $change['item_name'],
                 'old_cost' => $change['old_cost'],
                 'new_cost' => $change['new_cost'],
+                'avg_cost' => round($avgCost, 2),
                 'delta_pct' => $change['delta_pct'],
                 'direction' => $change['direction'],
                 'is_unusual' => $change['is_unusual'],
