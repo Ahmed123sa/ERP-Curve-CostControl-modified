@@ -413,12 +413,19 @@ class ReportController extends Controller
             ->orderBy('sort_order')->orderBy('name')
             ->get(['id', 'name', 'unit']);
 
-        $lines = DispatchLine::select('dispatch_lines.*')
-            ->where('dispatch_lines.warehouse_id', $warehouseId)
-            ->whereHas('order', fn($q) => $q->where('client_id', $clientId)->where('type', 'purchase'))
-            ->leftJoin('dispatch_orders', 'dispatch_lines.order_id', '=', 'dispatch_orders.id')
-            ->whereBetween(DB::raw('COALESCE(dispatch_lines.date, dispatch_orders.date)'), [$start->toDateString(), $end->toDateString()])
-            ->get(['dispatch_lines.item_id', 'dispatch_lines.date', 'dispatch_lines.qty']);
+        // نجيب الحركات من stock_ledger + dispatch_orders (عشان تضبط مع القديم والجديد)
+        // بنستخدم withoutGlobalScope عشان HasTenant بتضيف where('client_id') بدون table prefix
+        $lines = StockLedger::withoutGlobalScope('client')
+            ->where('stock_ledger.client_id', $clientId)
+            ->where('stock_ledger.warehouse_id', $warehouseId)
+            ->where('stock_ledger.movement_type', 'in')
+            ->whereBetween('stock_ledger.date', [$start->toDateString(), $end->toDateString()])
+            ->join('dispatch_orders', function ($j) {
+                $j->on('stock_ledger.ref_id', '=', 'dispatch_orders.id')
+                  ->where('stock_ledger.ref_type', '=', 'dispatch_order');
+            })
+            ->where('dispatch_orders.type', 'purchase')
+            ->get(['stock_ledger.item_id', 'stock_ledger.date', 'stock_ledger.qty']);
 
         $perItem = $lines->groupBy('item_id');
         $grid = [];
@@ -467,12 +474,17 @@ class ReportController extends Controller
             ->orderBy('sort_order')->orderBy('name')
             ->get(['id', 'name', 'unit']);
 
-        $lines = DispatchLine::select('dispatch_lines.*')
-            ->where('dispatch_lines.warehouse_id', $branchId)
-            ->whereHas('order', fn($q) => $q->where('client_id', $clientId)->where('type', 'purchase'))
-            ->leftJoin('dispatch_orders', 'dispatch_lines.order_id', '=', 'dispatch_orders.id')
-            ->whereBetween(DB::raw('COALESCE(dispatch_lines.date, dispatch_orders.date)'), [$start->toDateString(), $end->toDateString()])
-            ->get(['dispatch_lines.item_id', 'dispatch_lines.date', 'dispatch_lines.qty']);
+        $lines = StockLedger::withoutGlobalScope('client')
+            ->where('stock_ledger.client_id', $clientId)
+            ->where('stock_ledger.warehouse_id', $branchId)
+            ->whereIn('stock_ledger.movement_type', ['in', 'transfer_in'])
+            ->whereBetween('stock_ledger.date', [$start->toDateString(), $end->toDateString()])
+            ->join('dispatch_orders', function ($j) {
+                $j->on('stock_ledger.ref_id', '=', 'dispatch_orders.id')
+                  ->where('stock_ledger.ref_type', '=', 'dispatch_order');
+            })
+            ->whereIn('dispatch_orders.type', ['purchase', 'dispatch'])
+            ->get(['stock_ledger.item_id', 'stock_ledger.date', 'stock_ledger.qty']);
 
         $perItem = $lines->groupBy('item_id');
         $grid = [];

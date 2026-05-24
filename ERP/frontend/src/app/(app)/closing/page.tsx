@@ -9,7 +9,6 @@ import toast from 'react-hot-toast';
 export default function ClosingPage() {
   const qc = useQueryClient();
   const [viewType, setViewType] = useState<'matrix' | 'single'>('matrix');
-  const [singleTab, setSingleTab] = useState<'closing' | 'daily'>('closing');
   const [warehouseId, setWarehouseId] = useState('');
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
 
@@ -20,26 +19,26 @@ export default function ClosingPage() {
     enabled: viewType === 'matrix',
   });
 
-  // 2. بيانات الموقع الواحد
-  const { data: singleData = [], isLoading: singleLoading } = useQuery({
-    queryKey: ['closing', warehouseId, month],
-    queryFn: () => api.get('/closing', { params: { warehouse_id: warehouseId, month } }).then((r) => r.data.data),
-    enabled: viewType === 'single' && !!warehouseId && singleTab === 'closing',
-  });
-
   const { data: warehouses = [] } = useQuery({
     queryKey: ['warehouses'],
     queryFn: () => api.get('/warehouses').then((r) => r.data),
   });
 
-  // 3. بيانات اليوميات للموقع الواحد (بعد warehouses عشان isBranch)
   const isBranch = (warehouses as any[]).find((w: any) => w.id === warehouseId)?.type === 'branch';
+
+  // 2. بيانات الموقع الواحد (تقفيل + وارد يومي)
+  const { data: singleData = [], isLoading: singleLoading } = useQuery({
+    queryKey: ['closing', warehouseId, month],
+    queryFn: () => api.get('/closing', { params: { warehouse_id: warehouseId, month } }).then((r) => r.data.data),
+    enabled: viewType === 'single' && !!warehouseId,
+  });
+
   const { data: dailyData, isLoading: dailyLoading } = useQuery({
     queryKey: ['daily', isBranch ? 'branch' : 'warehouse', warehouseId, month],
     queryFn: () => api.get(isBranch ? '/reports/branch-daily' : '/reports/warehouse-daily', {
       params: { [isBranch ? 'branch_id' : 'warehouse_id']: warehouseId, month },
     }).then((r) => r.data),
-    enabled: viewType === 'single' && !!warehouseId && singleTab === 'daily',
+    enabled: viewType === 'single' && !!warehouseId,
   });
 
   const isBranchSelected = (() => {
@@ -176,18 +175,6 @@ export default function ClosingPage() {
                <option value="">اختر الموقع...</option>
                {warehouses.map((w: any) => <option key={w.id} value={w.id}>{w.name} ({w.type})</option>)}
              </select>
-             {warehouseId && (
-               <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
-                 <button onClick={() => setSingleTab('closing')}
-                   className={`px-3 py-1.5 text-xs rounded-md font-medium transition ${singleTab === 'closing' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}>
-                   التقفيل
-                 </button>
-                 <button onClick={() => setSingleTab('daily')}
-                   className={`px-3 py-1.5 text-xs rounded-md font-medium transition ${singleTab === 'daily' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}>
-                   اليوميات
-                 </button>
-               </div>
-             )}
           </div>
         )}
 
@@ -264,80 +251,132 @@ export default function ClosingPage() {
               </table>
             </div>
           )
-        ) : singleTab === 'closing' ? (
-          singleLoading ? <div className="p-12 text-center text-gray-400">جاري التحميل...</div> : (
-            <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-              <table className="w-full text-sm text-right" dir="rtl">
-                <thead className="bg-gray-50 border-b border-gray-100">
-                  <tr className="text-gray-500 text-[10px]">
-                    <th className="px-3 py-3 font-semibold">الصنف</th>
-                    <th className="px-3 py-3 font-semibold">أول المدة (كمية)</th>
-                    <th className="px-3 py-3 font-semibold">قيمة أول المدة</th>
-                    <th className="px-3 py-3 font-semibold">وارد (كمية)</th>
-                    <th className="px-3 py-3 font-semibold">قيمة الوارد</th>
-                    <th className="px-3 py-3 font-semibold">المنصرف</th>
-                    <th className="px-3 py-3 font-semibold">متوسط السعر</th>
-                    {!isBranchSelected && <th className="px-3 py-3 font-semibold">نظري آخر</th>}
-                    <th className="px-3 py-3 font-semibold">آخر المدة (فعلي)</th>
-                    {!isBranchSelected && <th className="px-3 py-3 font-semibold">الفرق</th>}
-                    {!isBranchSelected && <th className="px-3 py-3 font-semibold">قيمة الفرق</th>}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {singleData.map((row: any) => (
-                    <tr key={row.id}>
-                      <td className="px-3 py-3 font-bold">{row.item_name}</td>
-                      <td className="px-3 py-3">{row.opening_qty}</td>
-                      <td className="px-3 py-3">{Number(row.opening_value ?? 0).toLocaleString('en-US')}</td>
-                      <td className="px-3 py-3 text-green-600">{row.in_qty}</td>
-                      <td className="px-3 py-3 text-green-700">{Number(row.in_value ?? 0).toLocaleString('en-US')}</td>
-                      <td className="px-3 py-3 text-red-600">{row.out_qty}</td>
-                      <td className="px-3 py-3 font-medium">{Number(row.avg_cost ?? 0).toFixed(2)}</td>
-                      {!isBranchSelected && <td className="px-3 py-3 font-bold">{row.closing_qty_theoretical}</td>}
-                      <td className="px-3 py-3">{row.closing_qty_actual ? Number(row.closing_qty_actual * row.avg_cost).toLocaleString('en-US') : '—'}</td>
-                      {!isBranchSelected && <td className="px-3 py-3 font-bold text-red-600">{row.diff_qty}</td>}
-                      {!isBranchSelected && <td className="px-3 py-3 font-bold text-red-700">{Number(row.diff_value ?? 0).toLocaleString('en-US')}</td>}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )
         ) : (
-          /* اليوميات */
-          dailyLoading ? <div className="p-12 text-center text-gray-400">جاري التحميل...</div> : (
-            !dailyData || !dailyData.items || dailyData.items.filter((i: any) => i.total > 0).length === 0 ? (
-              <div className="p-12 text-center text-gray-400">لا توجد واردات في هذا الشهر</div>
-            ) : (
-              <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-auto">
-                <table className="w-full text-sm whitespace-nowrap">
-                  <thead>
-                    <tr className="bg-gray-50 text-xs text-gray-500 border-b">
-                      <th className="px-2 py-1.5 text-start font-medium sticky right-0 bg-gray-50 z-10">الصنف</th>
-                      {Array.from({ length: dailyData.days_in_month }, (_, i) => i + 1).map((d: number) => (
-                        <th key={d} className="px-2 py-1.5 text-center font-medium text-gray-400 min-w-[40px]">{d}</th>
-                      ))}
-                      <th className="px-2 py-1.5 text-center font-medium text-gray-700 min-w-[60px]">الإجمالي</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {dailyData.items.filter((i: any) => i.total > 0).map((item: any) => (
-                      <tr key={item.item_id} className="hover:bg-gray-50/30">
-                        <td className="px-2 py-1 text-start font-medium text-gray-800 sticky right-0 bg-white z-10">
-                          {item.item_name} <span className="text-xs text-gray-400">({item.unit})</span>
-                        </td>
-                        {Array.from({ length: dailyData.days_in_month }, (_, i) => i + 1).map((d: number) => (
-                          <td key={d} className="px-2 py-1 text-center font-mono text-xs">
-                            {item.days[d] > 0 ? item.days[d].toFixed(3) : ''}
-                          </td>
+          singleLoading || dailyLoading ? <div className="p-12 text-center text-gray-400">جاري التحميل...</div> : (
+            (() => {
+              const daysInMonth = dailyData?.days_in_month || 30;
+              // build a map of item_id -> daily days
+              const dailyMap: Record<string, { days: number[], total: number }> = {};
+              (dailyData?.items || []).forEach((i: any) => {
+                dailyMap[i.item_id] = { days: i.days, total: i.total };
+              });
+
+              const mergedRows = singleData.map((row: any) => {
+                const daily = dailyMap[row.item_id] || { days: [], total: 0 };
+                const purchasesValue = Number(row.in_value ?? 0);
+                return { ...row, daily, purchasesValue };
+              });
+
+              return (
+                <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-auto">
+                  <table className="w-full text-xs whitespace-nowrap border-collapse" dir="rtl">
+                    <thead>
+                      <tr className="bg-gray-100 text-gray-600">
+                        <th className="px-1.5 py-1.5 text-start font-semibold sticky right-0 bg-gray-100 z-10 border border-gray-300">الصنف</th>
+                        <th className="px-1.5 py-1.5 text-center font-semibold border border-gray-300">الوحدة</th>
+                        <th className="px-1.5 py-1.5 text-center font-semibold text-gray-500 border border-gray-300">أول المدة</th>
+                        {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => (
+                          <th key={d} className="px-1 py-1.5 text-center font-medium text-gray-400 min-w-[34px] border border-gray-300">{d}</th>
                         ))}
-                        <td className="px-2 py-1 text-center font-mono font-bold text-sm">{item.total.toFixed(3)}</td>
+                        <th className="px-1.5 py-1.5 text-center font-semibold text-gray-700 border border-gray-300">إجمالي الوارد</th>
+                        <th className="px-1.5 py-1.5 text-center font-semibold border border-gray-300">متوسط السعر</th>
+                        {isBranch && <th className="px-1.5 py-1.5 text-center font-semibold border border-gray-300">آخر المدة</th>}
+                        {!isBranch && <th className="px-1.5 py-1.5 text-center font-semibold border border-gray-300">آخر المدة</th>}
+                        {isBranch && <th className="px-1.5 py-1.5 text-center font-semibold border border-gray-300 text-blue-600">المستلم الفعلي</th>}
+                        {!isBranch && <th className="px-1.5 py-1.5 text-center font-semibold border border-gray-300 text-orange-600">منصرف فروع</th>}
+                        {!isBranch && <th className="px-1.5 py-1.5 text-center font-semibold border border-gray-300">نظري</th>}
+                        <th className="px-1.5 py-1.5 text-center font-semibold border border-gray-300">قيمة أول المدة</th>
+                        <th className="px-1.5 py-1.5 text-center font-semibold border border-gray-300">قيمة المشتريات</th>
+                        {!isBranch && <th className="px-1.5 py-1.5 text-center font-semibold border border-gray-300">قيمة آخر المدة</th>}
+                        {isBranch && <th className="px-1.5 py-1.5 text-center font-semibold border border-gray-300">قيمة آخر المدة</th>}
+                        {isBranch && <th className="px-1.5 py-1.5 text-center font-semibold border border-gray-300 text-blue-600">قيمة المستلم الفعلي</th>}
+                        {!isBranch && <th className="px-1.5 py-1.5 text-center font-semibold border border-gray-300">قيمة النظري</th>}
+                        {!isBranch && <th className="px-1.5 py-1.5 text-center font-semibold border border-gray-300">الفرق</th>}
+                        {!isBranch && <th className="px-1.5 py-1.5 text-center font-semibold border border-gray-300">قيمة الفرق</th>}
+                        {!isBranch && <th className="px-1.5 py-1.5 text-center font-semibold text-green-700 border border-gray-300">إجمالي المشتريات</th>}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )
+                    </thead>
+                    <tbody>
+                      {mergedRows.map((row: any) => {
+                        const avgCost = Number(row.avg_cost ?? 0);
+                        const openingVal = Number(row.opening_value ?? 0);
+                        const closingVal = Number(row.closing_qty_actual ?? 0) * avgCost;
+                        const theoreticalVal = Number(row.closing_qty_theoretical ?? 0) * avgCost;
+                        const diffVal = Number(row.diff_value ?? 0);
+                        const diffQty = Number(row.diff_qty ?? 0);
+                        return (
+                          <tr key={row.id} className="hover:bg-gray-50/30">
+                            <td className="px-1.5 py-1 text-start font-bold text-gray-800 sticky right-0 bg-white z-10 border border-gray-300">{row.item_name}</td>
+                            <td className="px-1.5 py-1 text-center text-gray-400 border border-gray-300">{row.unit}</td>
+                            <td className="px-1.5 py-1 text-center font-mono border border-gray-300">{row.opening_qty}</td>
+                            {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => (
+                              <td key={d} className="px-1 py-1 text-center font-mono text-xs text-green-700 border border-gray-300">
+                                {row.daily.days?.[d] > 0 ? Number(row.daily.days[d]).toFixed(3) : ''}
+                              </td>
+                            ))}
+                            <td className="px-1.5 py-1 text-center font-mono font-bold text-green-700 border border-gray-300">{row.daily.total.toFixed(3)}</td>
+                            <td className="px-1.5 py-1 text-center font-mono font-bold border border-gray-300">{avgCost.toFixed(3)}</td>
+                            {!isBranch && <td className="px-1.5 py-1 text-center font-mono border border-gray-300">{row.closing_qty_actual}</td>}
+                            {isBranch && <td className="px-1.5 py-1 text-center font-mono border border-gray-300">{row.closing_qty_actual}</td>}
+                            {isBranch && <td className="px-1.5 py-1 text-center font-mono text-blue-600 border border-gray-300">
+                              {(() => { const v = Number(row.opening_qty || 0) + Number(row.in_qty || 0) - Number(row.closing_qty_actual || 0); return v > 0 ? v.toFixed(3) : ''; })()}
+                            </td>}
+                            {!isBranch && <td className="px-1.5 py-1 text-center font-mono text-orange-600 border border-gray-300">
+                              {(Object.values(row.branch_dispatches || {}) as any[]).reduce((s: number, d: any) => s + Number(d.qty || 0), 0) || ''}
+                            </td>}
+                            {!isBranch && <td className="px-1.5 py-1 text-center font-mono text-gray-500 border border-gray-300">{row.closing_qty_theoretical}</td>}
+                            <td className="px-1.5 py-1 text-center font-mono border border-gray-300">{openingVal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                            <td className="px-1.5 py-1 text-center font-mono text-green-700 font-bold border border-gray-300">{row.purchasesValue.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                            {!isBranch && <td className="px-1.5 py-1 text-center font-mono border border-gray-300">{closingVal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>}
+                            {isBranch && <td className="px-1.5 py-1 text-center font-mono border border-gray-300">{closingVal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>}
+                            {isBranch && <td className="px-1.5 py-1 text-center font-mono text-blue-600 border border-gray-300">
+                              {(() => { const v = Number(row.opening_qty || 0) + Number(row.in_qty || 0) - Number(row.closing_qty_actual || 0); return v > 0 ? (v * avgCost).toLocaleString('en-US', { minimumFractionDigits: 2 }) : ''; })()}
+                            </td>}
+                            {!isBranch && <td className="px-1.5 py-1 text-center font-mono border border-gray-300">{theoreticalVal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>}
+                            {!isBranch && <td className="px-1.5 py-1 text-center font-mono font-bold text-red-600 border border-gray-300">{diffQty}</td>}
+                            {!isBranch && <td className="px-1.5 py-1 text-center font-mono font-bold text-red-700 border border-gray-300">{diffVal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>}
+                            {!isBranch && <td className="px-1.5 py-1 text-center font-mono font-bold text-green-700 border border-gray-300">{row.purchasesValue.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {/* Summary section */}
+                  {(() => {
+                    const totOpening = mergedRows.reduce((s: number, r: any) => s + Number(r.opening_qty || 0), 0);
+                    const totInQty = mergedRows.reduce((s: number, r: any) => s + Number(r.in_qty || 0), 0);
+                    const totClosingActual = mergedRows.reduce((s: number, r: any) => s + Number(r.closing_qty_actual || 0), 0);
+                    const totBranchDispatch = mergedRows.reduce((s: number, r: any) => s + (Object.values(r.branch_dispatches || {}) as any[]).reduce((ss: number, d: any) => ss + Number(d.qty || 0), 0), 0);
+                    const totReceivedQty = mergedRows.reduce((s: number, r: any) => {
+                      const v = Number(r.opening_qty || 0) + Number(r.in_qty || 0) - (r.closing_qty_actual ?? 0);
+                      return s + (v > 0 ? v : 0);
+                    }, 0);
+                    const totReceivedVal = mergedRows.reduce((s: number, r: any) => {
+                      const v = Number(r.opening_qty || 0) + Number(r.in_qty || 0) - (r.closing_qty_actual ?? 0);
+                      return s + (v > 0 ? v * Number(r.avg_cost || 0) : 0);
+                    }, 0);
+                    const summaryItems = [
+                      ['إجمالي أول المدة', totOpening],
+                      ['إجمالي المشتريات', totInQty],
+                      ['إجمالي آخر المدة', totClosingActual],
+                      ...(!isBranch ? [['إجمالي منصرف فروع', totBranchDispatch]] : []),
+                      ['المستلم الفعلي (كمية)', totReceivedQty.toFixed(3)],
+                      ['المستلم الفعلي (قيمة)', totReceivedVal.toLocaleString('en-US', { minimumFractionDigits: 2 })],
+                    ];
+                    return (
+                      <div className="mt-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                        {summaryItems.map(([label, val]: [string, any]) => (
+                          <div key={label} className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                            <div className="text-xs text-blue-600 font-medium">{label}</div>
+                            <div className="text-lg font-bold text-blue-900 mt-0.5">{val}</div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              );
+            })()
           )
         )}
       </div>

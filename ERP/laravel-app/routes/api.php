@@ -42,9 +42,14 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // ── Items (الأصناف) ───────────────────────────────────
     Route::middleware('permission:items')->group(function () {
+        // Specific routes MUST come before apiResource to avoid matching {item}
         Route::delete('/items/bulk', [ItemController::class, 'bulkDelete']);
-        Route::apiResource('items', ItemController::class);
         Route::post('/items/import', [ItemController::class, 'import']);
+        Route::post('/items/import-stock-levels', [ItemController::class, 'importStockLevels']);
+        Route::get('/items/export', [ItemController::class, 'exportExcel']);
+        Route::put('/items/{item}/move-bottom', [ItemController::class, 'moveBottom']);
+        Route::put('/items/{item}/move-up', [ItemController::class, 'moveUp']);
+        Route::apiResource('items', ItemController::class)->only(['index', 'store', 'update', 'destroy']);
     });
 
     // ── Warehouses ────────────────────────────────────────

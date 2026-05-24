@@ -17,7 +17,8 @@ class SmartAnalyticsController extends Controller
     {
         $clientId = $request->user()->current_client_id;
         $threshold = (float) ($request->threshold ?? 20);
-        $result = $this->analytics->inventoryAlerts($clientId, $threshold);
+        $warehouseIds = $request->warehouse_ids ? explode(',', $request->warehouse_ids) : null;
+        $result = $this->analytics->inventoryAlerts($clientId, $threshold, $warehouseIds);
         return response()->json($result);
     }
 
@@ -30,6 +31,7 @@ class SmartAnalyticsController extends Controller
             $request->from,
             $request->to,
             (int) ($request->limit ?? 10),
+            $request->warehouse_id,
         );
         return response()->json($result);
     }
@@ -56,7 +58,6 @@ class SmartAnalyticsController extends Controller
             $clientId,
             $request->from,
             $request->to,
-            (int) ($request->limit ?? 50),
         );
         return response()->json($result);
     }

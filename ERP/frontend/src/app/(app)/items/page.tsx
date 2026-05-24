@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/ui/AppShell';
 import { useAuthStore } from '@/lib/store';
-import { useState } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import toast from 'react-hot-toast';
 
 export default function ItemsPage() {
@@ -14,9 +14,17 @@ export default function ItemsPage() {
   const [unit, setUnit] = useState('');
   const [category, setCategory] = useState('');
   const [cost, setCost] = useState('');
+  const [minStock, setMinStock] = useState('');
+  const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState('sort_order');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [insertId, setInsertId] = useState<string | null>(null);
+  const [insertPos, setInsertPos] = useState<'before' | 'after'>('after');
+  const [insertName, setInsertName] = useState('');
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editData, setEditData] = useState<any>({});
+  const insertRef = useRef<HTMLInputElement>(null);
 
   const { data: items, isLoading } = useQuery({
     queryKey: ['items', currentClient?.id],
@@ -33,11 +41,8 @@ export default function ItemsPage() {
   const createMutation = useMutation({
     mutationFn: (newData: any) => api.post('/items', newData),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['items'] });
-      setName('');
-      setUnit('');
-      setCategory('');
-      setCost('');
+      queryClient.invalidateQueries({ queryKey: ['items', currentClient?.id] });
+      setName(''); setUnit(''); setCategory(''); setCost(''); setMinStock('');
       toast.success('تمت إضافة الصنف بنجاح');
     },
   });
@@ -45,7 +50,7 @@ export default function ItemsPage() {
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => api.put(`/items/${id}`, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['items'] });
+      queryClient.invalidateQueries({ queryKey: ['items', currentClient?.id] });
       setEditingId(null);
       toast.success('تم تحديث الصنف');
     },
@@ -54,7 +59,7 @@ export default function ItemsPage() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/items/${id}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['items'] });
+      queryClient.invalidateQueries({ queryKey: ['items', currentClient?.id] });
       toast.success('تم حذف الصنف');
     },
   });
@@ -62,228 +67,296 @@ export default function ItemsPage() {
   const bulkDeleteMutation = useMutation({
     mutationFn: () => api.delete('/items/bulk'),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['items'] });
+      queryClient.invalidateQueries({ queryKey: ['items', currentClient?.id] });
       toast.success('تم حذف جميع الأصناف بنجاح');
+    },
+  });
+
+  const moveBottomMutation = useMutation({
+    mutationFn: (id: string) => api.put(`/items/${id}/move-bottom`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['items', currentClient?.id] });
+      toast.success('تم نقل الصنف إلى الأسفل');
+    },
+  });
+
+  const moveUpMutation = useMutation({
+    mutationFn: (id: string) => api.put(`/items/${id}/move-up`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['items', currentClient?.id] });
+      toast.success('تم نقل الصنف إلى الأعلى');
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || 'لا يمكن النقل لأعلى');
     },
   });
 
   const startEditing = (item: any) => {
     setEditingId(item.id);
-    setEditData({ 
-      name: item.name, 
-      default_cost: item.default_cost || 0, 
+    setEditData({
+      name: item.name,
+      default_cost: item.default_cost || 0,
       unit: item.unit,
-      default_warehouse_id: item.default_warehouse_id || ''
+      default_warehouse_id: item.default_warehouse_id || '',
+      min_stock_level: item.min_stock_level ?? '',
     });
   };
 
   const saveEdit = (id: string) => {
-    updateMutation.mutate({ id, data: editData });
+    const data = { ...editData };
+    if (data.min_stock_level === '' || data.min_stock_level === null) data.min_stock_level = null;
+    updateMutation.mutate({ id, data });
+  };
+
+  const toggleSort = (key: string) => {
+    setSortDir(prev => sortKey === key ? (prev === 'asc' ? 'desc' : 'asc') : 'asc');
+    setSortKey(key);
+  };
+
+  const filteredItems = useMemo(() => {
+    if (!items) return [];
+    let list = [...items];
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter((i: any) => i.name?.toLowerCase().includes(q) || i.category?.toLowerCase().includes(q));
+    }
+    list.sort((a: any, b: any) => {
+      let va = a[sortKey] ?? '';
+      let vb = b[sortKey] ?? '';
+      if (sortKey === 'default_cost' || sortKey === 'min_stock_level' || sortKey === 'sort_order') { va = parseFloat(va) || 0; vb = parseFloat(vb) || 0; }
+      else { va = String(va).toLowerCase(); vb = String(vb).toLowerCase(); }
+      return sortDir === 'asc' ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1);
+    });
+    return list;
+  }, [items, search, sortKey, sortDir]);
+
+  const SortIcon = ({ k }: { k: string }) => {
+    if (sortKey !== k) return <span className="text-gray-300 mr-1">↕</span>;
+    return <span className="text-blue-600 mr-1">{sortDir === 'asc' ? '↑' : '↓'}</span>;
+  };
+
+  const startInsert = (id: string, pos: 'before' | 'after') => {
+    setInsertId(id);
+    setInsertPos(pos);
+    setTimeout(() => insertRef.current?.focus(), 50);
+  };
+
+  const confirmInsert = () => {
+    if (!insertName.trim() || !insertId) return;
+    const params: any = { name: insertName.trim(), unit: 'قطعة', default_cost: 0 };
+    if (insertPos === 'after') params.after_id = insertId;
+    else params.before_id = insertId;
+    createMutation.mutate(params);
+    setInsertId(null);
+    setInsertName('');
   };
 
   return (
     <>
-      <PageHeader
-        title="الأصناف والأسعار"
-        subtitle="تعريف المنتجات والمواد الخام"
+      <PageHeader title="الأصناف والأسعار" subtitle="تعريف المنتجات والمواد الخام"
         actions={
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => {
-                if (window.confirm('هل أنت متأكد من حذف جميع الأصناف بالكامل؟ لا يمكن التراجع عن هذه الخطوة!')) {
-                  bulkDeleteMutation.mutate();
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={async () => {
+                const res = await api.get('/items/export', { responseType: 'blob' });
+                const url = URL.createObjectURL(res.data);
+                const a = document.createElement('a'); a.href = url; a.download = 'items.xlsx'; a.click();
+                URL.revokeObjectURL(url);
+              }} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700">📥 تصدير Excel</button>
+            <label className="cursor-pointer px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700">📥 استيراد
+              <input type="file" className="hidden" accept=".xlsx,.xls" onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  const form = new FormData(); form.append('file', file);
+                  api.post('/items/import', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+                    .then(() => { toast.success('تم الاستيراد بنجاح'); queryClient.invalidateQueries({ queryKey: ['items', currentClient?.id] }); })
+                    .catch(() => toast.error('خطأ في الاستيراد'));
                 }
-              }}
-              className="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm font-medium hover:bg-red-100 transition-colors"
-            >
-              🗑️ حذف كل الأصناف
-            </button>
-            <label className="cursor-pointer px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 flex items-center gap-2">
-              <span>استيراد من Excel 📥</span>
-              <input 
-                type="file" 
-                className="hidden" 
-                accept=".xlsx,.xls" 
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    const form = new FormData();
-                    form.append('file', file);
-                    api.post('/items/import', form, {
-                      headers: { 'Content-Type': 'multipart/form-data' }
-                    }).then(() => {
-                      toast.success('تم الاستيراد بنجاح');
-                      queryClient.invalidateQueries({ queryKey: ['items'] });
-                    }).catch(() => toast.error('خطأ في الاستيراد'));
-                  }
-                }}
-              />
+              }} />
             </label>
+            <label className="cursor-pointer px-3 py-1.5 bg-amber-500 text-white rounded-lg text-xs font-medium hover:bg-amber-600">📥 الحد الأدنى
+              <input type="file" className="hidden" accept=".xlsx,.xls" onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  const form = new FormData(); form.append('file', file);
+                  api.post('/items/import-stock-levels', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+                    .then((r) => { toast.success(r.data?.message || 'تم التحديث'); queryClient.invalidateQueries({ queryKey: ['items', currentClient?.id] }); })
+                    .catch(() => toast.error('خطأ في الاستيراد'));
+                }
+              }} />
+            </label>
+            <button onClick={() => { if (window.confirm('هل أنت متأكد من حذف جميع الأصناف بالكامل؟ لا يمكن التراجع عن هذه الخطوة!')) bulkDeleteMutation.mutate(); }}
+              className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-medium hover:bg-red-100">🗑️ حذف الكل</button>
           </div>
-        }
-      />
+        } />
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {/* صندوق إضافة صنف جديد */}
-        <div className="bg-white border border-gray-100 rounded-xl p-4">
-          <h3 className="text-sm font-medium mb-4 text-gray-800">إضافة صنف جديد</h3>
-          <div className="grid grid-cols-4 gap-4 mb-4">
-            <input
-              type="text"
-              placeholder="اسم الصنف"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm"
-            />
-            <input
-              type="text"
-              placeholder="الوحدة (كيلو، عدد...)"
-              value={unit}
-              onChange={(e) => setUnit(e.target.value)}
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm"
-            />
-            <input
-              type="number"
-              placeholder="السعر (اختياري)"
-              value={cost}
-              onChange={(e) => setCost(e.target.value)}
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm"
-            />
-            <input
-              type="text"
-              placeholder="التصنيف"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm"
-            />
-          </div>
-          <div className="flex justify-end">
-            <button
-              onClick={() => createMutation.mutate({ name, unit, category, default_cost: parseFloat(cost || '0') })}
+      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        {/* إضافة صنف جديد */}
+        <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+          <h3 className="text-xs font-semibold mb-3 text-gray-700">إضافة صنف جديد</h3>
+          <div className="flex items-end gap-3 flex-wrap">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-gray-400">الاسم</label>
+              <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-44" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-gray-400">الوحدة</label>
+              <input type="text" value={unit} onChange={(e) => setUnit(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-24" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-gray-400">السعر</label>
+              <input type="number" value={cost} onChange={(e) => setCost(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-24" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-gray-400">التصنيف</label>
+              <input type="text" value={category} onChange={(e) => setCategory(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-28" />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-gray-400">الحد الأدنى</label>
+              <input type="number" value={minStock} onChange={(e) => setMinStock(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-20" />
+            </div>
+            <button onClick={() => createMutation.mutate({ name, unit, category, default_cost: parseFloat(cost || '0'), min_stock_level: minStock ? parseFloat(minStock) : null })}
               disabled={!name || !unit || createMutation.isPending}
-              className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-            >
-              ➕ إضافة صنف
-            </button>
+              className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">➕ إضافة</button>
           </div>
         </div>
 
+        {/* شريط البحث */}
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 text-sm">🔍</span>
+            <input type="text" placeholder="بحث..." value={search} onChange={(e) => setSearch(e.target.value)}
+              className="border border-gray-200 rounded-lg pr-8 pl-3 py-2 text-sm w-56 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100" />
+          </div>
+          {search ? (
+            <button onClick={() => setSearch('')} className="text-xs text-gray-400 hover:text-gray-600">مسح</button>
+          ) : null}
+          <span className="text-xs text-gray-400 mr-auto">{filteredItems.length} / {items?.length || 0} صنف</span>
+        </div>
+
         {/* جدول الأصناف */}
-        <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
-          <table className="w-full text-sm" dir="rtl">
-            <thead className="bg-gray-50 border-b border-gray-100">
-              <tr className="text-right text-xs text-gray-500 uppercase">
-                <th className="px-6 py-3 font-medium w-16">#</th>
-                <th className="px-6 py-3 font-medium w-1/4">الاسم</th>
-                <th className="px-6 py-3 font-medium">الوحدة</th>
-                <th className="px-6 py-3 font-medium">السعر (Cost)</th>
-                <th className="px-6 py-3 font-medium">المخزن الافتراضي</th>
-                <th className="px-6 py-3 font-medium">التصنيف</th>
-                <th className="px-6 py-3 font-medium text-center">إجراءات</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {isLoading ? (
-                <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-400">جاري التحميل...</td></tr>
-              ) : items?.length === 0 ? (
-                <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-400">لا توجد أصناف، يمكنك إضافتها يدوياً أو استيرادها من إكسيل.</td></tr>
-              ) : items?.map((item: any, idx: number) => {
-                const isEditing = editingId === item.id;
-                const currentWarehouse = warehouses?.find((w: any) => w.id === item.default_warehouse_id);
-                return (
-                  <tr key={item.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 text-gray-400">{idx + 1}</td>
-                    
-                    <td className="px-6 py-4 font-medium text-gray-900">
-                      {isEditing ? (
-                        <input 
-                          type="text" 
-                          value={editData.name} 
-                          onChange={(e) => setEditData({...editData, name: e.target.value})}
-                          className="border border-gray-300 rounded px-2 py-1 w-full" 
-                        />
-                      ) : (
-                        item.name
-                      )}
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-600">
-                      {isEditing ? (
-                        <input 
-                          type="text" 
-                          value={editData.unit} 
-                          onChange={(e) => setEditData({...editData, unit: e.target.value})}
-                          className="border border-gray-300 rounded px-2 py-1 w-20" 
-                        />
-                      ) : (
-                        item.unit
-                      )}
-                    </td>
-
-                    <td className="px-6 py-4 font-semibold text-blue-600">
-                      {isEditing ? (
-                        <input 
-                          type="number" 
-                          value={editData.default_cost} 
-                          onChange={(e) => setEditData({...editData, default_cost: parseFloat(e.target.value) || 0})}
-                          className="border border-gray-300 rounded px-2 py-1 w-24 text-left" 
-                          dir="ltr"
-                        />
-                      ) : (
-                        <span dir="ltr">{Number(item.default_cost || 0).toLocaleString()} ج.م</span>
-                      )}
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-500">
-                      {isEditing ? (
-                        <select
-                          value={editData.default_warehouse_id}
-                          onChange={(e) => setEditData({...editData, default_warehouse_id: e.target.value})}
-                          className="border border-gray-300 rounded px-2 py-1 w-full text-xs"
-                        >
-                          <option value="">-- اختر المخزن --</option>
-                          {warehouses?.map((w: any) => (
-                            <option key={w.id} value={w.id}>{w.name}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span className={`text-xs px-2 py-1 rounded ${currentWarehouse ? 'bg-gray-100' : 'text-gray-400 italic'}`}>
-                          {currentWarehouse ? currentWarehouse.name : 'الرئيسي (تلقائي)'}
-                        </span>
-                      )}
-                    </td>
-
-                    <td className="px-6 py-4 text-gray-500">{item.category}</td>
-
-                    <td className="px-6 py-4 text-center">
-                      {isEditing ? (
-                        <div className="flex items-center justify-center gap-2">
-                          <button onClick={() => saveEdit(item.id)} className="text-green-600 hover:text-green-800 font-medium">حفظ</button>
-                          <button onClick={() => setEditingId(null)} className="text-gray-400 hover:text-gray-600">إلغاء</button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-center gap-3">
-                          <button onClick={() => startEditing(item)} className="text-blue-600 hover:text-blue-800" title="تعديل">
-                            ✏️
+        <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm" dir="rtl">
+              <thead>
+                <tr className="bg-gray-50 text-xs text-gray-500 border-b border-gray-100">
+                  <th className="px-3 py-3 font-medium w-14 text-center cursor-pointer select-none text-gray-400 hover:text-gray-600" onClick={() => { setSortKey('sort_order'); setSortDir('asc'); }} title="الترتيب الأصلي">#</th>
+                  <th className="px-4 py-3 font-medium cursor-pointer select-none text-right" onClick={() => toggleSort('name')}>
+                    <SortIcon k="name" />الاسم
+                  </th>
+                  <th className="px-3 py-3 font-medium cursor-pointer select-none text-right" onClick={() => toggleSort('unit')}>
+                    <SortIcon k="unit" />الوحدة
+                  </th>
+                  <th className="px-3 py-3 font-medium cursor-pointer select-none text-right" onClick={() => toggleSort('default_cost')}>
+                    <SortIcon k="default_cost" />السعر
+                  </th>
+                  <th className="px-3 py-3 font-medium cursor-pointer select-none text-right" onClick={() => toggleSort('min_stock_level')}>
+                    <SortIcon k="min_stock_level" />الحد الأدنى
+                  </th>
+                  <th className="px-3 py-3 font-medium text-right">المخزن</th>
+                  <th className="px-3 py-3 font-medium cursor-pointer select-none text-right" onClick={() => toggleSort('category')}>
+                    <SortIcon k="category" />التصنيف
+                  </th>
+                  <th className="px-3 py-3 font-medium text-center">إجراءات</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {isLoading ? (
+                  <tr><td colSpan={8} className="px-6 py-16 text-center text-gray-300">جاري التحميل...</td></tr>
+                ) : filteredItems.length === 0 ? (
+                  <tr><td colSpan={8} className="px-6 py-16 text-center text-gray-300">لا توجد أصناف مطابقة.</td></tr>
+                ) : filteredItems.map((item: any, idx: number) => {
+                  const isEditing = editingId === item.id;
+                  const currentWarehouse = warehouses?.find((w: any) => w.id === item.default_warehouse_id);
+                  return (
+                    <tr key={item.id} className="hover:bg-gray-50/70 transition-colors group">
+                      <td className="px-3 py-3 text-center align-middle">
+                        <div className="flex flex-col items-center gap-0 relative">
+                          <button onClick={() => startInsert(item.id, 'before')}
+                            className="opacity-0 group-hover:opacity-100 text-[9px] leading-none text-indigo-300 hover:text-indigo-500 transition-opacity" title="إدراج قبله">+
                           </button>
-                          <button 
-                            onClick={() => {
-                              if (window.confirm('هل أنت متأكد من حذف هذا الصنف؟')) {
-                                deleteMutation.mutate(item.id);
-                              }
-                            }} 
-                            className="text-red-500 hover:text-red-700" title="حذف"
-                          >
-                            🗑️
+                          <span className="text-gray-400 text-xs font-mono leading-tight">{idx + 1}</span>
+                          <button onClick={() => startInsert(item.id, 'after')}
+                            className="opacity-0 group-hover:opacity-100 text-[9px] leading-none text-indigo-300 hover:text-indigo-500 transition-opacity" title="إدراج بعده">+
                           </button>
                         </div>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      </td>
+
+                      <td className="px-4 py-3 font-medium text-gray-900">
+                        {isEditing ? (
+                          <input type="text" value={editData.name} onChange={(e) => setEditData({...editData, name: e.target.value})} className="border border-gray-300 rounded px-2 py-1 w-full text-sm" />
+                        ) : (item.name)}
+                      </td>
+                      <td className="px-3 py-3 text-gray-500">
+                        {isEditing ? (
+                          <input type="text" value={editData.unit} onChange={(e) => setEditData({...editData, unit: e.target.value})} className="border border-gray-300 rounded px-2 py-1 w-16 text-sm" />
+                        ) : (<span className="text-gray-400">{item.unit}</span>)}
+                      </td>
+                      <td className="px-3 py-3 font-semibold text-blue-600">
+                        {isEditing ? (
+                          <input type="number" value={editData.default_cost} onChange={(e) => setEditData({...editData, default_cost: parseFloat(e.target.value) || 0})} className="border border-gray-300 rounded px-2 py-1 w-20 text-left text-sm" dir="ltr" />
+                        ) : (<span dir="ltr">{Number(item.default_cost || 0).toLocaleString()} ج.م</span>)}
+                      </td>
+                      <td className="px-3 py-3 text-gray-500">
+                        {isEditing ? (
+                          <input type="number" value={editData.min_stock_level} onChange={(e) => setEditData({...editData, min_stock_level: e.target.value})} className="border border-gray-300 rounded px-2 py-1 w-16 text-sm" />
+                        ) : (<span>{item.min_stock_level ?? '—'}</span>)}
+                      </td>
+                      <td className="px-3 py-3 text-gray-500">
+                        {isEditing ? (
+                          <select value={editData.default_warehouse_id} onChange={(e) => setEditData({...editData, default_warehouse_id: e.target.value})} className="border border-gray-300 rounded px-2 py-1 w-28 text-xs">
+                            <option value="">-- اختر --</option>
+                            {warehouses?.map((w: any) => (<option key={w.id} value={w.id}>{w.name}</option>))}
+                          </select>
+                        ) : (
+                          <span className={`text-[11px] px-2 py-0.5 rounded ${currentWarehouse ? 'bg-gray-100 text-gray-600' : 'text-gray-300 italic'}`}>
+                            {currentWarehouse ? currentWarehouse.name : 'رئيسي'}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-3 text-gray-500">{item.category}</td>
+
+                      <td className="px-3 py-3 text-center">
+                        {isEditing ? (
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button onClick={() => saveEdit(item.id)} className="px-2.5 py-1 text-green-700 bg-green-50 rounded text-xs font-medium hover:bg-green-100">حفظ</button>
+                            <button onClick={() => setEditingId(null)} className="px-2.5 py-1 text-gray-500 bg-gray-50 rounded text-xs hover:bg-gray-100">إلغاء</button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-center gap-1">
+                            <button onClick={() => startEditing(item)} className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50" title="تعديل">✏️</button>
+                            <button onClick={() => moveUpMutation.mutate(item.id)} className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:text-orange-600 hover:bg-orange-50" title="نقل لأعلى">⏫</button>
+                            <button onClick={() => moveBottomMutation.mutate(item.id)} className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:text-orange-600 hover:bg-orange-50" title="نقل لأسفل">⏬</button>
+                            <button onClick={() => { if (window.confirm('هل أنت متأكد من حذف هذا الصنف؟')) deleteMutation.mutate(item.id); }}
+                              className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:text-red-600 hover:bg-red-50" title="حذف">🗑️</button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {/* Insert inline row */}
+                {insertId && (() => {
+                  const targetItem = items?.find((i: any) => i.id === insertId);
+                  return (
+                    <tr className="bg-indigo-50/70">
+                      <td colSpan={8} className="px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-indigo-500 font-medium whitespace-nowrap">
+                            إضافة {insertPos === 'after' ? 'بعد' : 'قبل'} "{targetItem?.name}":
+                          </span>
+                          <input ref={insertRef} type="text" placeholder="اسم الصنف..." value={insertName} onChange={(e) => setInsertName(e.target.value)}
+                            className="border border-gray-200 rounded px-2.5 py-1.5 text-sm w-56 outline-none focus:border-indigo-400" />
+                          <button onClick={confirmInsert} disabled={!insertName.trim() || createMutation.isPending}
+                            className="px-3 py-1.5 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 disabled:opacity-50">إضافة</button>
+                          <button onClick={() => setInsertId(null)} className="text-gray-400 hover:text-gray-600 text-xs">إلغاء</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })()}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </>

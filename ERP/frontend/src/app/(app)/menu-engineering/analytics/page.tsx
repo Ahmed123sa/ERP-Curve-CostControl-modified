@@ -20,28 +20,49 @@ export default function AnalyticsPage() {
     { key: 'stock-value', label: '💰 قيمة المخزون' },
   ];
 
+  const [selectedWarehouses, setSelectedWarehouses] = useState<string[]>([]);
+
+  const { data: warehouses } = useQuery({
+    queryKey: ['wh-list'],
+    queryFn: () => api.get('/warehouses').then((r) => r.data),
+  });
+
+  const inventoryWh = (warehouses || []).filter((w: any) => w.type !== 'branch');
+
   // ── Inventory Alerts ──
   const { data: alerts } = useQuery({
-    queryKey: ['analytics-inventory'],
-    queryFn: () => api.get('/menu-engineering/analytics/inventory-alerts').then((r) => r.data),
+    queryKey: ['analytics-inventory', selectedWarehouses],
+    queryFn: () => api.get('/menu-engineering/analytics/inventory-alerts', {
+      params: selectedWarehouses.length ? { warehouse_ids: selectedWarehouses.join(',') } : {} }
+    ).then((r) => r.data),
   });
 
   // ── Top Purchases ──
+  const [purchasesWhId, setPurchasesWhId] = useState('');
+  const [purchasesMonth, setPurchasesMonth] = useState('');
   const { data: purchases } = useQuery({
-    queryKey: ['analytics-purchases', limit],
-    queryFn: () => api.get('/menu-engineering/analytics/top-purchases', { params: { limit } }).then((r) => r.data),
+    queryKey: ['analytics-purchases', limit, purchasesWhId, purchasesMonth],
+    queryFn: () => api.get('/menu-engineering/analytics/top-purchases', {
+      params: { limit, warehouse_id: purchasesWhId || undefined, from: purchasesMonth ? `${purchasesMonth}-01` : undefined, to: purchasesMonth ? `${purchasesMonth}-31` : undefined },
+    }).then((r) => r.data),
   });
 
   // ── Price Changes ──
+  const [pricesMonth, setPricesMonth] = useState('');
   const { data: prices } = useQuery({
-    queryKey: ['analytics-prices', threshold],
-    queryFn: () => api.get('/menu-engineering/analytics/price-changes', { params: { threshold } }).then((r) => r.data),
+    queryKey: ['analytics-prices', threshold, pricesMonth],
+    queryFn: () => api.get('/menu-engineering/analytics/price-changes', {
+      params: { threshold, from: pricesMonth ? `${pricesMonth}-01` : undefined, to: pricesMonth ? `${pricesMonth}-31` : undefined },
+    }).then((r) => r.data),
   });
 
   // ── Cost Impact ──
+  const [costImpactMonth, setCostImpactMonth] = useState('');
   const { data: costImpact } = useQuery({
-    queryKey: ['analytics-cost-impact', threshold],
-    queryFn: () => api.get('/menu-engineering/analytics/cost-impact', { params: { threshold } }).then((r) => r.data),
+    queryKey: ['analytics-cost-impact', costImpactMonth],
+    queryFn: () => api.get('/menu-engineering/analytics/cost-impact', {
+      params: { from: costImpactMonth ? `${costImpactMonth}-01` : undefined, to: costImpactMonth ? `${costImpactMonth}-31` : undefined },
+    }).then((r) => r.data),
   });
 
   // ── Stock Value ──
@@ -59,7 +80,7 @@ export default function AnalyticsPage() {
             <h2 className="text-lg font-bold text-gray-800">🔬 التحليلات الذكية</h2>
             <p className="text-xs text-gray-500 mt-0.5">تحليلات متقدمة للمخزون والمشتريات والتكاليف</p>
           </div>
-          {(activeTab === 'prices' || activeTab === 'cost-impact') && (
+          {activeTab === 'prices' && (
             <div className="flex items-center gap-2">
               <span className="text-xs text-gray-500">Threshold:</span>
               <input type="number" value={threshold} onChange={(e) => setThreshold(e.target.value)}
@@ -99,16 +120,81 @@ export default function AnalyticsPage() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
         {activeTab === 'inventory' && (
-          <InventoryAlertsTab data={alerts} />
+          <>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-gray-500 font-medium">المخازن:</span>
+              {inventoryWh.map((wh: any) => {
+                const active = selectedWarehouses.includes(wh.id);
+                return (
+                  <button key={wh.id} onClick={() => setSelectedWarehouses(prev =>
+                    active ? prev.filter((id: string) => id !== wh.id) : [...prev, wh.id]
+                  )} className={`px-3 py-1 text-xs rounded-full border transition-colors ${
+                    active ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'
+                  }`}>
+                    {wh.name}
+                  </button>
+                );
+              })}
+              {selectedWarehouses.length > 0 && (
+                <button onClick={() => setSelectedWarehouses([])} className="px-2 py-1 text-xs text-gray-400 hover:text-gray-600">
+                  ✕ الكل
+                </button>
+              )}
+            </div>
+            <InventoryAlertsTab data={alerts} />
+          </>
         )}
         {activeTab === 'purchases' && (
-          <TopPurchasesTab data={purchases} />
+          <>
+            <div className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm flex items-center gap-3 flex-wrap">
+              <span className="text-xs text-gray-400 font-medium">تصفية:</span>
+              <select value={purchasesWhId} onChange={(e) => setPurchasesWhId(e.target.value)}
+                className="border border-gray-200 rounded-lg px-3 py-2 text-xs outline-none bg-white">
+                <option value="">كل المخازن</option>
+                {warehouses?.filter((w: any) => w.type !== 'branch').map((w: any) => (
+                  <option key={w.id} value={w.id}>{w.name}</option>
+                ))}
+              </select>
+              <input type="month" value={purchasesMonth} onChange={(e) => setPurchasesMonth(e.target.value)}
+                className="border border-gray-200 rounded-lg px-3 py-2 text-xs outline-none" />
+              {(purchasesWhId || purchasesMonth) && (
+                <button onClick={() => { setPurchasesWhId(''); setPurchasesMonth(''); }}
+                  className="text-xs text-gray-400 hover:text-red-500 px-2 py-1 rounded hover:bg-red-50">✕ مسح</button>
+              )}
+            </div>
+            <TopPurchasesTab data={purchases} />
+          </>
         )}
         {activeTab === 'prices' && (
-          <PriceChangesTab data={prices} threshold={parseFloat(threshold)} />
+          <>
+            <div className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm flex items-center gap-3 flex-wrap">
+              <span className="text-xs text-gray-400 font-medium">تصفية:</span>
+              <input type="month" value={pricesMonth} onChange={(e) => setPricesMonth(e.target.value)}
+                className="border border-gray-200 rounded-lg px-3 py-2 text-xs outline-none" />
+              <label className="text-xs text-gray-400">Threshold:</label>
+              <input type="number" value={threshold} onChange={(e) => setThreshold(e.target.value)}
+                className="border border-gray-200 rounded-lg px-3 py-2 text-xs outline-none w-20" />%
+              {pricesMonth && (
+                <button onClick={() => setPricesMonth('')}
+                  className="text-xs text-gray-400 hover:text-red-500 px-2 py-1 rounded hover:bg-red-50">✕ مسح</button>
+              )}
+            </div>
+            <PriceChangesTab data={prices} />
+          </>
         )}
         {activeTab === 'cost-impact' && (
-          <CostImpactTab data={costImpact} />
+          <>
+            <div className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm flex items-center gap-3 flex-wrap">
+              <span className="text-xs text-gray-400 font-medium">تصفية بالشهر:</span>
+              <input type="month" value={costImpactMonth} onChange={(e) => setCostImpactMonth(e.target.value)}
+                className="border border-gray-200 rounded-lg px-3 py-2 text-xs outline-none" />
+              {costImpactMonth && (
+                <button onClick={() => setCostImpactMonth('')}
+                  className="text-xs text-gray-400 hover:text-red-500 px-2 py-1 rounded hover:bg-red-50">✕ مسح</button>
+              )}
+            </div>
+            <CostImpactTab data={costImpact} />
+          </>
         )}
         {activeTab === 'pareto' && (
           <ParetoTab />
@@ -125,13 +211,71 @@ export default function AnalyticsPage() {
 
 function InventoryAlertsTab({ data }: { data: any }) {
   if (!data) return <Loading />;
+
+  const Bar = ({ pct }: { pct: number }) => {
+    const color = pct < 25 ? 'bg-red-500' : pct < 75 ? 'bg-amber-500' : 'bg-green-500';
+    return (
+      <div className="bg-gray-100 rounded-full h-2.5 w-24 overflow-hidden inline-block align-middle">
+        <div className={`${color} h-full rounded-full transition-all`} style={{ width: `${Math.min(pct, 100)}%` }} />
+      </div>
+    );
+  };
+
+  const Tables = ({ items, color, label }: { items: any[]; color: string; label: string }) => (
+    <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+      <div className={`px-4 py-2.5 border-b font-bold text-sm`} style={{ background: `${color}10`, borderColor: `${color}30`, color }}>
+        {label}
+      </div>
+      <table className="w-full text-sm">
+        <thead><tr className="text-xs text-gray-500 border-b border-gray-50">
+          <th className="px-3 py-2 text-start font-medium">الصنف</th>
+          <th className="px-3 py-2 text-start font-medium">المخزن</th>
+          <th className="px-3 py-2 text-end font-medium">الرصيد</th>
+          <th className="px-3 py-2 text-end font-medium">الحد</th>
+          <th className="px-3 py-2 text-center font-medium">المستوى</th>
+          <th className="px-3 py-2 text-end font-medium">معدل الصرف</th>
+          <th className="px-3 py-2 text-end font-medium">أيام للنفاد</th>
+        </tr></thead>
+        <tbody className="divide-y divide-gray-50">
+          {items.map((a: any, i: number) => {
+            const pct = a.usage_pct ?? 0;
+            const urgent = a.days_until_stockout !== null && a.days_until_stockout <= 3;
+            return (
+              <tr key={i} className="hover:bg-gray-50/30">
+                <td className="px-3 py-2 font-medium text-gray-800">{a.item_name}</td>
+                <td className="px-3 py-2 text-gray-500 text-xs">{a.warehouse_name}</td>
+                <td className="px-3 py-2 text-end font-mono font-medium" style={{ color }}>{a.current_qty} {a.unit}</td>
+                <td className="px-3 py-2 text-end font-mono text-gray-400">{a.min_stock_level} {a.unit}</td>
+                <td className="px-3 py-2 text-center"><Bar pct={pct} /></td>
+                <td className="px-3 py-2 text-end font-mono text-gray-400 text-xs">
+                  {a.avg_daily_consumption > 0 ? a.avg_daily_consumption.toFixed(3) : '—'}
+                </td>
+                <td className="px-3 py-2 text-end">
+                  {a.days_until_stockout !== null ? (
+                    <span className={`font-mono font-bold text-xs ${urgent ? 'text-red-600 bg-red-50 px-1.5 py-0.5 rounded' : 'text-gray-500'}`}>
+                      {urgent ? '⚠️ ' : ''}{a.days_until_stockout} يوم
+                    </span>
+                  ) : <span className="text-gray-300 text-xs">—</span>}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+
   return (
     <>
       {/* Summary */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-4 gap-3">
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 text-center">
+          <div className="text-2xl font-bold text-white">{data.summary.out_of_stock_count}</div>
+          <div className="text-xs text-gray-400 mt-1">⚫ منقطع (رصيد = 0)</div>
+        </div>
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
           <div className="text-2xl font-bold text-red-600">{data.summary.critical_count}</div>
-          <div className="text-xs text-red-500 mt-1">🔴 حرج — أقل من الحد الأدنى</div>
+          <div className="text-xs text-red-500 mt-1">🔴 حرج — أقل من الحد</div>
         </div>
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
           <div className="text-2xl font-bold text-amber-600">{data.summary.warning_count}</div>
@@ -139,71 +283,26 @@ function InventoryAlertsTab({ data }: { data: any }) {
         </div>
         <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-center">
           <div className="text-2xl font-bold text-green-600">{data.summary.ok_count}</div>
-          <div className="text-xs text-green-500 mt-1">🟢 تمام — ضمن الحدود الآمنة</div>
+          <div className="text-xs text-green-500 mt-1">🟢 تمام — ضمن الآمن</div>
         </div>
       </div>
 
+      {/* Out of Stock */}
+      {data.out_of_stock?.length > 0 && (
+        <Tables items={data.out_of_stock} color="#dc2626" label="⚫ منقطع — رصيد صفر" />
+      )}
+
       {/* Critical */}
-      {data.critical.length > 0 && (
-        <div className="bg-white border border-red-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="bg-red-50 px-4 py-2.5 border-b border-red-100 font-bold text-red-700 text-sm">
-            🔴 حرج — أصناف أقل من الحد الأدنى
-          </div>
-          <table className="w-full text-sm">
-            <thead><tr className="text-xs text-gray-500 border-b border-gray-50">
-              <th className="px-3 py-2 text-start font-medium">الصنف</th>
-              <th className="px-3 py-2 text-start font-medium">المخزن</th>
-              <th className="px-3 py-2 text-end font-medium">الرصيد الحالي</th>
-              <th className="px-3 py-2 text-end font-medium">الحد الأدنى</th>
-              <th className="px-3 py-2 text-end font-medium">العجز</th>
-              <th className="px-3 py-2 text-end font-medium">اقتراح طلب</th>
-            </tr></thead>
-            <tbody className="divide-y divide-gray-50">
-              {data.critical.map((a: any, i: number) => (
-                <tr key={i} className="hover:bg-red-50/30">
-                  <td className="px-3 py-2 font-medium text-gray-800">{a.item_name}</td>
-                  <td className="px-3 py-2 text-gray-600">{a.warehouse_name}</td>
-                  <td className="px-3 py-2 text-end font-mono text-red-600 font-medium">{a.current_qty} {a.unit}</td>
-                  <td className="px-3 py-2 text-end font-mono">{a.min_stock_level} {a.unit}</td>
-                  <td className="px-3 py-2 text-end font-mono text-red-600">{a.deficit} {a.unit}</td>
-                  <td className="px-3 py-2 text-end font-mono text-blue-600">
-                    {a.reorder_qty > 0 ? `+${a.reorder_qty} ${a.unit}` : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {data.critical?.length > 0 && (
+        <Tables items={data.critical} color="#ea580c" label="🔴 حرج — أقل من الحد الأدنى" />
       )}
 
       {/* Warning */}
-      {data.warning.length > 0 && (
-        <div className="bg-white border border-amber-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="bg-amber-50 px-4 py-2.5 border-b border-amber-100 font-bold text-amber-700 text-sm">
-            🟡 إنذار — أصناف أوشكت على النفاد
-          </div>
-          <table className="w-full text-sm">
-            <thead><tr className="text-xs text-gray-500 border-b border-gray-50">
-              <th className="px-3 py-2 text-start font-medium">الصنف</th>
-              <th className="px-3 py-2 text-start font-medium">المخزن</th>
-              <th className="px-3 py-2 text-end font-medium">الرصيد الحالي</th>
-              <th className="px-3 py-2 text-end font-medium">الحد الأدنى</th>
-            </tr></thead>
-            <tbody className="divide-y divide-gray-50">
-              {data.warning.map((a: any, i: number) => (
-                <tr key={i} className="hover:bg-amber-50/30">
-                  <td className="px-3 py-2 font-medium text-gray-800">{a.item_name}</td>
-                  <td className="px-3 py-2 text-gray-600">{a.warehouse_name}</td>
-                  <td className="px-3 py-2 text-end font-mono text-amber-600 font-medium">{a.current_qty} {a.unit}</td>
-                  <td className="px-3 py-2 text-end font-mono">{a.min_stock_level} {a.unit}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {data.warning?.length > 0 && (
+        <Tables items={data.warning} color="#d97706" label="🟡 إنذار — وشك النفاد" />
       )}
 
-      {data.critical.length === 0 && data.warning.length === 0 && (
+      {!data.out_of_stock?.length && !data.critical?.length && !data.warning?.length && (
         <div className="bg-white border border-green-200 rounded-xl p-8 text-center text-green-600 font-medium">
           ✅ جميع الأصناف ضمن الحدود الآمنة — لا توجد إنذارات
         </div>
@@ -222,14 +321,18 @@ function TopPurchasesTab({ data }: { data: any }) {
       </div>
 
       <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
-        <div className="px-4 py-3 border-b border-gray-100 font-medium text-gray-700 text-sm">📈 ترتيب الأصناف حسب قيمة الشراء</div>
+        <div className="px-4 py-3 border-b border-gray-100 font-medium text-gray-700 text-sm flex items-center gap-2">
+          <span>📈 ترتيب الأصناف حسب قيمة الشراء</span>
+        </div>
         <table className="w-full text-sm">
           <thead><tr className="text-xs text-gray-500 border-b border-gray-50">
             <th className="px-3 py-2 text-center font-medium">#</th>
             <th className="px-3 py-2 text-start font-medium">الصنف</th>
+            <th className="px-3 py-2 text-start font-medium">التصنيف</th>
             <th className="px-3 py-2 text-end font-medium">عدد مرات الشراء</th>
-            <th className="px-3 py-2 text-end font-medium">إجمالي الكمية</th>
-            <th className="px-3 py-2 text-end font-medium">إجمالي القيمة</th>
+            <th className="px-3 py-2 text-end font-medium">الكمية</th>
+            <th className="px-3 py-2 text-end font-medium">القيمة</th>
+            <th className="px-3 py-2 text-end font-medium">%</th>
             <th className="px-3 py-2 text-end font-medium">متوسط سعر الوحدة</th>
           </tr></thead>
           <tbody className="divide-y divide-gray-50">
@@ -237,11 +340,20 @@ function TopPurchasesTab({ data }: { data: any }) {
               <tr key={p.rank} className="hover:bg-gray-50/30">
                 <td className="px-3 py-2 text-center text-gray-400 text-xs">{p.rank}</td>
                 <td className="px-3 py-2 font-medium text-gray-800">{p.item_name}</td>
+                <td className="px-3 py-2 text-gray-400 text-xs">{p.category || '—'}</td>
                 <td className="px-3 py-2 text-end font-mono">{p.purchase_count}</td>
                 <td className="px-3 py-2 text-end font-mono">{p.total_qty} {p.unit}</td>
                 <td className="px-3 py-2 text-end font-mono text-green-700 font-medium">{p.total_value.toLocaleString()} ج</td>
-                <td className="px-3 py-2 text-end font-mono text-gray-500">
-                  {p.purchase_count > 0 ? (p.total_value / p.total_qty).toFixed(2) : 0} ج/{p.unit}
+                <td className="px-3 py-2 text-end">
+                  <div className="flex items-center gap-2 justify-end">
+                    <span className="font-mono text-xs text-gray-500">{p.contribution_pct}%</span>
+                    <div className="bg-gray-100 rounded-full h-2 w-12 overflow-hidden">
+                      <div className="bg-blue-500 h-full rounded-full" style={{ width: `${Math.min(p.contribution_pct, 100)}%` }} />
+                    </div>
+                  </div>
+                </td>
+                <td className="px-3 py-2 text-end font-mono text-gray-500 text-xs">
+                  {p.avg_unit_price.toFixed(2)} ج/{p.unit}
                 </td>
               </tr>
             ))}
@@ -255,77 +367,60 @@ function TopPurchasesTab({ data }: { data: any }) {
   );
 }
 
-function PriceChangesTab({ data, threshold }: { data: any; threshold: number }) {
-  const [hideStale, setHideStale] = useState(false);
+function PriceChangesTab({ data }: { data: any }) {
   if (!data) return <Loading />;
-  const visibleChanges = hideStale ? data.changes.filter((c: any) => !c.is_stale) : data.changes;
-  const staleCount = data.changes.filter((c: any) => c.is_stale).length;
+  const isUp = (d: string) => d === 'up';
   return (
     <>
-      <div className="flex items-center gap-3">
-        <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-center flex-1">
-          <div className="text-xl font-bold text-orange-600">{data.changes.length}</div>
-          <div className="text-xs text-orange-500 mt-0.5">إجمالي تغيرات الأسعار</div>
+      <div className={`rounded-xl p-5 shadow text-white ${data.net_impact >= 0 ? 'bg-gradient-to-r from-red-600 to-orange-500' : 'bg-gradient-to-r from-green-600 to-teal-500'}`}>
+        <div className="text-sm opacity-80">صافي التأثير المالي لتغيرات الأسعار</div>
+        <div className="text-3xl font-bold mt-1">
+          {data.net_impact >= 0 ? '+' : ''}{data.net_impact.toLocaleString()} ج
         </div>
-        <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center flex-1">
-          <div className="text-xl font-bold text-red-600">{data.unusual_count}</div>
-          <div className="text-xs text-red-500 mt-0.5">⚠️ غير طبيعي (&gt;{threshold}%)</div>
+        <div className="text-xs opacity-70 mt-0.5">
+          {data.net_impact >= 0 ? '🔺 زيادة في التكاليف' : '🟢 توفير في التكاليف'}
+          {' · '}{data.count} تغيير
         </div>
-        {staleCount > 0 && (
-          <div className="bg-gray-100 border border-gray-200 rounded-xl p-3 text-center flex-1">
-            <div className="text-xl font-bold text-gray-500">{staleCount}</div>
-            <div className="text-xs text-gray-400 mt-0.5">تم التصحيح</div>
-          </div>
-        )}
-      </div>
-
-      <div className="flex items-center gap-2 justify-end mb-2">
-        {staleCount > 0 && (
-          <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
-            <input type="checkbox" checked={hideStale} onChange={(e) => setHideStale(e.target.checked)}
-              className="rounded border-gray-300" />
-            إخفاء التغييرات الملغية ({staleCount})
-          </label>
-        )}
       </div>
 
       <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
         <table className="w-full text-sm">
           <thead><tr className="text-xs text-gray-500 border-b border-gray-50">
             <th className="px-3 py-2 text-start font-medium">الصنف</th>
-            <th className="px-3 py-2 text-end font-medium">متوسط السعر</th>
             <th className="px-3 py-2 text-end font-medium">السعر القديم</th>
             <th className="px-3 py-2 text-end font-medium">السعر الجديد</th>
-            <th className="px-3 py-2 text-end font-medium">الفرق</th>
+            <th className="px-3 py-2 text-end font-medium">المتوسط الحالي</th>
             <th className="px-3 py-2 text-end font-medium">%</th>
-            <th className="px-3 py-2 text-end font-medium">المخزن</th>
+            <th className="px-3 py-2 text-end font-medium">التأثير المالي</th>
+            <th className="px-3 py-2 text-end font-medium">المصدر</th>
             <th className="px-3 py-2 text-end font-medium">التاريخ</th>
           </tr></thead>
           <tbody className="divide-y divide-gray-50">
-            {visibleChanges.map((c: any, i: number) => (
-              <tr key={c.id || i} className={`hover:bg-gray-50/30 ${c.is_unusual ? 'bg-red-50/50' : ''} ${c.is_stale ? 'opacity-50 line-through' : ''}`}>
-                <td className="px-3 py-2 font-medium text-gray-800">
-                  {c.is_unusual && <span className="ml-1">⚠️</span>}
-                  {c.is_stale && <span className="ml-1 text-gray-400">🗑️</span>}
-                  {c.item_name}
-                </td>
-                <td className="px-3 py-2 text-end font-mono font-bold text-blue-700">{c.avg_cost.toFixed(2)}</td>
+            {data.changes.map((c: any, i: number) => (
+              <tr key={i} className="hover:bg-gray-50/30">
+                <td className="px-3 py-2 font-medium text-gray-800">{c.item_name}</td>
                 <td className="px-3 py-2 text-end font-mono text-gray-500">{c.old_cost.toFixed(2)}</td>
-                <td className="px-3 py-2 text-end font-mono font-medium">{c.new_cost.toFixed(2)}</td>
-                <td className={`px-3 py-2 text-end font-mono font-medium ${c.direction === 'up' ? 'text-red-600' : c.direction === 'down' ? 'text-green-600' : ''}`}>
-                  {c.delta > 0 ? '+' : ''}{c.delta.toFixed(2)}
+                <td className="px-3 py-2 text-end font-mono">
+                  <span className={`font-bold ${isUp(c.direction) ? 'text-red-600' : 'text-green-600'}`}>
+                    {c.new_cost.toFixed(2)}
+                  </span>
+                  <span className="mr-1">{isUp(c.direction) ? '🔴' : '🟢'}</span>
                 </td>
-                <td className={`px-3 py-2 text-end font-mono font-medium ${c.direction === 'up' ? 'text-red-600' : c.direction === 'down' ? 'text-green-600' : ''}`}>
+                <td className="px-3 py-2 text-end font-mono font-bold text-blue-700">{c.avg_cost?.toFixed(2) ?? '—'}</td>
+                <td className={`px-3 py-2 text-end font-mono font-bold ${isUp(c.direction) ? 'text-red-600' : 'text-green-600'}`}>
                   {c.delta_pct > 0 ? '+' : ''}{c.delta_pct}%
                 </td>
-                <td className="px-3 py-2 text-end text-gray-500 text-xs">{c.warehouse || '—'}</td>
+                <td className={`px-3 py-2 text-end font-mono font-bold ${c.total_impact >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+                  {c.total_impact > 0 ? '+' : ''}{c.total_impact.toLocaleString()} ج
+                </td>
+                <td className="px-3 py-2 text-end text-gray-500 text-xs">{c.source || '—'}</td>
                 <td className="px-3 py-2 text-end text-gray-400 text-xs">{c.date ? new Date(c.date).toLocaleDateString('ar-EG') : '—'}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        {visibleChanges.length === 0 && (
-          <div className="p-8 text-center text-gray-400">لا توجد تغيرات في الأسعار في هذه الفترة</div>
+        {data.changes.length === 0 && (
+          <div className="p-8 text-center text-gray-400">لا توجد تغيرات في الأسعار تتجاوز الحد المحدد</div>
         )}
       </div>
     </>
@@ -333,69 +428,125 @@ function PriceChangesTab({ data, threshold }: { data: any; threshold: number }) 
 }
 
 function CostImpactTab({ data }: { data: any }) {
+  const [expandedMenu, setExpandedMenu] = useState<string | null>(null);
+
   if (!data) return <Loading />;
-  const totalDelta = data.total_delta || 0;
+  if (!data.menus?.length) return (
+    <div className="bg-white border border-gray-100 rounded-xl p-8 text-center text-gray-400">
+      لا توجد منيوات نشطة
+    </div>
+  );
+
+  const totalDelta = data.menus.reduce((s: number, m: any) => s + m.delta, 0);
+  const totalOld = data.menus.reduce((s: number, m: any) => s + m.old_total_cost, 0);
+  const totalCurrent = data.menus.reduce((s: number, m: any) => s + m.current_total_cost, 0);
+  const totalSp = data.menus.reduce((s: number, m: any) => s + (m.total_selling_price || 0), 0);
+  const oldFc = totalSp > 0 ? (totalOld / totalSp * 100) : 0;
+  const currentFc = totalSp > 0 ? (totalCurrent / totalSp * 100) : 0;
+  const isUp = (d: number) => d >= 0;
+
   return (
     <>
-      <div className={`rounded-xl p-5 shadow ${totalDelta >= 0 ? 'bg-gradient-to-r from-red-600 to-orange-500' : 'bg-gradient-to-r from-green-600 to-teal-500'} text-white`}>
-        <div className="text-sm opacity-80">إجمالي أثر تغيرات الأسعار على المنيوهات</div>
+      <div className={`rounded-xl p-5 shadow text-white ${isUp(totalDelta) ? 'bg-gradient-to-r from-red-600 to-orange-500' : 'bg-gradient-to-r from-green-600 to-teal-500'}`}>
+        <div className="text-sm opacity-80">نسبة التكلفة المباشرة (FC%) — إجمالي المنيوهات</div>
         <div className="text-3xl font-bold mt-1">
-          {totalDelta >= 0 ? '+' : ''}{totalDelta.toLocaleString()} ج
+          {oldFc.toFixed(1)}% <span className="text-lg opacity-60 mx-1">→</span> {currentFc.toFixed(1)}%
         </div>
         <div className="text-xs opacity-70 mt-0.5">
-          {totalDelta >= 0 ? '🔺 زيادة في التكاليف' : '🟢 توفير في التكاليف'}
+          {isUp(totalDelta) ? '🔺 زيادة في التكاليف' : '🟢 توفير في التكاليف'}
+          {' · قديم '}{totalOld.toLocaleString()} ج {' → حالي '}{totalCurrent.toLocaleString()} ج
         </div>
       </div>
 
-      {data.impacts.map((imp: any, i: number) => (
-        <div key={i} className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
-          <div className={`px-4 py-2.5 border-b font-medium text-sm flex items-center justify-between ${
-            imp.direction === 'up' ? 'bg-red-50 border-red-100 text-red-700' : 'bg-green-50 border-green-100 text-green-700'
-          }`}>
-            <span>
-              {imp.direction === 'up' ? '🔴' : '🟢'} {imp.ingredient_name}
-              {' · قديم '}{imp.old_cost} → {'جديد '}{imp.new_cost} ج
-              {' · متوسط '}
-              <span className="text-blue-700 font-bold">{imp.avg_cost || '—'}</span> ج
-              {' ('}{imp.delta_pct > 0 ? '+' : ''}{imp.delta_pct}%)
-              {imp.is_unusual && <span className="mr-2 text-xs bg-white px-1.5 py-0.5 rounded-full">⚠️ غير طبيعي</span>}
-            </span>
-            <span className="text-xs opacity-70">أثر على {imp.recipes_affected} ريسيبي</span>
-          </div>
-          {imp.recipes.length > 0 && (
-            <table className="w-full text-sm">
-              <thead><tr className="text-xs text-gray-500 border-b border-gray-50">
-                <th className="px-3 py-2 text-start font-medium">الريسيبي</th>
-                <th className="px-3 py-2 text-end font-medium">التكلفة القديمة</th>
-                <th className="px-3 py-2 text-end font-medium">التكلفة الجديدة</th>
-                <th className="px-3 py-2 text-end font-medium">الفرق</th>
-                <th className="px-3 py-2 text-end font-medium">%</th>
-              </tr></thead>
-              <tbody className="divide-y divide-gray-50">
-                {imp.recipes.map((r: any, j: number) => (
-                  <tr key={j} className="hover:bg-gray-50/30">
-                    <td className="px-3 py-2 font-medium text-gray-800">{r.recipe_name}</td>
-                    <td className="px-3 py-2 text-end font-mono">{r.old_line_total.toFixed(2)} ج</td>
-                    <td className="px-3 py-2 text-end font-mono">{r.new_line_total.toFixed(2)} ج</td>
-                    <td className={`px-3 py-2 text-end font-mono font-medium ${r.delta >= 0 ? 'text-red-600' : 'text-green-600'}`}>
-                      {r.delta >= 0 ? '+' : ''}{r.delta.toFixed(2)} ج
-                    </td>
-                    <td className={`px-3 py-2 text-end font-mono font-medium ${r.delta >= 0 ? 'text-red-600' : 'text-green-600'}`}>
-                      {r.delta_pct >= 0 ? '+' : ''}{r.delta_pct}%
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      ))}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {data.menus.map((menu: any) => {
+          const menuUp = isUp(menu.delta);
+          const expanded = expandedMenu === menu.menu_id;
+          return (
+            <div key={menu.menu_id} className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+              <button onClick={() => setExpandedMenu(expanded ? null : menu.menu_id)}
+                className="w-full text-right p-4 hover:bg-gray-50/50 transition-colors">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="font-bold text-gray-800">🍽️ {menu.menu_name}</div>
+                    <div className="text-xs text-gray-400 mt-0.5">{menu.recipes_count} وصفة</div>
+                  </div>
+                  <div className="text-left">
+                    <div className={`text-lg font-bold ${menuUp ? 'text-red-600' : 'text-green-600'}`}>
+                      {menuUp ? '🔴' : '🟢'} {menu.fc_delta > 0 ? '+' : ''}{menu.fc_delta}%
+                      <span className="text-xs font-normal opacity-70 mr-1">FC</span>
+                    </div>
+                    <div className={`text-xs font-medium ${menuUp ? 'text-red-500' : 'text-green-500'}`}>
+                      {menu.delta > 0 ? '+' : ''}{menu.delta.toLocaleString()} ج
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
+                  <span className="bg-gray-100 px-2 py-0.5 rounded">FC: {menu.old_fc_pct}%</span>
+                  <span className="text-gray-300">→</span>
+                  <span className={`px-2 py-0.5 rounded font-medium ${menuUp ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
+                    FC: {menu.current_fc_pct}%
+                  </span>
+                </div>
+              </button>
 
-      {data.impacts.length === 0 && (
-        <div className="bg-white border border-gray-100 rounded-xl p-8 text-center text-gray-400">
-          ✅ لا توجد تغيرات في الأسعار أثرت على المنيوهات مؤخراً
-        </div>
-      )}
+              {expanded && (
+                <div className="border-t border-gray-100 px-4 py-3 space-y-3">
+                  {menu.affected_recipes?.length === 0 ? (
+                    <div className="text-center text-gray-400 text-xs py-4">✅ لا توجد تغييرات في هذه المنيو</div>
+                  ) : (
+                    menu.affected_recipes.map((r: any, j: number) => (
+                      <div key={j} className="border border-gray-100 rounded-lg overflow-hidden">
+                        {/* Recipe header */}
+                        <div className="flex items-center justify-between px-3 py-2 bg-gray-50/70">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-gray-800 text-sm">🍳 {r.recipe_name}</span>
+                            <span className="text-xs text-gray-400">
+                              FC: <span className="font-mono">{r.old_fc_pct}%</span>
+                              <span className="mx-1">→</span>
+                              <span className={`font-mono font-medium ${r.fc_delta >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                {r.current_fc_pct}%
+                              </span>
+                            </span>
+                          </div>
+                          <span className={`text-xs font-medium ${r.total_impact >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+                            {r.total_impact > 0 ? '+' : ''}{r.total_impact.toFixed(2)} ج
+                          </span>
+                        </div>
+                        {/* Ingredients table */}
+                        {r.ingredients?.length > 0 && (
+                          <table className="w-full text-xs">
+                            <thead><tr className="text-gray-400 border-b border-gray-50">
+                              <th className="px-3 py-1 text-start font-medium pr-8">المكون</th>
+                              <th className="px-3 py-1 text-end font-medium">قديم</th>
+                              <th className="px-3 py-1 text-end font-medium">جديد</th>
+                              <th className="px-3 py-1 text-end font-medium">التأثير</th>
+                            </tr></thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {r.ingredients.map((ing: any, k: number) => (
+                                <tr key={k} className="hover:bg-gray-50/30">
+                                  <td className="px-3 py-1 text-gray-600 pr-8">{ing.ingredient_name}</td>
+                                  <td className="px-3 py-1 text-end text-gray-400 font-mono">{ing.old_unit_cost.toFixed(2)}</td>
+                                  <td className={`px-3 py-1 text-end font-mono font-medium ${ing.current_unit_cost >= ing.old_unit_cost ? 'text-red-600' : 'text-green-600'}`}>
+                                    {ing.current_unit_cost.toFixed(2)}
+                                  </td>
+                                  <td className={`px-3 py-1 text-end font-mono font-medium ${ing.delta >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                    {ing.delta > 0 ? '+' : ''}{ing.delta.toFixed(2)} ج
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </>
   );
 }

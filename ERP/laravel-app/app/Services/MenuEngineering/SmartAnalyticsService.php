@@ -2,7 +2,6 @@
 namespace App\Services\MenuEngineering;
 
 use App\Models\ActivityLog;
-use App\Models\DispatchOrder;
 use App\Models\Item;
 use App\Models\MenuEngineering\MenuEngineeringMenu;
 use App\Models\MenuEngineering\MenuRecipe;
@@ -21,67 +20,103 @@ class SmartAnalyticsService
     ) {}
 
     // ── 1. Inventory Alerts ──
-    public function inventoryAlerts(string $clientId, float $warningThresholdPct = 20): array
+    public function inventoryAlerts(string $clientId, float $warningThresholdPct = 50, ?array $warehouseIds = null): array
     {
         $items = Item::where('client_id', $clientId)
             ->where('is_active', true)
             ->whereNotNull('min_stock_level')
-            ->get(['id', 'name', 'unit', 'min_stock_level', 'max_stock_level', 'reorder_qty']);
+            ->get(['id', 'name', 'unit', 'min_stock_level', 'default_warehouse_id']);
 
-        $warehouses = Warehouse::where('client_id', $clientId)
+        $whQuery = Warehouse::where('client_id', $clientId)
             ->where('is_active', true)
-            ->get(['id', 'name', 'type']);
+            ->where('type', '!=', 'branch');
+        if ($warehouseIds) {
+            $whQuery->whereIn('id', $warehouseIds);
+        }
+        $allWarehouses = $whQuery->get(['id', 'name', 'type']);
+        $warehousesById = $allWarehouses->keyBy('id');
 
+        $whIds = $allWarehouses->pluck('id')->toArray();
+
+        // Pre-fetch avg daily consumption (last 30 days) for all items × warehouses
+        $thirtyDaysAgo = now()->subDays(30)->toDateString();
+        $consumptionQuery = StockLedger::select('item_id', 'warehouse_id', DB::raw('SUM(qty) as total_out'))
+            ->where('client_id', $clientId)
+            ->whereIn('warehouse_id', $whIds)
+            ->whereIn('movement_type', ['out', 'transfer_out'])
+            ->where('date', '>=', $thirtyDaysAgo)
+            ->groupBy('item_id', 'warehouse_id')
+            ->get();
+
+        $consumptionMap = [];
+        foreach ($consumptionQuery as $row) {
+            $consumptionMap[$row->item_id . '_' . $row->warehouse_id] = (float) $row->total_out;
+        }
+
+        $outOfStock = [];
         $critical = [];
         $warning = [];
+        $ok = 0;
 
         foreach ($items as $item) {
-            foreach ($warehouses as $wh) {
+            $targetWh = $item->default_warehouse_id && $warehousesById->has($item->default_warehouse_id)
+                ? [$warehousesById[$item->default_warehouse_id]]
+                : $allWarehouses;
+
+            foreach ($targetWh as $wh) {
                 $qty = $this->calc->currentStock($clientId, $wh->id, $item->id);
                 $min = (float) $item->min_stock_level;
+                $totalOut = $consumptionMap[$item->id . '_' . $wh->id] ?? 0;
+                $avgDaily = $totalOut / 30;
+                $daysUntilStockout = $avgDaily > 0 ? round($qty / $avgDaily, 1) : null;
+                $usagePct = $min > 0 ? round(($qty / $min) * 100, 1) : ($qty > 0 ? 999 : 0);
 
-                if ($qty <= $min) {
-                    $critical[] = [
-                        'item_id' => $item->id,
-                        'item_name' => $item->name,
-                        'unit' => $item->unit,
-                        'warehouse_id' => $wh->id,
-                        'warehouse_name' => $wh->name,
-                        'current_qty' => $qty,
-                        'min_stock_level' => $min,
-                        'max_stock_level' => (float) ($item->max_stock_level ?? 0),
-                        'reorder_qty' => (float) ($item->reorder_qty ?? 0),
-                        'deficit' => round($min - $qty, 3),
-                    ];
+                $entry = [
+                    'item_id' => $item->id,
+                    'item_name' => $item->name,
+                    'unit' => $item->unit,
+                    'warehouse_id' => $wh->id,
+                    'warehouse_name' => $wh->name,
+                    'current_qty' => $qty,
+                    'min_stock_level' => $min,
+                    'avg_daily_consumption' => round($avgDaily, 3),
+                    'days_until_stockout' => $daysUntilStockout,
+                    'usage_pct' => $usagePct,
+                ];
+
+                if ($qty <= 0) {
+                    $outOfStock[] = $entry;
+                } elseif ($qty < $min) {
+                    $critical[] = $entry;
                 } elseif ($min > 0 && $qty <= $min * (1 + $warningThresholdPct / 100)) {
-                    $warning[] = [
-                        'item_id' => $item->id,
-                        'item_name' => $item->name,
-                        'unit' => $item->unit,
-                        'warehouse_id' => $wh->id,
-                        'warehouse_name' => $wh->name,
-                        'current_qty' => $qty,
-                        'min_stock_level' => $min,
-                        'max_stock_level' => (float) ($item->max_stock_level ?? 0),
-                        'reorder_qty' => (float) ($item->reorder_qty ?? 0),
-                    ];
+                    $warning[] = $entry;
+                } else {
+                    $ok++;
                 }
             }
         }
 
+        // Sort by usage_pct ascending (most urgent first)
+        $sortByUsage = fn($a, $b) => $a['usage_pct'] <=> $b['usage_pct'];
+        usort($outOfStock, $sortByUsage);
+        usort($critical, $sortByUsage);
+        usort($warning, $sortByUsage);
+
         return [
+            'out_of_stock' => $outOfStock,
             'critical' => $critical,
             'warning' => $warning,
             'summary' => [
+                'out_of_stock_count' => count($outOfStock),
                 'critical_count' => count($critical),
                 'warning_count' => count($warning),
-                'ok_count' => $items->count() * $warehouses->count() - count($critical) - count($warning),
+                'ok_count' => $ok,
             ],
         ];
     }
 
     // ── 2. Top Purchased Items ──
-    public function topPurchases(string $clientId, ?string $from = null, ?string $to = null, int $limit = 10): array
+    public function topPurchases(string $clientId, ?string $from = null, ?string $to = null, int $limit = 10, ?string $warehouseId = null): array
     {
         $query = StockLedger::where('client_id', $clientId)
             ->where('voucher_type', 'purchase')
@@ -89,6 +124,7 @@ class SmartAnalyticsService
 
         if ($from) $query->where('date', '>=', $from);
         if ($to) $query->where('date', '<=', $to);
+        if ($warehouseId) $query->where('warehouse_id', $warehouseId);
 
         $items = $query->select(
                 'item_id',
@@ -102,178 +138,270 @@ class SmartAnalyticsService
             ->get();
 
         $itemIds = $items->pluck('item_id');
-        $itemNames = Item::whereIn('id', $itemIds)->pluck('name', 'id');
-        $itemUnits = Item::whereIn('id', $itemIds)->pluck('unit', 'id');
+        $itemLookup = Item::whereIn('id', $itemIds)->get()->keyBy('id');
 
         $result = [];
         foreach ($items as $i => $row) {
+            $item = $itemLookup[$row->item_id] ?? null;
             $result[] = [
                 'rank' => $i + 1,
                 'item_id' => $row->item_id,
-                'item_name' => $itemNames[$row->item_id] ?? '—',
-                'unit' => $itemUnits[$row->item_id] ?? '—',
+                'item_name' => $item->name ?? '—',
+                'unit' => $item->unit ?? '—',
+                'category' => $item->category ?? null,
                 'purchase_count' => (int) $row->purchase_count,
                 'total_qty' => (float) $row->total_qty,
                 'total_value' => (float) $row->total_value,
+                'avg_unit_price' => $row->total_qty > 0 ? round($row->total_value / $row->total_qty, 2) : 0,
             ];
+        }
+
+        $totalAll = array_sum(array_column($result, 'total_value'));
+        foreach ($result as &$r) {
+            $r['contribution_pct'] = $totalAll > 0 ? round(($r['total_value'] / $totalAll) * 100, 1) : 0;
         }
 
         return [
             'period' => ['from' => $from ?? 'all', 'to' => $to ?? 'all'],
             'items' => $result,
-            'total_value_all' => array_sum(array_column($result, 'total_value')),
+            'total_value_all' => $totalAll,
         ];
     }
 
-    // ── 3. Price Change Detection ──
+    // ── 3. Price Change Detection (daily settled cost from actual stock movements) ──
     public function priceChanges(string $clientId, float $thresholdPct = 10, ?string $from = null, ?string $to = null, int $limit = 50): array
     {
-        $warehouses = Warehouse::where('client_id', $clientId)->where('is_active', true)->pluck('id');
-        $clientMainWh = $warehouses->first();
+        $mainWhIds = Warehouse::where('client_id', $clientId)
+            ->where('is_active', true)
+            ->where('type', '!=', 'branch')
+            ->pluck('id');
 
-        $query = ActivityLog::where('client_id', $clientId)
-            ->where('action', 'price_updated');
+        $query = StockLedger::where('client_id', $clientId)
+            ->whereIn('warehouse_id', $mainWhIds)
+            ->where('movement_type', 'in')
+            ->where('voucher_type', 'purchase')
+            ->where('unit_cost', '>', 0);
 
-        if ($from) $query->where('created_at', '>=', $from);
-        if ($to) $query->where('created_at', '<=', $to);
+        if ($from) $query->where('date', '>=', $from);
+        if ($to) $query->where('date', '<=', $to);
 
-        $logs = $query->orderByDesc('created_at')->limit($limit)->get();
+        $rows = $query->select('item_id', 'warehouse_id', 'unit_cost', 'date', 'created_at')
+            ->orderBy('item_id')
+            ->orderBy('warehouse_id')
+            ->orderBy('date')
+            ->orderBy('created_at')
+            ->get();
 
-        $itemIds = $logs->pluck('entity_id')->unique();
-        $items = Item::whereIn('id', $itemIds)->get()->keyBy('id');
-        $userIds = $logs->pluck('user_id')->unique();
-        $userNames = User::whereIn('id', $userIds)->pluck('name', 'id');
+        // Daily settled cost: for each (item_id, warehouse_id, date), take last entry
+        $daily = collect();
+        $grouped = $rows->groupBy(fn($r) => $r->item_id . '_' . $r->warehouse_id . '_' . $r->date->format('Y-m-d'));
+        foreach ($grouped as $entries) {
+            $daily->push($entries->last());
+        }
+
+        $byItemWh = $daily->groupBy(fn($r) => $r->item_id . '_' . $r->warehouse_id);
+
+        $itemIds = $rows->pluck('item_id')->unique();
+        $itemNames = Item::whereIn('id', $itemIds)->pluck('name', 'id');
+        $whNames = Warehouse::whereIn('id', $mainWhIds)->pluck('name', 'id');
 
         $changes = [];
-        foreach ($logs as $log) {
-            $item = $items->get($log->entity_id);
-            $old = (float) ($log->old_values['default_cost'] ?? 0);
-            $new = (float) ($log->new_values['default_cost'] ?? 0);
-            $delta = $new - $old;
-            $deltaPct = $old > 0 ? round(($delta / $old) * 100, 1) : 0;
-            $isUnusual = abs($deltaPct) >= $thresholdPct;
+        foreach ($byItemWh as $key => $dayEntries) {
+            $sorted = $dayEntries->sortBy('date')->values();
+            for ($i = 1; $i < count($sorted); $i++) {
+                $prev = $sorted[$i - 1];
+                $curr = $sorted[$i];
+                $oldCost = (float) $prev->unit_cost;
+                $newCost = (float) $curr->unit_cost;
+                if ($oldCost == $newCost) continue;
+                $delta = $newCost - $oldCost;
+                $deltaPct = $oldCost > 0 ? round(($delta / $oldCost) * 100, 1) : 0;
+                if (abs($deltaPct) < $thresholdPct) continue;
 
-            $source = $log->new_values['source'] ?? '';
-            $voucherId = $log->new_values['voucher_id'] ?? null;
-            $warehouseName = null;
-            if ($voucherId) {
-                $order = DispatchOrder::find($voucherId);
-                $warehouseName = $order && $order->warehouse ? $order->warehouse->name : null;
-            } elseif ($source === 'manual_edit') {
-                $warehouseName = 'تعديل يدوي';
-            }
+                $currentQty = $this->calc->currentStock($clientId, $curr->warehouse_id, $curr->item_id);
+                $totalImpact = round($delta * $currentQty, 2);
+                $avgCost = $this->calc->weightedAverageCost($clientId, $curr->warehouse_id, $curr->item_id);
 
-            $avgCost = 0;
-            if ($item && $clientMainWh) {
-                $avgCost = $this->calc->weightedAverageCost($clientId, $clientMainWh, $item->id);
-            }
-
-            $changes[] = [
-                'id' => $log->id,
-                'item_id' => $log->entity_id,
-                'item_name' => $item->name ?? '—',
-                'unit' => $item->unit ?? null,
-                'old_cost' => $old,
-                'new_cost' => $new,
-                'avg_cost' => round($avgCost, 2),
-                'delta' => round($delta, 2),
-                'delta_pct' => $deltaPct,
-                'direction' => $delta > 0 ? 'up' : ($delta < 0 ? 'down' : 'same'),
-                'is_unusual' => $isUnusual,
-                'is_stale' => false,
-                'warehouse' => $warehouseName,
-                'changed_by' => $userNames[$log->user_id] ?? '—',
-                'date' => $log->created_at->toDateTimeString(),
-            ];
-        }
-
-        // كشف التغييرات الملغية: لو في أودرين متتاليين لنفس الصنف
-        // والتاني old_cost مختلف عن الأول new_cost => الأول ملغي (اتصحح من بره اللوج)
-        $byItem = [];
-        foreach ($changes as $idx => $c) {
-            $byItem[$c['item_id']][] = $idx;
-        }
-        foreach ($byItem as $indices) {
-            if (count($indices) < 2) continue;
-            usort($indices, fn($a, $b) => strcmp($changes[$a]['date'], $changes[$b]['date']));
-            for ($i = 1; $i < count($indices); $i++) {
-                $prev = $changes[$indices[$i - 1]];
-                $curr = $changes[$indices[$i]];
-                if (abs($prev['new_cost'] - $curr['old_cost']) > 0.01) {
-                    $changes[$indices[$i - 1]]['is_stale'] = true;
-                }
+                $changes[] = [
+                    'item_id' => $curr->item_id,
+                    'item_name' => $itemNames[$curr->item_id] ?? '—',
+                    'old_cost' => $oldCost,
+                    'new_cost' => $newCost,
+                    'avg_cost' => $avgCost,
+                    'delta' => round($delta, 2),
+                    'delta_pct' => $deltaPct,
+                    'direction' => $delta > 0 ? 'up' : 'down',
+                    'total_impact' => $totalImpact,
+                    'warehouse_id' => $curr->warehouse_id,
+                    'source' => $whNames[$curr->warehouse_id] ?? '—',
+                    'date' => $curr->date instanceof \Carbon\Carbon ? $curr->date->toDateString() : $curr->date,
+                ];
             }
         }
+
+        usort($changes, fn($a, $b) => strcmp($b['date'], $a['date']));
+        $changes = array_slice($changes, 0, $limit);
+        $netImpact = array_sum(array_column($changes, 'total_impact'));
 
         return [
             'threshold' => $thresholdPct,
             'changes' => $changes,
-            'unusual_count' => count(array_filter($changes, fn($c) => $c['is_unusual'])),
+            'count' => count($changes),
+            'net_impact' => round($netImpact, 2),
         ];
     }
 
-    // ── 4. Cost Impact Analysis (بمتوسط السعر المرجح) ──
-    public function costImpact(string $clientId, ?string $from = null, ?string $to = null, int $limit = 50): array
+    // ── 4. Cost Impact Analysis (كروت المنيوهات + الفرق بين قديم/حالي) ──
+    public function costImpact(string $clientId, ?string $from = null, ?string $to = null): array
     {
-        $warehouses = Warehouse::where('client_id', $clientId)->where('is_active', true)->pluck('id');
-        $clientMainWh = $warehouses->first();
+        $menus = MenuEngineeringMenu::where('client_id', $clientId)
+            ->with(['recipes' => function($q) {
+                $q->where('status', 'active')->with('items.ingredient:id,name');
+            }])
+            ->get();
 
-        $priceChanges = $this->priceChanges($clientId, 0, $from, $to, $limit);
-
-        $impacts = [];
-        $totalDelta = 0;
-
-        foreach ($priceChanges['changes'] as $change) {
-            $itemId = $change['item_id'];
-
-            $avgCost = $clientMainWh ? $this->calc->weightedAverageCost($clientId, $clientMainWh, $itemId) : 0;
-
-            $recipes = MenuRecipeItem::where('ingredient_id', $itemId)
-                ->whereHas('recipe', fn($q) => $q->where('client_id', $clientId)->whereNull('deleted_at'))
-                ->get();
-
-            if ($recipes->isEmpty()) continue;
-
-            $recipesGrouped = [];
-            $recipesDelta = 0;
-
-            foreach ($recipes as $ri) {
-                $oldLineTotal = (float) $ri->line_total;
-                $data = $ri->toArray();
-                $data['purchase_unit_price'] = $avgCost > 0 ? $avgCost : $change['new_cost'];
-                $recalc = $this->recipeCalc->calculateItemFromArray($data);
-                $newLineTotal = $recalc['line_total'];
-                $delta = round($newLineTotal - $oldLineTotal, 4);
-
-                $recipesGrouped[] = [
-                    'recipe_id' => $ri->recipe_id,
-                    'recipe_name' => $ri->recipe->name ?? '—',
-                    'old_line_total' => $oldLineTotal,
-                    'new_line_total' => $newLineTotal,
-                    'delta' => $delta,
-                    'delta_pct' => $oldLineTotal > 0 ? round(($delta / $oldLineTotal) * 100, 1) : 0,
-                ];
-                $recipesDelta += $delta;
-            }
-
-            $impacts[] = [
-                'ingredient_id' => $itemId,
-                'ingredient_name' => $change['item_name'],
-                'old_cost' => $change['old_cost'],
-                'new_cost' => $change['new_cost'],
-                'avg_cost' => round($avgCost, 2),
-                'delta_pct' => $change['delta_pct'],
-                'direction' => $change['direction'],
-                'is_unusual' => $change['is_unusual'],
-                'recipes_affected' => count($recipesGrouped),
-                'recipes' => $recipesGrouped,
+        if ($menus->isEmpty()) {
+            return [
+                'period' => ['from' => $from ?? 'all', 'to' => $to ?? 'all'],
+                'menus' => [],
             ];
-            $totalDelta += $recipesDelta;
         }
 
+        $ingredientIds = collect();
+        foreach ($menus as $menu) {
+            foreach ($menu->recipes as $recipe) {
+                foreach ($recipe->items as $item) {
+                    $ingredientIds->push($item->ingredient_id);
+                }
+            }
+        }
+        $ingredientIds = $ingredientIds->unique()->values();
+
+        $allMovements = StockLedger::whereIn('item_id', $ingredientIds)
+            ->where('unit_cost', '>', 0)
+            ->where(function($q) {
+                $q->where(function($q2) {
+                    $q2->where('movement_type', 'in')
+                       ->where('voucher_type', 'purchase');
+                })->orWhere('voucher_type', 'opening');
+            })
+            ->when($from, fn($q) => $q->where('date', '>=', $from))
+            ->when($to, fn($q) => $q->where('date', '<=', $to))
+            ->orderBy('item_id')
+            ->orderBy('warehouse_id')
+            ->orderBy('date')
+            ->orderBy('created_at')
+            ->get(['item_id', 'warehouse_id', 'unit_cost', 'date', 'created_at']);
+
+        // Daily settled cost: لكل (صنف, مخزن, تاريخ) نأخذ آخر إدخال
+        $daily = collect();
+        $grouped = $allMovements->groupBy(fn($r) => $r->item_id . '_' . $r->warehouse_id . '_' . $r->date->format('Y-m-d'));
+        foreach ($grouped as $entries) {
+            $daily->push($entries->last());
+        }
+
+        $byItem = $daily->groupBy('item_id');
+        $itemDefaults = Item::whereIn('id', $ingredientIds)->pluck('default_cost', 'id');
+
+        $prices = [];
+        foreach ($ingredientIds as $id) {
+            $entries = $byItem->get($id, collect())->sortBy('date')->values();
+            $def = (float) ($itemDefaults[$id] ?? 0);
+            $prices[$id] = [
+                'old' => $entries->isNotEmpty() ? (float) $entries->first()->unit_cost : $def,
+                'current' => $entries->isNotEmpty() ? (float) $entries->last()->unit_cost : $def,
+            ];
+        }
+
+        $result = [];
+        foreach ($menus as $menu) {
+            $menuOldTotal = 0;
+            $menuCurrentTotal = 0;
+            $affectedRecipes = [];
+
+            foreach ($menu->recipes as $recipe) {
+                $recipeOldTotal = 0;
+                $recipeCurrentTotal = 0;
+                $recipeSellingPrice = (float) ($recipe->selling_price ?? 0);
+                $recipeIngredients = [];
+
+                foreach ($recipe->items as $item) {
+                    $id = $item->ingredient_id;
+                    $qty = (float) $item->qty;
+                    $oldPrice = $prices[$id]['old'] ?? 0;
+                    $currentPrice = $prices[$id]['current'] ?? 0;
+
+                    // قديم = إعادة حساب بـ أول سعر مستقر
+                    $ro = $item->toArray();
+                    $ro['purchase_unit_price'] = $oldPrice;
+                    $itemOldTotal = round((float) ($this->recipeCalc->calculateItemFromArray($ro)['line_total'] ?? 0), 4);
+
+                    // جديد = إعادة حساب بـ آخر سعر مستقر
+                    $rc = $item->toArray();
+                    $rc['purchase_unit_price'] = $currentPrice;
+                    $itemCurrentTotal = round((float) ($this->recipeCalc->calculateItemFromArray($rc)['line_total'] ?? 0), 4);
+
+                    $recipeOldTotal += $itemOldTotal;
+                    $recipeCurrentTotal += $itemCurrentTotal;
+
+                    $ingDelta = round($itemCurrentTotal - $itemOldTotal, 2);
+                    if (abs($ingDelta) < 0.01) continue;
+
+                    $recipeIngredients[] = [
+                        'ingredient_name' => $item->ingredient?->name ?? '—',
+                        'old_unit_cost' => $oldPrice,
+                        'current_unit_cost' => $currentPrice,
+                        'total_old' => round($itemOldTotal, 2),
+                        'total_current' => round($itemCurrentTotal, 2),
+                        'delta' => $ingDelta,
+                    ];
+                }
+
+                $recipeOldFc = $recipeSellingPrice > 0 ? round(($recipeOldTotal / $recipeSellingPrice) * 100, 1) : 0;
+                $recipeCurrentFc = $recipeSellingPrice > 0 ? round(($recipeCurrentTotal / $recipeSellingPrice) * 100, 1) : 0;
+                $recipeImpact = round($recipeCurrentTotal - $recipeOldTotal, 2);
+
+                if (count($recipeIngredients) > 0) {
+                    $affectedRecipes[] = [
+                        'recipe_name' => $recipe->name,
+                        'selling_price' => $recipeSellingPrice,
+                        'old_fc_pct' => $recipeOldFc,
+                        'current_fc_pct' => $recipeCurrentFc,
+                        'fc_delta' => round($recipeCurrentFc - $recipeOldFc, 1),
+                        'total_impact' => $recipeImpact,
+                        'ingredients' => $recipeIngredients,
+                    ];
+                }
+
+                $menuOldTotal += $recipeOldTotal;
+                $menuCurrentTotal += $recipeCurrentTotal;
+            }
+
+            $menuDelta = round($menuCurrentTotal - $menuOldTotal, 2);
+            $menuSellingPrice = (float) $menu->recipes->sum('selling_price');
+            $menuOldFc = $menuSellingPrice > 0 ? round(($menuOldTotal / $menuSellingPrice) * 100, 1) : 0;
+            $menuCurrentFc = $menuSellingPrice > 0 ? round(($menuCurrentTotal / $menuSellingPrice) * 100, 1) : 0;
+            $result[] = [
+                'menu_id' => $menu->id,
+                'menu_name' => $menu->name,
+                'recipes_count' => $menu->recipes->count(),
+                'total_selling_price' => $menuSellingPrice,
+                'old_total_cost' => round($menuOldTotal, 2),
+                'current_total_cost' => round($menuCurrentTotal, 2),
+                'delta' => $menuDelta,
+                'delta_pct' => $menuOldTotal > 0 ? round(($menuDelta / $menuOldTotal) * 100, 1) : 0,
+                'old_fc_pct' => $menuOldFc,
+                'current_fc_pct' => $menuCurrentFc,
+                'fc_delta' => round($menuCurrentFc - $menuOldFc, 1),
+                'affected_recipes' => $affectedRecipes,
+            ];
+        }
+
+        usort($result, fn($a, $b) => abs($b['delta']) <=> abs($a['delta']));
+
         return [
-            'impacts' => $impacts,
-            'total_delta' => round($totalDelta, 2),
+            'period' => ['from' => $from ?? 'all', 'to' => $to ?? 'all'],
+            'menus' => $result,
         ];
     }
 
