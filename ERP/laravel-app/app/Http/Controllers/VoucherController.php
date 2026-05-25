@@ -9,6 +9,7 @@ use App\Services\VoucherParserService;
 use App\Services\MappingService;
 use App\Services\StockLedgerService;
 use App\Services\ActivityLogger;
+use App\Services\CostCalculationService;
 use App\Models\ActivityLog;
 use App\Models\DispatchOrder;
 use App\Models\DispatchLine;
@@ -28,9 +29,10 @@ use Illuminate\Support\Facades\Storage;
 class VoucherController extends Controller
 {
     public function __construct(
-        private VoucherParserService  $parser,
-        private MappingService        $mapper,
-        private StockLedgerService    $ledger,
+        private VoucherParserService   $parser,
+        private MappingService         $mapper,
+        private StockLedgerService     $ledger,
+        private CostCalculationService $calc,
     ) {}
 
     // ── رفع Excel وتحليله (Preview قبل الحفظ) ───────────────
@@ -519,6 +521,12 @@ class VoucherController extends Controller
 
             return $order;
         });
+
+        // auto-generate MonthlyClosing after opening balance save
+        if ($request->type === 'opening' && $warehouseId && $request->date) {
+            $month = substr($request->date, 0, 7);
+            $this->calc->generateMonthlyClosing($clientId, $warehouseId, $month);
+        }
 
         return response()->json(['message' => 'تم الحفظ', 'order_id' => $order->id], 201);
     }

@@ -9,7 +9,7 @@ class Item extends Model
     use HasTenant;
     protected $keyType = 'string';
     public $incrementing = false;
-    protected $fillable = ['id','client_id','default_warehouse_id','name','unit','category','is_active', 'default_cost', 'sort_order', 'min_stock_level', 'max_stock_level', 'reorder_qty'];
+    protected $fillable = ['id','client_id','default_warehouse_id','name','unit','category','is_active', 'default_cost', 'sort_order', 'min_stock_level'];
 
     public function client(): BelongsTo     { return $this->belongsTo(Client::class); }
     public function warehouse(): BelongsTo  { return $this->belongsTo(Warehouse::class, 'default_warehouse_id'); }

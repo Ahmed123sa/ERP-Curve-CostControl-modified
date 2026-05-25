@@ -29,6 +29,8 @@ class MenuExportService
 
         $recipes = MenuRecipe::where('menu_id', $menu->id)
             ->where('client_id', $client->id)
+            ->where('status', 'active')
+            ->where('exclude_from_menu', false)
             ->with('items.ingredient:id,name')
             ->get();
 
@@ -100,6 +102,8 @@ class MenuExportService
 
         $recipes = MenuRecipe::where('menu_id', $menu->id)
             ->where('client_id', $client->id)
+            ->where('status', 'active')
+            ->where('exclude_from_menu', false)
             ->with('items.ingredient:id,name')
             ->get();
 
@@ -194,7 +198,9 @@ class MenuExportService
         ini_set('memory_limit', '512M');
         set_time_limit(120);
 
-        $query = MenuRecipe::where('client_id', $clientId);
+        $query = MenuRecipe::where('client_id', $clientId)
+            ->where('status', 'active')
+            ->where('exclude_from_menu', false);
         if ($branchId) $query->where('branch_id', $branchId);
         if ($menuId) $query->where('menu_id', $menuId);
         $recipes = $query->get();
@@ -287,7 +293,9 @@ class MenuExportService
         ini_set('memory_limit', '512M');
         set_time_limit(120);
 
-        $query = MenuRecipe::where('client_id', $clientId);
+        $query = MenuRecipe::where('client_id', $clientId)
+            ->where('status', 'active')
+            ->where('exclude_from_menu', false);
         if ($branchId) $query->where('branch_id', $branchId);
         if ($menuId) $query->where('menu_id', $menuId);
         $recipes = $query->get();

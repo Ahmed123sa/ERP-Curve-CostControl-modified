@@ -413,3 +413,41 @@ Older copy. Do NOT modify. Changes go into `ERP/laravel-app/`.
 - **Root cause**: `$postDate = $end->toDateString()` (end of month, e.g., 2026-05-31). When today is before month-end (e.g., May 17), the DispatchOrder gets a future date. The `update()` form on the frontend validates `date <= today`, so editing/updating the posted production order fails with "The date field must be a date before or equal to today."
 - **Fix**: Changed to `$postDate = now()->toDateString()` — records the production as happening on the actual posting date.
 - **Impact**: Production orders now have today's date, not month-end. The update form works normally.
+
+---
+
+## Surgical Changes Applied (2026-05-23 — Item Import Fix + Closing Edit Mode)
+
+### 22. Item Import — Header-name-based column reading
+- **Files**: `ERP/laravel-app/app/Http/Controllers/ItemController.php:122-192`
+- **Root cause**: `import()` used fixed index `$row[0]`, `$row[1]`, etc., which mismatched the Export column order. Exporting then re-importing the same Excel would corrupt data (e.g., reading the serial number `#` as the item name).
+- **Fix**: Rewrote `import()` and `importStockLevels()` to read the first row as headers, build a column map by Arabic header name (`الاسم`, `الوحدة`, `السعر`, `الحد الأدنى`, `المخزن الافتراضي`, `التصنيف`), then read each data row by header name. Also added `category` import (was missing). Now 100% compatible with Export output.
+- **Impact**: Export then re-import produces the exact same data. No data corruption.
+
+### 23. Database — Removed `max_stock_level` and `reorder_qty`
+- **File**: `ERP/laravel-app/database/migrations/2026_05_23_000000_drop_max_stock_and_reorder_from_items.php`
+- **Change**: Dropped `max_stock_level` (decimal) and `reorder_qty` (decimal) columns from `items` table.
+- **Impact**: Schema cleaned up. Both columns were unused. `min_stock_level` retained.
+
+### 24. Edit Mode in Monthly Closing — Inline editing with reverse voucher sync
+- **Files**: `ERP/laravel-app/app/Http/Controllers/ClosingController.php` (new methods), `ERP/laravel-app/routes/api.php` (routes), `ERP/frontend/src/app/(app)/closing/page.tsx` (UI)
+- **Backend — New API endpoints**:
+  - `GET /closing/cell-orders` — Returns order-level detail for a daily cell (item+warehouse+date)
+  - `PATCH /closing/edit-daily-cell` — Updates DispatchLine + StockLedger qty/total_cost for one or more orders, then regenerates monthly_closings for the affected item. Preserves `is_locked`, `closing_qty_actual`, `physical_count`.
+  - `PATCH /closing/edit-cell-value` — Same for total_cost (value) editing.
+- **Backend — Logic**:
+  1. Validates `is_locked` → 403 if locked
+  2. `DB::transaction()`:
+     - Update `DispatchLine` (qty + total_cost)
+     - Update ALL `StockLedger` entries for (ref_id, item_id) — keeps source/target in sync
+     - Log `ActivityLogger` for `closing_cell_edited` / `closing_value_edited`
+     - For `purchase` type orders: update `Item::default_cost` + log `price_updated`
+     - Call `itemMonthSummary()` + `MonthlyClosing::updateOrCreate()` for the affected item/warehouse/month
+- **Frontend — Edit Mode**:
+  - Toggle button "وضع التعديل" in toolbar (single location view only, same permission as vouchers)
+  - Single-order cells → inline `<input>` that adds to `pendingEdits` on change
+  - Multi-order cells → clickable `[5+3]` link that opens Popover with order breakdown
+  - Value column (إجمالي المشتريات) → same Popover pattern with order-level value editing
+  - "حفظ التعديلات" button → batch saves all pending edits via `Promise.allSettled`
+  - Auto refreshes closing + daily + grand-summary queries after save
+- **Impact**: Users can edit daily quantities and purchase values directly in the closing table. Changes propagate backwards to the source vouchers in history. Monthly closing regenerates automatically.

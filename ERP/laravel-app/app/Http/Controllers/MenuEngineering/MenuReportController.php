@@ -21,7 +21,9 @@ class MenuReportController extends Controller
         $branchId = $request->branch_id;
         $menuId = $request->menu_id;
 
-        $query = MenuRecipe::where('client_id', $clientId);
+        $query = MenuRecipe::where('client_id', $clientId)
+            ->where('status', 'active')
+            ->where('exclude_from_menu', false);
         if ($branchId) {
             $query->where('branch_id', $branchId);
         }

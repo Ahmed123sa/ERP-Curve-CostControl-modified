@@ -129,34 +129,63 @@ class ItemController extends Controller
         $sheet       = $spreadsheet->getActiveSheet();
         $rows        = $sheet->toArray(null, true, true, false);
 
+        if (empty($rows) || empty($rows[0])) {
+            return response()->json(['message' => 'الملف فارغ'], 400);
+        }
+
+        $headerRow = array_map('trim', $rows[0]);
+        $col = [];
+        $arToField = [
+            'الاسم'             => 'name',
+            'الوحدة'            => 'unit',
+            'السعر'             => 'cost',
+            'الحد الأدنى'       => 'min_stock',
+            'الحد الادنى'       => 'min_stock',
+            'المخزن الافتراضي'  => 'warehouse',
+            'المخزن'            => 'warehouse',
+            'التصنيف'           => 'category',
+        ];
+        foreach ($headerRow as $i => $h) {
+            if (isset($arToField[$h])) {
+                $col[$arToField[$h]] = $i;
+            }
+        }
+
+        if (!isset($col['name'])) {
+            return response()->json(['message' => 'لم يتم العثور على عمود "الاسم" في الملف'], 400);
+        }
+
         $imported = 0;
         $whLookup = Warehouse::where('client_id', $clientId)->pluck('id', 'name');
         foreach ($rows as $index => $row) {
             if ($index === 0) continue;
 
-            $name     = trim($row[0] ?? '');
-            $unit     = trim($row[1] ?? 'قطعة');
-            $cost     = (float) trim($row[2] ?? '0');
-            $minStock = $row[3] !== null && $row[3] !== '' ? (float) trim($row[3]) : null;
-            $whName   = trim($row[4] ?? '');
+            $name = trim($row[$col['name']] ?? '');
+            if (!$name) continue;
 
-            if ($name) {
-                $data = [
-                    'unit' => $unit,
-                    'default_cost' => $cost,
-                    'min_stock_level' => $minStock,
-                    'sort_order' => $index,
-                    'is_active' => true,
-                ];
-                if ($whName && isset($whLookup[$whName])) {
-                    $data['default_warehouse_id'] = $whLookup[$whName];
-                }
-                Item::updateOrCreate(
-                    ['client_id' => $clientId, 'name' => $name],
-                    $data
-                );
-                $imported++;
+            $unit     = isset($col['unit']) ? trim($row[$col['unit']] ?? '') : 'قطعة';
+            $cost     = isset($col['cost']) ? (float) trim($row[$col['cost']] ?? '0') : 0;
+            $minStock = isset($col['min_stock']) && $row[$col['min_stock']] !== null && $row[$col['min_stock']] !== ''
+                ? (float) trim($row[$col['min_stock']]) : null;
+            $whName   = isset($col['warehouse']) ? trim($row[$col['warehouse']] ?? '') : '';
+            $category = isset($col['category']) ? trim($row[$col['category']] ?? '') : '';
+
+            $data = [
+                'unit' => $unit ?: 'قطعة',
+                'default_cost' => $cost,
+                'min_stock_level' => $minStock,
+                'category' => $category ?: null,
+                'sort_order' => $index,
+                'is_active' => true,
+            ];
+            if ($whName && isset($whLookup[$whName])) {
+                $data['default_warehouse_id'] = $whLookup[$whName];
             }
+            Item::updateOrCreate(
+                ['client_id' => $clientId, 'name' => $name],
+                $data
+            );
+            $imported++;
         }
 
         return response()->json(['message' => "تم استيراد {$imported} صنف بنجاح"]);
@@ -172,19 +201,37 @@ class ItemController extends Controller
         $sheet       = $spreadsheet->getActiveSheet();
         $rows        = $sheet->toArray(null, true, true, false);
 
+        if (empty($rows) || empty($rows[0])) {
+            return response()->json(['message' => 'الملف فارغ'], 400);
+        }
+
+        $headerRow = array_map('trim', $rows[0]);
+        $col = [];
+        foreach ($headerRow as $i => $h) {
+            if (in_array($h, ['الاسم', 'الحد الأدنى', 'الحد الادنى'], true)) {
+                $key = $h === 'الاسم' ? 'name' : 'min_stock';
+                $col[$key] = $i;
+            }
+        }
+
+        if (!isset($col['name'])) {
+            return response()->json(['message' => 'لم يتم العثور على عمود "الاسم" في الملف'], 400);
+        }
+
         $updated = 0;
         foreach ($rows as $index => $row) {
             if ($index === 0) continue;
 
-            $name     = trim($row[0] ?? '');
-            $minStock = $row[1] !== null && $row[1] !== '' ? (float) trim($row[1]) : null;
+            $name = trim($row[$col['name']] ?? '');
+            if (!$name) continue;
 
-            if ($name) {
-                $item = Item::where('client_id', $clientId)->where('name', $name)->first();
-                if ($item) {
-                    $item->update(['min_stock_level' => $minStock]);
-                    $updated++;
-                }
+            $minStock = isset($col['min_stock']) && $row[$col['min_stock']] !== null && $row[$col['min_stock']] !== ''
+                ? (float) trim($row[$col['min_stock']]) : null;
+
+            $item = Item::where('client_id', $clientId)->where('name', $name)->first();
+            if ($item) {
+                $item->update(['min_stock_level' => $minStock]);
+                $updated++;
             }
         }
 

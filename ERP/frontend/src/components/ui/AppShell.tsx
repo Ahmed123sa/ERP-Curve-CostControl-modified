@@ -23,7 +23,6 @@ const PERMISSION_MAP: Record<string, string> = {
   '/stock/closing': 'stock.closing',
   '/menu-engineering': 'menu-engineering',
   '/reports/financial-details': 'reports.financial',
-  '/reports/grand-summary': 'reports.grand-summary',
   '/reports/diffs': 'reports.diffs',
   '/reports/cost': 'reports.food-cost',
   '/items': 'items',
@@ -85,7 +84,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       section: 'التقارير',
       items: [
         { href: '/reports/financial-details', icon: '₿',  label: 'التفاصيل المالية' },
-        { href: '/reports/grand-summary', icon: '▦',  label: 'التقرير الشامل (Matrix)' },
         { href: '/reports/diffs', icon: '!',  label: 'الفروق والهدر' },
         { href: '/reports/cost',  icon: '%',  label: 'Food Cost %' },
       ].filter((i) => hasPerm(i.href)),
@@ -228,6 +226,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Main */}
       <main className="flex-1 flex flex-col overflow-hidden">
+        {/* شريط علوي ثابت — اسم العميل + اللوجو */}
+        <div className="flex items-center justify-center gap-4 py-3 bg-white border-b border-gray-200 flex-shrink-0">
+          {logoUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={logoUrl} alt="Curve" className="h-8" />
+          )}
+          <span className="text-lg font-bold text-gray-800">{currentClient?.name ?? '—'}</span>
+        </div>
         {children}
       </main>
     </div>

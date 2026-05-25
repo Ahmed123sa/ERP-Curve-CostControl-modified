@@ -12,6 +12,12 @@ export default function ClosingPage() {
   const [warehouseId, setWarehouseId] = useState('');
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
 
+  // Edit Mode
+  const [editMode, setEditMode] = useState(false);
+  const [pendingEdits, setPendingEdits] = useState<any[]>([]);
+  const [popoverTarget, setPopoverTarget] = useState<any>(null);
+  const [cellOrdersCache, setCellOrdersCache] = useState<Record<string, any[]>>({});
+
   // 1. بيانات الـ Matrix
   const { data: matrixData, isLoading: matrixLoading } = useQuery({
     queryKey: ['grand-summary', month],
@@ -57,6 +63,56 @@ export default function ClosingPage() {
   });
 
   // مزامنة الجرد النهائي (تحميل الفعلي)
+  // Edit Mode — حفظ التعديلات
+  const fetchCellOrders = async (whId: string, itemId: string, date: string) => {
+    const key = `${itemId}_${date}`;
+    if (cellOrdersCache[key]) return cellOrdersCache[key];
+    const res = await api.get('/closing/cell-orders', { params: { warehouse_id: whId, item_id: itemId, date } });
+    const lines = res.data.lines || [];
+    setCellOrdersCache(prev => ({ ...prev, [key]: lines }));
+    return lines;
+  };
+
+  const editDailyCellMutation = useMutation({
+    mutationFn: (payload: any) => api.patch('/closing/edit-daily-cell', payload),
+  });
+
+  const editCellValueMutation = useMutation({
+    mutationFn: (payload: any) => api.patch('/closing/edit-cell-value', payload),
+  });
+
+  const saveAllEdits = async () => {
+    if (pendingEdits.length === 0) return;
+    const toastId = toast.loading('جاري حفظ التعديلات...');
+    try {
+      // Group by (warehouse_id, item_id, date, month)
+      const groups: Record<string, any> = {};
+      for (const edit of pendingEdits) {
+        const gk = `${edit.warehouse_id}_${edit.item_id}_${edit.date}_${edit.month}`;
+        if (!groups[gk]) {
+          groups[gk] = { warehouse_id: edit.warehouse_id, item_id: edit.item_id, date: edit.date, month: edit.month, lines: [] };
+        }
+        groups[gk].lines.push({ order_id: edit.order_id, [edit.type === 'value' ? 'value' : 'qty']: edit.newVal });
+      }
+      const promises = Object.values(groups).map((g: any) =>
+        g.lines[0]?.value !== undefined
+          ? editCellValueMutation.mutateAsync(g)
+          : editDailyCellMutation.mutateAsync(g)
+      );
+      await Promise.allSettled(promises);
+      toast.dismiss(toastId);
+      toast.success(`تم حفظ ${pendingEdits.length} تعديل وإعادة حساب التقفيل`);
+      setPendingEdits([]);
+      setEditMode(false);
+      qc.invalidateQueries({ queryKey: ['grand-summary'] });
+      qc.invalidateQueries({ queryKey: ['closing'] });
+      qc.invalidateQueries({ queryKey: ['daily'] });
+    } catch {
+      toast.dismiss(toastId);
+      toast.error('فشل حفظ بعض التعديلات');
+    }
+  };
+
   const syncActualMutation = useMutation({
     mutationFn: () => api.post('/closing/sync-physical', { 
       month, 
@@ -150,13 +206,29 @@ export default function ClosingPage() {
             {viewType === 'single' && warehouseId && (
               <>
                 <button
-                  onClick={() => downloadExport(`${api.defaults.baseURL}/closing/export?warehouse_id=${warehouseId}&month=${month}`, `تقفيل_${month}.xlsx`)}
-                  className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700"
-                >إكسيل</button>
-                <button
-                  onClick={() => downloadExport(`${api.defaults.baseURL}/closing/export-pdf?warehouse_id=${warehouseId}&month=${month}`, `تقفيل_${month}.pdf`)}
-                  className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700"
-                >PDF</button>
+                  onClick={() => {
+                    if (editMode && pendingEdits.length > 0) { saveAllEdits(); return; }
+                    setEditMode(!editMode);
+                    if (editMode) { setPendingEdits([]); setPopoverTarget(null); }
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${
+                    editMode ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-amber-500 text-white hover:bg-amber-600'
+                  }`}
+                >
+                  {editMode ? (pendingEdits.length > 0 ? `💾 حفظ التعديلات (${pendingEdits.length})` : '✏️ وضع التعديل') : '✏️ وضع التعديل'}
+                </button>
+                {!editMode && (
+                  <>
+                    <button
+                      onClick={() => downloadExport(`${api.defaults.baseURL}/closing/export?warehouse_id=${warehouseId}&month=${month}`, `تقفيل_${month}.xlsx`)}
+                      className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700"
+                    >إكسيل</button>
+                    <button
+                      onClick={() => downloadExport(`${api.defaults.baseURL}/closing/export-pdf?warehouse_id=${warehouseId}&month=${month}`, `تقفيل_${month}.pdf`)}
+                      className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700"
+                    >PDF</button>
+                  </>
+                )}
               </>
             )}
           </div>
@@ -276,7 +348,7 @@ export default function ClosingPage() {
                         <th className="px-1.5 py-1.5 text-center font-semibold border border-gray-300">الوحدة</th>
                         <th className="px-1.5 py-1.5 text-center font-semibold text-gray-500 border border-gray-300">أول المدة</th>
                         {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => (
-                          <th key={d} className="px-1 py-1.5 text-center font-medium text-gray-400 min-w-[34px] border border-gray-300">{d}</th>
+                          <th key={d} className="px-1 py-1.5 text-center font-medium text-gray-400 min-w-[56px] border border-gray-300">{d}</th>
                         ))}
                         <th className="px-1.5 py-1.5 text-center font-semibold text-gray-700 border border-gray-300">إجمالي الوارد</th>
                         <th className="px-1.5 py-1.5 text-center font-semibold border border-gray-300">متوسط السعر</th>
@@ -309,11 +381,73 @@ export default function ClosingPage() {
                             <td className="px-1.5 py-1 text-start font-bold text-gray-800 sticky right-0 bg-white z-10 border border-gray-300">{row.item_name}</td>
                             <td className="px-1.5 py-1 text-center text-gray-400 border border-gray-300">{row.unit}</td>
                             <td className="px-1.5 py-1 text-center font-mono border border-gray-300">{row.opening_qty}</td>
-                            {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => (
-                              <td key={d} className="px-1 py-1 text-center font-mono text-xs text-green-700 border border-gray-300">
-                                {row.daily.days?.[d] > 0 ? Number(row.daily.days[d]).toFixed(3) : ''}
-                              </td>
-                            ))}
+                            {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => {
+                              const cellKey = `${row.item_id}_${String(d).padStart(2,'0')}`;
+                              const cellVal = row.daily.days?.[d] > 0 ? Number(row.daily.days[d]) : 0;
+                              const pending = pendingEdits.find((e: any) => e.item_id === row.item_id && e.day === d && e.type === 'qty');
+                              const displayVal = pending ? pending.newVal : cellVal;
+
+                              if (editMode) {
+                                const orders = cellOrdersCache[cellKey];
+                                const isMulti = orders && orders.length > 1;
+
+                                if (isMulti) {
+                                  return (
+                                    <td key={d} className="px-1.5 py-1 text-center font-mono text-xs border border-gray-300">
+                                      <button
+                                        onClick={() => setPopoverTarget({
+                                          warehouse_id: warehouseId, item_id: row.item_id, item_name: row.item_name,
+                                          date: `${month}-${String(d).padStart(2,'0')}`, day: d, month, lines: orders,
+                                        })}
+                                        className="w-full text-center text-amber-700 font-bold bg-amber-50 hover:bg-amber-100 rounded cursor-pointer text-[10px]"
+                                      >
+                                        {orders.map((o: any) => o.qty).join('+')}
+                                      </button>
+                                    </td>
+                                  );
+                                }
+
+                                return (
+                                  <td key={d} className="px-1.5 py-1 text-center font-mono text-xs border border-gray-300">
+                                    <input
+                                      type="number"
+                                      step="0.001"
+                                      defaultValue={cellVal > 0 ? cellVal : ''}
+                                      className="w-full h-full bg-transparent text-center text-green-700 outline-none focus:bg-yellow-100 rounded text-xs"
+                                      onFocus={async () => {
+                                        if (!cellOrdersCache[cellKey]) {
+                                          try {
+                                            const res = await api.get('/closing/cell-orders', {
+                                              params: { warehouse_id: warehouseId, item_id: row.item_id, date: `${month}-${String(d).padStart(2,'0')}` }
+                                            });
+                                            setCellOrdersCache(prev => ({ ...prev, [cellKey]: res.data.lines || [] }));
+                                          } catch {}
+                                        }
+                                      }}
+                                      onChange={(e) => {
+                                        const v = parseFloat(e.target.value) || 0;
+                                        const ords = cellOrdersCache[cellKey] || [];
+                                        if (ords.length !== 1) return;
+                                        setPendingEdits(prev => {
+                                          const others = prev.filter((ed: any) => !(ed.item_id === row.item_id && ed.day === d && ed.type === 'qty'));
+                                          return [...others, {
+                                            warehouse_id: warehouseId, item_id: row.item_id, day: d,
+                                            date: `${month}-${String(d).padStart(2,'0')}`,
+                                            month, order_id: ords[0].order_id, type: 'qty', newVal: v, oldVal: cellVal
+                                          }];
+                                        });
+                                      }}
+                                    />
+                                  </td>
+                                );
+                              }
+
+                              return (
+                                <td key={d} className="px-2 py-1.5 text-center font-mono text-xs text-green-700 border border-gray-300">
+                                  {cellVal > 0 ? cellVal.toFixed(3) : ''}
+                                </td>
+                              );
+                            })}
                             <td className="px-1.5 py-1 text-center font-mono font-bold text-green-700 border border-gray-300">{row.daily.total.toFixed(3)}</td>
                             <td className="px-1.5 py-1 text-center font-mono font-bold border border-gray-300">{avgCost.toFixed(3)}</td>
                             {!isBranch && <td className="px-1.5 py-1 text-center font-mono border border-gray-300">{row.closing_qty_actual}</td>}
@@ -335,7 +469,39 @@ export default function ClosingPage() {
                             {!isBranch && <td className="px-1.5 py-1 text-center font-mono border border-gray-300">{theoreticalVal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>}
                             {!isBranch && <td className="px-1.5 py-1 text-center font-mono font-bold text-red-600 border border-gray-300">{diffQty}</td>}
                             {!isBranch && <td className="px-1.5 py-1 text-center font-mono font-bold text-red-700 border border-gray-300">{diffVal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>}
-                            {!isBranch && <td className="px-1.5 py-1 text-center font-mono font-bold text-green-700 border border-gray-300">{row.purchasesValue.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>}
+                            {!isBranch && (
+                              editMode ? (
+                                <td className="px-1.5 py-1 text-center font-mono font-bold text-green-700 border border-gray-300">
+                                  <button
+                                    onClick={async () => {
+                                      const vKey = `val_${row.item_id}`;
+                                      let lines = cellOrdersCache[vKey];
+                                      if (!lines) {
+                                        try {
+                                          const res = await api.get('/closing/monthly-orders', {
+                                            params: { warehouse_id: warehouseId, item_id: row.item_id, month }
+                                          });
+                                          lines = res.data.lines || [];
+                                          setCellOrdersCache(prev => ({ ...prev, [vKey]: lines }));
+                                        } catch { lines = []; }
+                                      }
+                                      setPopoverTarget({
+                                        warehouse_id: warehouseId, item_id: row.item_id, item_name: row.item_name,
+                                        date: month, day: null, month, lines: lines || [],
+                                        isValue: true, totalValue: row.purchasesValue || 0,
+                                      });
+                                    }}
+                                    className="w-full text-center text-green-700 font-bold bg-transparent hover:bg-yellow-100 rounded cursor-pointer text-xs"
+                                  >
+                                    {row.purchasesValue.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                  </button>
+                                </td>
+                              ) : (
+                                <td className="px-1.5 py-1 text-center font-mono font-bold text-green-700 border border-gray-300">
+                                  {row.purchasesValue.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                </td>
+                              )
+                            )}
                           </tr>
                         );
                       })}
@@ -380,6 +546,77 @@ export default function ClosingPage() {
           )
         )}
       </div>
+
+      {/* Popover — لتعديل الخلايا المتعددة الفواتير */}
+      {popoverTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" onClick={() => setPopoverTarget(null)}>
+          <div className="bg-white rounded-xl shadow-2xl border border-gray-200 p-4 min-w-[400px] max-w-[500px]" onClick={(e) => e.stopPropagation()} dir="rtl">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold text-gray-800">
+                {popoverTarget.isValue ? 'تعديل قيمة المشتريات' : 'تعديل وارد اليوم'}
+              </h3>
+              <button onClick={() => setPopoverTarget(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
+            </div>
+            <div className="text-xs text-gray-500 mb-3">
+              {popoverTarget.item_name} — {popoverTarget.date}
+            </div>
+
+            <div className="space-y-2 mb-3">
+              {popoverTarget.lines && popoverTarget.lines.length > 0 ? popoverTarget.lines.map((line: any, idx: number) => {
+                const editKey = `${popoverTarget.item_id}_${popoverTarget.date}_${line.order_id}`;
+                const pending = pendingEdits.find((e: any) => e._popoverKey === editKey);
+                const currentVal = pending ? pending.newVal : (popoverTarget.isValue ? line.total_cost : line.qty);
+                return (
+                  <div key={line.order_id} className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
+                    <span className="text-xs text-gray-500 font-mono min-w-[80px]">{line.date || line.order_ref || '—'}</span>
+                    <span className="text-xs text-gray-400">({line.type})</span>
+                    <input
+                      type="number"
+                      step={popoverTarget.isValue ? "0.01" : "0.001"}
+                      defaultValue={currentVal}
+                      className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs text-center font-mono outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value) || 0;
+                        setPendingEdits(prev => {
+                          const others = prev.filter((ed: any) => ed._popoverKey !== editKey);
+                          return [...others, {
+                            _popoverKey: editKey,
+                            warehouse_id: popoverTarget.warehouse_id,
+                            item_id: popoverTarget.item_id,
+                            day: popoverTarget.day,
+                            date: popoverTarget.date,
+                            month: popoverTarget.month,
+                            order_id: line.order_id,
+                            type: popoverTarget.isValue ? 'value' : 'qty',
+                            newVal: v,
+                            oldVal: popoverTarget.isValue ? line.total_cost : line.qty,
+                          }];
+                        });
+                      }}
+                    />
+                  </div>
+                );
+              }) : (
+                <div className="text-xs text-gray-400 text-center py-4">لا توجد فواتير مفصلة — سيتم توزيع التعديل مباشرة</div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between border-t border-gray-100 pt-3">
+              <div className="text-xs text-gray-600">
+                الإجمالي: <span className="font-bold text-gray-800">
+                  {popoverTarget.isValue
+                    ? pendingEdits.filter((e: any) => e.item_id === popoverTarget.item_id && e.type === 'value').reduce((s: number, e: any) => s + e.newVal, 0).toLocaleString('en-US', { minimumFractionDigits: 2 })
+                    : pendingEdits.filter((e: any) => e.item_id === popoverTarget.item_id && e.day === popoverTarget.day && e.type === 'qty').reduce((s: number, e: any) => s + e.newVal, 0).toFixed(3)}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setPopoverTarget(null)} className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg">إلغاء</button>
+                <button onClick={() => { setPopoverTarget(null); }} className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700">حفظ</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

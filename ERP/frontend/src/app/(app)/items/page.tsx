@@ -21,6 +21,10 @@ export default function ItemsPage() {
   const [insertId, setInsertId] = useState<string | null>(null);
   const [insertPos, setInsertPos] = useState<'before' | 'after'>('after');
   const [insertName, setInsertName] = useState('');
+  const [insertUnit, setInsertUnit] = useState('قطعة');
+  const [insertCategory, setInsertCategory] = useState('');
+  const [insertCost, setInsertCost] = useState('');
+  const [insertMinStock, setInsertMinStock] = useState('');
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editData, setEditData] = useState<any>({});
@@ -99,6 +103,7 @@ export default function ItemsPage() {
       unit: item.unit,
       default_warehouse_id: item.default_warehouse_id || '',
       min_stock_level: item.min_stock_level ?? '',
+      category: item.category || '',
     });
   };
 
@@ -143,12 +148,22 @@ export default function ItemsPage() {
 
   const confirmInsert = () => {
     if (!insertName.trim() || !insertId) return;
-    const params: any = { name: insertName.trim(), unit: 'قطعة', default_cost: 0 };
+    const params: any = {
+      name: insertName.trim(),
+      unit: insertUnit.trim() || 'قطعة',
+      default_cost: parseFloat(insertCost) || 0,
+      category: insertCategory.trim() || undefined,
+      min_stock_level: insertMinStock ? parseFloat(insertMinStock) : null,
+    };
     if (insertPos === 'after') params.after_id = insertId;
     else params.before_id = insertId;
     createMutation.mutate(params);
     setInsertId(null);
     setInsertName('');
+    setInsertUnit('قطعة');
+    setInsertCategory('');
+    setInsertCost('');
+    setInsertMinStock('');
   };
 
   return (
@@ -264,10 +279,37 @@ export default function ItemsPage() {
                   <tr><td colSpan={8} className="px-6 py-16 text-center text-gray-300">جاري التحميل...</td></tr>
                 ) : filteredItems.length === 0 ? (
                   <tr><td colSpan={8} className="px-6 py-16 text-center text-gray-300">لا توجد أصناف مطابقة.</td></tr>
-                ) : filteredItems.map((item: any, idx: number) => {
+                ) : filteredItems.flatMap((item: any, idx: number) => {
                   const isEditing = editingId === item.id;
                   const currentWarehouse = warehouses?.find((w: any) => w.id === item.default_warehouse_id);
-                  return (
+                  const rows: React.ReactNode[] = [];
+                  if (insertId === item.id && insertPos === 'before') {
+                    rows.push(
+                      <tr key={`insert-${item.id}`} className="bg-indigo-50/70">
+                        <td colSpan={8} className="px-4 py-2.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[11px] text-indigo-500 font-medium whitespace-nowrap">
+                              إضافة قبل "{item.name}":
+                            </span>
+                            <input ref={insertRef} type="text" placeholder="اسم الصنف..." value={insertName} onChange={(e) => setInsertName(e.target.value)}
+                              className="border border-gray-200 rounded px-2.5 py-1.5 text-sm w-36 outline-none focus:border-indigo-400" />
+                            <input type="text" placeholder="الوحدة" value={insertUnit} onChange={(e) => setInsertUnit(e.target.value)}
+                              className="border border-gray-200 rounded px-2.5 py-1.5 text-sm w-20 outline-none focus:border-indigo-400" />
+                            <input type="number" placeholder="السعر" value={insertCost} onChange={(e) => setInsertCost(e.target.value)}
+                              className="border border-gray-200 rounded px-2.5 py-1.5 text-sm w-24 outline-none focus:border-indigo-400" />
+                            <input type="text" placeholder="التصنيف..." value={insertCategory} onChange={(e) => setInsertCategory(e.target.value)}
+                              className="border border-gray-200 rounded px-2.5 py-1.5 text-sm w-28 outline-none focus:border-indigo-400" />
+                            <input type="number" placeholder="الحد الأدنى" value={insertMinStock} onChange={(e) => setInsertMinStock(e.target.value)}
+                              className="border border-gray-200 rounded px-2.5 py-1.5 text-sm w-24 outline-none focus:border-indigo-400" />
+                            <button onClick={confirmInsert} disabled={!insertName.trim() || createMutation.isPending}
+                              className="px-3 py-1.5 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 disabled:opacity-50">إضافة</button>
+                            <button onClick={() => setInsertId(null)} className="text-gray-400 hover:text-gray-600 text-xs">إلغاء</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }
+                  rows.push(
                     <tr key={item.id} className="hover:bg-gray-50/70 transition-colors group">
                       <td className="px-3 py-3 text-center align-middle">
                         <div className="flex flex-col items-center gap-0 relative">
@@ -313,7 +355,11 @@ export default function ItemsPage() {
                           </span>
                         )}
                       </td>
-                      <td className="px-3 py-3 text-gray-500">{item.category}</td>
+                      <td className="px-3 py-3 text-gray-500">
+                        {isEditing ? (
+                          <input type="text" value={editData.category} onChange={(e) => setEditData({...editData, category: e.target.value})} className="border border-gray-300 rounded px-2 py-1 w-28 text-sm" />
+                        ) : (<span>{item.category}</span>)}
+                      </td>
 
                       <td className="px-3 py-3 text-center">
                         {isEditing ? (
@@ -333,27 +379,34 @@ export default function ItemsPage() {
                       </td>
                     </tr>
                   );
+                  if (insertId === item.id && insertPos === 'after') {
+                    rows.push(
+                      <tr key={`insert-${item.id}`} className="bg-indigo-50/70">
+                        <td colSpan={8} className="px-4 py-2.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[11px] text-indigo-500 font-medium whitespace-nowrap">
+                              إضافة بعد "{item.name}":
+                            </span>
+                            <input ref={insertRef} type="text" placeholder="اسم الصنف..." value={insertName} onChange={(e) => setInsertName(e.target.value)}
+                              className="border border-gray-200 rounded px-2.5 py-1.5 text-sm w-36 outline-none focus:border-indigo-400" />
+                            <input type="text" placeholder="الوحدة" value={insertUnit} onChange={(e) => setInsertUnit(e.target.value)}
+                              className="border border-gray-200 rounded px-2.5 py-1.5 text-sm w-20 outline-none focus:border-indigo-400" />
+                            <input type="number" placeholder="السعر" value={insertCost} onChange={(e) => setInsertCost(e.target.value)}
+                              className="border border-gray-200 rounded px-2.5 py-1.5 text-sm w-24 outline-none focus:border-indigo-400" />
+                            <input type="text" placeholder="التصنيف..." value={insertCategory} onChange={(e) => setInsertCategory(e.target.value)}
+                              className="border border-gray-200 rounded px-2.5 py-1.5 text-sm w-28 outline-none focus:border-indigo-400" />
+                            <input type="number" placeholder="الحد الأدنى" value={insertMinStock} onChange={(e) => setInsertMinStock(e.target.value)}
+                              className="border border-gray-200 rounded px-2.5 py-1.5 text-sm w-24 outline-none focus:border-indigo-400" />
+                            <button onClick={confirmInsert} disabled={!insertName.trim() || createMutation.isPending}
+                              className="px-3 py-1.5 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 disabled:opacity-50">إضافة</button>
+                            <button onClick={() => setInsertId(null)} className="text-gray-400 hover:text-gray-600 text-xs">إلغاء</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }
+                  return rows;
                 })}
-                {/* Insert inline row */}
-                {insertId && (() => {
-                  const targetItem = items?.find((i: any) => i.id === insertId);
-                  return (
-                    <tr className="bg-indigo-50/70">
-                      <td colSpan={8} className="px-4 py-2.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[11px] text-indigo-500 font-medium whitespace-nowrap">
-                            إضافة {insertPos === 'after' ? 'بعد' : 'قبل'} "{targetItem?.name}":
-                          </span>
-                          <input ref={insertRef} type="text" placeholder="اسم الصنف..." value={insertName} onChange={(e) => setInsertName(e.target.value)}
-                            className="border border-gray-200 rounded px-2.5 py-1.5 text-sm w-56 outline-none focus:border-indigo-400" />
-                          <button onClick={confirmInsert} disabled={!insertName.trim() || createMutation.isPending}
-                            className="px-3 py-1.5 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 disabled:opacity-50">إضافة</button>
-                          <button onClick={() => setInsertId(null)} className="text-gray-400 hover:text-gray-600 text-xs">إلغاء</button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })()}
               </tbody>
             </table>
           </div>

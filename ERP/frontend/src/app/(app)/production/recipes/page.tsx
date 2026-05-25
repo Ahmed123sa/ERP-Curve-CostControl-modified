@@ -194,7 +194,7 @@ export default function RecipesPage() {
             item_id: ing.item_id,
             name: ing.item?.name || '',
             unit: ing.item?.unit || '',
-            price: parseFloat(ing.unit_cost || ing.item?.default_cost || 0),
+            price: parseFloat(ing.item?.default_cost || 0),
             qty: String(ing.qty),
           }))
         : [emptyIngredient()],
@@ -216,7 +216,7 @@ export default function RecipesPage() {
         .map(ing => ({
           item_id: ing.item_id,
           qty: parseFloat(ing.qty) || 0,
-          unit_cost: ing.price > 0 ? ing.price : null,
+          unit_cost: null,
         })),
       sizes: form.customWeights
         .filter(w => w.grams && w.item_id)
@@ -237,8 +237,26 @@ export default function RecipesPage() {
     i.name.includes(itemSearch) || itemSearch === ''
   );
 
+  const { data: marketLatest = [] } = useQuery({
+    queryKey: ['market-latest'],
+    queryFn: () => api.get('/production/market-prices/latest').then(r => r.data),
+    refetchInterval: 60_000,
+  });
+
   return (
     <div className="space-y-4" dir="rtl">
+      {/* Market price strip */}
+      {marketLatest.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 flex items-center gap-4 text-sm overflow-x-auto">
+          <span className="text-amber-700 font-medium whitespace-nowrap">📊 أسعار البورصة:</span>
+          {marketLatest.map((m: any) => (
+            <span key={m.item_name} className="whitespace-nowrap text-gray-700">
+              {m.item_name}: <strong className="text-amber-800">{m.price ?? '—'} ج</strong>
+              {m.date && <span className="text-gray-400 text-xs mr-1">({m.date})</span>}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="flex justify-between items-center">
         <h2 className="text-lg font-semibold text-gray-800">الوصفات التصنيعية</h2>
         <div className="flex gap-2">
@@ -476,7 +494,13 @@ export default function RecipesPage() {
         <p className="text-gray-400">لا توجد وصفات — أضف وصفة جديدة</p>
       ) : (
         <div className="space-y-2">
-          {recipes.map((recipe: any) => (
+          {recipes.map((recipe: any) => {
+            const costFromIngredients = recipe.ingredients?.reduce((sum: number, ing: any) => {
+              return sum + (parseFloat(ing.qty) || 0) * (parseFloat(ing.item?.default_cost) || 0);
+            }, 0) || 0;
+            const prodQty = parseFloat(recipe.production_qty) || 1;
+            const recipeCost = recipe.outputItem?.default_cost ?? (costFromIngredients > 0 ? costFromIngredients / prodQty : null);
+            return (
             <div key={recipe.id} className="border border-gray-100 rounded-xl p-4 hover:border-gray-200">
               <div className="flex justify-between items-start">
                 <div>
@@ -493,6 +517,11 @@ export default function RecipesPage() {
                       </span>
                     )}
                     <span className="text-xs text-gray-400 mr-2">{recipe.unit}</span>
+                    {recipeCost != null && recipeCost > 0 && (
+                      <span className="px-2 py-0.5 text-xs bg-green-50 text-green-700 rounded-full font-mono font-medium mr-2">
+                        {recipeCost.toFixed(2)} ج /{recipe.unit || 'كجم'}
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-gray-400">
                     {recipe.outputItem?.name}
@@ -527,7 +556,8 @@ export default function RecipesPage() {
                 </div>
               )}
             </div>
-          ))}
+          );
+        })}
         </div>
       )}
     </div>

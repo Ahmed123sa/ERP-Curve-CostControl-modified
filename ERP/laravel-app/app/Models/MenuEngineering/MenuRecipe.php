@@ -18,12 +18,15 @@ class MenuRecipe extends Model
         'client_id', 'branch_id', 'menu_id', 'name', 'code', 'category', 'recipe_type',
         'portions', 'selling_price', 'target_food_cost_pct', 'prep_instructions',
         'status', 'version', 'created_by',
+        'exclude_from_reconciliation', 'exclude_from_menu',
     ];
 
     protected $casts = [
         'portions' => 'decimal:2',
         'selling_price' => 'decimal:4',
         'target_food_cost_pct' => 'decimal:2',
+        'exclude_from_reconciliation' => 'boolean',
+        'exclude_from_menu' => 'boolean',
     ];
 
     protected static function boot(): void

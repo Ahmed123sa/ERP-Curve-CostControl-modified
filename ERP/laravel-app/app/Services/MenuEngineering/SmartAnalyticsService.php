@@ -201,11 +201,21 @@ class SmartAnalyticsService
 
         $byItemWh = $daily->groupBy(fn($r) => $r->item_id . '_' . $r->warehouse_id);
 
-        $itemIds = $rows->pluck('item_id')->unique();
-        $itemNames = Item::whereIn('id', $itemIds)->pluck('name', 'id');
+        // ── Also read activity_logs for price_updated (manufactured items, no purchase records) ──
+        $priceLogs = ActivityLog::where('client_id', $clientId)
+            ->where('action', 'price_updated')
+            ->orderBy('created_at')
+            ->get();
+
+        $stockItemIds = $rows->pluck('item_id')->unique();
+        $alItemIds = $priceLogs->pluck('entity_id')->unique();
+        $allItemIds = $stockItemIds->merge($alItemIds)->unique();
+        $itemNames = Item::whereIn('id', $allItemIds)->pluck('name', 'id');
         $whNames = Warehouse::whereIn('id', $mainWhIds)->pluck('name', 'id');
 
         $changes = [];
+
+        // ── Process stock_ledger (purchase-based) changes ──
         foreach ($byItemWh as $key => $dayEntries) {
             $sorted = $dayEntries->sortBy('date')->values();
             for ($i = 1; $i < count($sorted); $i++) {
@@ -235,6 +245,60 @@ class SmartAnalyticsService
                     'warehouse_id' => $curr->warehouse_id,
                     'source' => $whNames[$curr->warehouse_id] ?? '—',
                     'date' => $curr->date instanceof \Carbon\Carbon ? $curr->date->toDateString() : $curr->date,
+                    'source_type' => 'purchase',
+                ];
+            }
+        }
+
+        // ── Process activity_logs (recipe sync) changes ──
+        $alByItem = $priceLogs->groupBy('entity_id');
+        foreach ($alByItem as $itemId => $logs) {
+            $sorted = $logs->sortBy('created_at')->values();
+            $entryCount = count($sorted);
+            if ($entryCount === 0) continue;
+
+            for ($i = 0; $i < $entryCount; $i++) {
+                // سجل واحد: old_values → new_values هو نفسه التغيير
+                if ($entryCount === 1) {
+                    $oldCost = (float) ($sorted[0]->old_values['default_cost'] ?? 0);
+                    $newCost = (float) ($sorted[0]->new_values['default_cost'] ?? 0);
+                    $logDate = $sorted[0]->created_at;
+                } else {
+                    // سجلين فأكثر: نقارن أول→ثاني، ثاني→ثالث، ...
+                    if ($i === 0) continue;
+                    $prev = $sorted[$i - 1];
+                    $curr = $sorted[$i];
+                    $oldCost = (float) ($prev->old_values['default_cost'] ?? 0);
+                    $newCost = (float) ($curr->new_values['default_cost'] ?? 0);
+                    $logDate = $curr->created_at;
+                }
+
+                if ($oldCost <= 0 || $newCost <= 0) continue;
+                if ($oldCost == $newCost) continue;
+                $delta = $newCost - $oldCost;
+                $deltaPct = $oldCost > 0 ? round(($delta / $oldCost) * 100, 1) : 0;
+                if (abs($deltaPct) < $thresholdPct) continue;
+
+                $totalQty = 0;
+                foreach ($mainWhIds as $whId) {
+                    $totalQty += $this->calc->currentStock($clientId, $whId, $itemId);
+                }
+                $totalImpact = round($delta * $totalQty, 2);
+
+                $changes[] = [
+                    'item_id' => $itemId,
+                    'item_name' => $itemNames[$itemId] ?? '—',
+                    'old_cost' => $oldCost,
+                    'new_cost' => $newCost,
+                    'avg_cost' => null,
+                    'delta' => round($delta, 2),
+                    'delta_pct' => $deltaPct,
+                    'direction' => $delta > 0 ? 'up' : 'down',
+                    'total_impact' => $totalImpact,
+                    'warehouse_id' => null,
+                    'source' => 'تحديث تكلفة صنف',
+                    'date' => $logDate instanceof \Carbon\Carbon ? $logDate->toDateString() : $logDate,
+                    'source_type' => 'activity_log',
                 ];
             }
         }
@@ -256,7 +320,7 @@ class SmartAnalyticsService
     {
         $menus = MenuEngineeringMenu::where('client_id', $clientId)
             ->with(['recipes' => function($q) {
-                $q->where('status', 'active')->with('items.ingredient:id,name');
+                $q->where('status', 'active')->where('exclude_from_menu', false)->with('items.ingredient:id,name');
             }])
             ->get();
 
@@ -303,14 +367,37 @@ class SmartAnalyticsService
         $byItem = $daily->groupBy('item_id');
         $itemDefaults = Item::whereIn('id', $ingredientIds)->pluck('default_cost', 'id');
 
+        // Read activity_logs for price_updated (ingredients with no purchase records)
+        $priceUpdateLogs = ActivityLog::where('client_id', $clientId)
+            ->where('action', 'price_updated')
+            ->whereIn('entity_id', $ingredientIds)
+            ->orderBy('created_at')
+            ->get()
+            ->groupBy('entity_id');
+
         $prices = [];
         foreach ($ingredientIds as $id) {
             $entries = $byItem->get($id, collect())->sortBy('date')->values();
             $def = (float) ($itemDefaults[$id] ?? 0);
-            $prices[$id] = [
-                'old' => $entries->isNotEmpty() ? (float) $entries->first()->unit_cost : $def,
-                'current' => $entries->isNotEmpty() ? (float) $entries->last()->unit_cost : $def,
-            ];
+            if ($entries->isNotEmpty()) {
+                $prices[$id] = [
+                    'old' => (float) $entries->first()->unit_cost,
+                    'current' => (float) $entries->last()->unit_cost,
+                ];
+            } elseif (isset($priceUpdateLogs[$id])) {
+                $logs = $priceUpdateLogs[$id]->sortBy('created_at')->values();
+                $oldCost = (float) ($logs->first()->old_values['default_cost'] ?? 0);
+                $currentCost = (float) ($logs->last()->new_values['default_cost'] ?? 0);
+                $prices[$id] = [
+                    'old' => $oldCost ?: $def,
+                    'current' => $currentCost ?: $def,
+                ];
+            } else {
+                $prices[$id] = [
+                    'old' => $def,
+                    'current' => $def,
+                ];
+            }
         }
 
         $result = [];
@@ -409,7 +496,8 @@ class SmartAnalyticsService
     public function costContribution(string $clientId, ?string $menuId = null, ?string $branchId = null): array
     {
         $query = MenuRecipe::where('client_id', $clientId)
-            ->where('status', 'active');
+            ->where('status', 'active')
+            ->where('exclude_from_menu', false);
 
         if ($menuId) $query->where('menu_id', $menuId);
         if ($branchId) $query->where('branch_id', $branchId);

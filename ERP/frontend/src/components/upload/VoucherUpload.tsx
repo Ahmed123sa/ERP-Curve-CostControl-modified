@@ -229,12 +229,33 @@ export function VoucherUpload() {
       {reviewVoucherIdx !== null && (
         <MappingReviewModal
           voucher={vouchers[reviewVoucherIdx]}
-           onResolve={(updatedVoucher) => {
-             setVouchers((prev) => 
-               prev.map((v, i) => 
-                 i === reviewVoucherIdx ? updatedVoucher : v
-               ) as UploadedVoucher[]
-             );
+           onResolve={(updatedVoucher: any) => {
+             setVouchers((prev) => {
+               // بناء خريطة بالأصناف اللي اتربطت: source_name → { item_id, item_name }
+               const resolvedMap = new Map<string, { item_id: string; item_name: string }>();
+               for (const line of updatedVoucher.lines) {
+                 if (line.item_id && line.source_name) {
+                   resolvedMap.set(line.source_name, { item_id: line.item_id, item_name: line.item_name });
+                 }
+               }
+               // تطبيق الربط على كل الأذون التانية اللي فيها نفس source_name
+               return prev.map((v, i) => {
+                 if (i === reviewVoucherIdx) return updatedVoucher;
+                 let changed = false;
+                 const newLines = v.lines.map((line: any) => {
+                   if (line.needs_review && resolvedMap.has(line.source_name)) {
+                     changed = true;
+                     const r = resolvedMap.get(line.source_name)!;
+                     return { ...line, item_id: r.item_id, item_name: r.item_name, needs_review: false, confidence: 100 };
+                   }
+                   return line;
+                 });
+                 if (changed) {
+                   return { ...v, lines: newLines, has_issues: newLines.some((l: any) => l.needs_review) };
+                 }
+                 return v;
+               }) as UploadedVoucher[];
+             });
              setReviewVoucherIdx(null);
            }}
           onClose={() => setReviewVoucherIdx(null)}

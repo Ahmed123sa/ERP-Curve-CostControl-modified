@@ -4,13 +4,14 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\ClosingGenerateRequest;
 use App\Http\Requests\UpdateActualRequest;
-use App\Http\Requests\VoucherConfirmRequest;
-use App\Http\Requests\VoucherManualRequest;
-use App\Http\Requests\VoucherUploadRequest;
 use App\Services\CostCalculationService;
 use App\Models\MonthlyClosing;
 use App\Models\Warehouse;
 use App\Models\Item;
+use App\Models\DispatchLine;
+use App\Models\DispatchOrder;
+use App\Models\StockLedger;
+use App\Services\ActivityLogger;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -275,6 +276,341 @@ class ClosingController extends Controller
             ]);
 
         return response()->json(['message' => "تم إقفال الشهر ({$count} صنف)"]);
+    }
+
+    /**
+     * تعديل خلية وارد يومي (كمية) في التقفيل ← تحديث الفاتورة الأصلية + إعادة توليد التقفيل
+     */
+    public function editDailyCell(Request $request): JsonResponse
+    {
+        $request->validate([
+            'warehouse_id'  => 'required|uuid',
+            'item_id'       => 'required|uuid',
+            'date'          => 'required|date',
+            'month'         => 'required|date_format:Y-m',
+            'lines'         => 'required|array|min:1',
+            'lines.*.order_id' => 'required|uuid',
+            'lines.*.qty'      => 'required|numeric|min:0',
+        ]);
+
+        $clientId = $request->user()->current_client_id;
+
+        // 1. تحقق من القفل
+        $locked = MonthlyClosing::where('client_id', $clientId)
+            ->where('warehouse_id', $request->warehouse_id)
+            ->where('item_id', $request->item_id)
+            ->where('month', $request->month)
+            ->value('is_locked');
+
+        if ($locked) {
+            abort(403, 'الشهر مقفول — لا يمكن التعديل');
+        }
+
+        $updatedOrders = 0;
+
+        DB::transaction(function () use ($request, $clientId, &$updatedOrders) {
+            foreach ($request->lines as $line) {
+                $dispatchLine = DispatchLine::where('client_id', $clientId)
+                    ->where('order_id', $line['order_id'])
+                    ->where('item_id', $request->item_id)
+                    ->first();
+
+                if (!$dispatchLine) continue;
+
+                $oldQty   = (float) $dispatchLine->qty;
+                $newQty   = (float) $line['qty'];
+                $unitCost = (float) $dispatchLine->unit_cost;
+
+                if (abs($newQty - $oldQty) < 0.001) continue;
+
+                // 2. تحديث DispatchLine
+                $dispatchLine->qty = round($newQty, 3);
+                if ($unitCost > 0) {
+                    $dispatchLine->total_cost = round($newQty * $unitCost, 2);
+                }
+                $dispatchLine->save();
+
+                // 3. تحديث StockLedger (كل الجهات — مخزن وفرع)
+                $ledgerEntries = StockLedger::where('client_id', $clientId)
+                    ->where('ref_type', 'dispatch_order')
+                    ->where('ref_id', $line['order_id'])
+                    ->where('item_id', $request->item_id)
+                    ->get();
+
+                foreach ($ledgerEntries as $entry) {
+                    $entry->qty = round($newQty, 3);
+                    if ($unitCost > 0) {
+                        $entry->total_cost = round($newQty * $unitCost, 2);
+                        $entry->unit_cost  = $unitCost;
+                    }
+                    $entry->save();
+                }
+
+                // 4. تسجيل النشاط
+                ActivityLogger::log(
+                    action:     'closing_cell_edited',
+                    entityType: 'DispatchLine',
+                    entityId:   $dispatchLine->id,
+                    oldValues:  ['qty' => $oldQty],
+                    newValues:  ['qty' => $newQty, 'source' => 'closing_edit_mode'],
+                );
+
+                // 5. لو الفاتورة من نوع purchase — نحدث default_cost
+                $order = DispatchOrder::where('client_id', $clientId)->find($line['order_id']);
+                if ($order && $order->type === 'purchase' && $unitCost > 0) {
+                    $item = Item::find($request->item_id);
+                    if ($item) {
+                        $oldCost = $item->default_cost;
+                        $item->default_cost = $unitCost;
+                        $item->save();
+
+                        if ((float) $oldCost !== $unitCost) {
+                            ActivityLogger::log(
+                                action:     'price_updated',
+                                entityType: 'Item',
+                                entityId:   $item->id,
+                                oldValues:  ['default_cost' => $oldCost],
+                                newValues:  ['default_cost' => $unitCost, 'source' => 'closing_edit_mode'],
+                            );
+                        }
+                    }
+                }
+
+                $updatedOrders++;
+            }
+
+            // 6. إعادة توليد التقفيل للصنف + المخزن
+            $summary = $this->calc->itemMonthSummary(
+                $clientId, $request->warehouse_id, $request->item_id, $request->month
+            );
+
+            $closing = MonthlyClosing::where('client_id', $clientId)
+                ->where('warehouse_id', $request->warehouse_id)
+                ->where('item_id', $request->item_id)
+                ->where('month', $request->month)
+                ->first();
+
+            if ($summary['opening_qty'] == 0 && $summary['in_qty'] == 0 && $summary['out_qty'] == 0) {
+                if ($closing) $closing->delete();
+            } else {
+                MonthlyClosing::updateOrCreate(
+                    [
+                        'client_id'    => $clientId,
+                        'warehouse_id' => $request->warehouse_id,
+                        'item_id'      => $request->item_id,
+                        'month'        => $request->month,
+                    ],
+                    array_merge($summary, [
+                        'is_locked'    => $closing?->is_locked ?? false,
+                        'locked_by'    => $closing?->locked_by ?? null,
+                        'locked_at'    => $closing?->locked_at ?? null,
+                        'closing_qty_actual' => $closing?->closing_qty_actual ?? null,
+                        'physical_count'     => $closing?->physical_count ?? null,
+                    ])
+                );
+            }
+        });
+
+        return response()->json([
+            'message'        => "تم تحديث {$updatedOrders} فاتورة وإعادة توليد التقفيل",
+            'updated_orders' => $updatedOrders,
+        ]);
+    }
+
+    /**
+     * جلب تفاصيل فواتير خلية معينة (لـ Popover في Edit Mode)
+     */
+    public function cellOrders(Request $request): JsonResponse
+    {
+        $request->validate([
+            'warehouse_id' => 'required|uuid',
+            'item_id'      => 'required|uuid',
+            'date'         => 'required|date',
+        ]);
+
+        $clientId = $request->user()->current_client_id;
+
+        $entries = StockLedger::where('client_id', $clientId)
+            ->where('warehouse_id', $request->warehouse_id)
+            ->where('item_id', $request->item_id)
+            ->where('date', $request->date)
+            ->whereIn('movement_type', ['in', 'transfer_in'])
+            ->get();
+
+        $lines = [];
+        foreach ($entries as $entry) {
+            $order = DispatchOrder::where('client_id', $clientId)->find($entry->ref_id);
+            $lines[] = [
+                'order_id'   => $entry->ref_id,
+                'order_ref'  => $order ? ($order->id ? '#' . substr($order->id, 0, 8) : '—') : '—',
+                'type'       => $order?->type ?? $entry->voucher_type,
+                'qty'        => (float) $entry->qty,
+                'total_cost' => (float) $entry->total_cost,
+                'unit_cost'  => (float) $entry->unit_cost,
+            ];
+        }
+
+        return response()->json([
+            'lines'       => $lines,
+            'total_qty'   => round(array_sum(array_column($lines, 'qty')), 3),
+            'total_value' => round(array_sum(array_column($lines, 'total_cost')), 2),
+        ]);
+    }
+
+    /**
+     * جلب كل فواتير الشراء لصنف+مخزن في شهر كامل (لـ Popover إجمالي المشتريات)
+     */
+    public function monthlyOrders(Request $request): JsonResponse
+    {
+        $request->validate([
+            'warehouse_id' => 'required|uuid',
+            'item_id'      => 'required|uuid',
+            'month'        => 'required|date_format:Y-m',
+        ]);
+
+        $clientId = $request->user()->current_client_id;
+        $start    = \Carbon\Carbon::parse($request->month . '-01');
+        $end      = $start->copy()->endOfMonth();
+
+        $entries = StockLedger::where('client_id', $clientId)
+            ->where('warehouse_id', $request->warehouse_id)
+            ->where('item_id', $request->item_id)
+            ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
+            ->where('movement_type', 'in')
+            ->where('voucher_type', 'purchase')
+            ->get();
+
+        $lines = [];
+        foreach ($entries as $entry) {
+            $order = DispatchOrder::where('client_id', $clientId)->find($entry->ref_id);
+            $lines[] = [
+                'order_id'   => $entry->ref_id,
+                'order_ref'  => $entry->ref_id ? '#' . substr($entry->ref_id, 0, 8) : '—',
+                'type'       => $order?->type ?? $entry->voucher_type,
+                'qty'        => (float) $entry->qty,
+                'total_cost' => (float) $entry->total_cost,
+                'unit_cost'  => (float) $entry->unit_cost,
+                'date'       => $entry->date instanceof \Carbon\Carbon ? $entry->date->toDateString() : $entry->date,
+            ];
+        }
+
+        return response()->json([
+            'lines'       => $lines,
+            'total_value' => round(array_sum(array_column($lines, 'total_cost')), 2),
+            'message'     => count($lines) > 0 ? null : 'لا توجد مشتريات لهذا الصنف في الشهر',
+        ]);
+    }
+
+    /**
+     * تعديل قيمة إجمالي المشتريات في التقفيل ← تحديث الفاتورة الأصلية + إعادة توليد التقفيل
+     */
+    public function editCellValue(Request $request): JsonResponse
+    {
+        $request->validate([
+            'warehouse_id'  => 'required|uuid',
+            'item_id'       => 'required|uuid',
+            'month'         => 'required|date_format:Y-m',
+            'lines'         => 'required|array|min:1',
+            'lines.*.order_id' => 'required|uuid',
+            'lines.*.value'    => 'required|numeric|min:0',
+        ]);
+
+        $clientId = $request->user()->current_client_id;
+
+        $locked = MonthlyClosing::where('client_id', $clientId)
+            ->where('warehouse_id', $request->warehouse_id)
+            ->where('item_id', $request->item_id)
+            ->where('month', $request->month)
+            ->value('is_locked');
+
+        if ($locked) {
+            abort(403, 'الشهر مقفول — لا يمكن التعديل');
+        }
+
+        $updatedOrders = 0;
+
+        DB::transaction(function () use ($request, $clientId, &$updatedOrders) {
+            foreach ($request->lines as $line) {
+                $dispatchLine = DispatchLine::where('client_id', $clientId)
+                    ->where('order_id', $line['order_id'])
+                    ->where('item_id', $request->item_id)
+                    ->first();
+
+                if (!$dispatchLine) continue;
+
+                $oldValue = (float) $dispatchLine->total_cost;
+                $newValue = (float) $line['value'];
+
+                if (abs($newValue - $oldValue) < 0.01) continue;
+
+                $dispatchLine->total_cost = round($newValue, 2);
+                if ($dispatchLine->qty > 0) {
+                    $dispatchLine->unit_cost = round($newValue / $dispatchLine->qty, 4);
+                }
+                $dispatchLine->save();
+
+                // تحديث StockLedger
+                $ledgerEntries = StockLedger::where('client_id', $clientId)
+                    ->where('ref_type', 'dispatch_order')
+                    ->where('ref_id', $line['order_id'])
+                    ->where('item_id', $request->item_id)
+                    ->get();
+
+                foreach ($ledgerEntries as $entry) {
+                    $entry->total_cost = round($newValue, 2);
+                    if ($entry->qty > 0) {
+                        $entry->unit_cost = round($newValue / $entry->qty, 4);
+                    }
+                    $entry->save();
+                }
+
+                ActivityLogger::log(
+                    action:     'closing_value_edited',
+                    entityType: 'DispatchLine',
+                    entityId:   $dispatchLine->id,
+                    oldValues:  ['total_cost' => $oldValue],
+                    newValues:  ['total_cost' => $newValue, 'source' => 'closing_edit_mode'],
+                );
+
+                $updatedOrders++;
+            }
+
+            // إعادة توليد التقفيل
+            $summary = $this->calc->itemMonthSummary(
+                $clientId, $request->warehouse_id, $request->item_id, $request->month
+            );
+
+            $closing = MonthlyClosing::where('client_id', $clientId)
+                ->where('warehouse_id', $request->warehouse_id)
+                ->where('item_id', $request->item_id)
+                ->where('month', $request->month)
+                ->first();
+
+            if ($summary['opening_qty'] == 0 && $summary['in_qty'] == 0 && $summary['out_qty'] == 0) {
+                if ($closing) $closing->delete();
+            } else {
+                MonthlyClosing::updateOrCreate(
+                    [
+                        'client_id'    => $clientId,
+                        'warehouse_id' => $request->warehouse_id,
+                        'item_id'      => $request->item_id,
+                        'month'        => $request->month,
+                    ],
+                    array_merge($summary, [
+                        'is_locked'    => $closing?->is_locked ?? false,
+                        'locked_by'    => $closing?->locked_by ?? null,
+                        'locked_at'    => $closing?->locked_at ?? null,
+                        'closing_qty_actual' => $closing?->closing_qty_actual ?? null,
+                        'physical_count'     => $closing?->physical_count ?? null,
+                    ])
+                );
+            }
+        });
+
+        return response()->json([
+            'message'        => "تم تحديث قيمة {$updatedOrders} فاتورة وإعادة توليد التقفيل",
+            'updated_orders' => $updatedOrders,
+        ]);
     }
 
     public function export(Request $request)

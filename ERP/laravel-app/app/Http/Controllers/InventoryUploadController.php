@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use App\Services\CostCalculationService;
 use App\Services\MappingService;
 use App\Services\StockLedgerService;
 use App\Models\MonthlyClosing;
@@ -19,10 +20,11 @@ class InventoryUploadController extends Controller
     protected $mappingService;
     protected $ledger;
 
-    public function __construct(MappingService $mappingService, StockLedgerService $ledger)
+    public function __construct(MappingService $mappingService, StockLedgerService $ledger, CostCalculationService $calc)
     {
         $this->mappingService = $mappingService;
         $this->ledger = $ledger;
+        $this->calc = $calc;
     }
 
     /**
@@ -174,6 +176,11 @@ class InventoryUploadController extends Controller
                 }
             }
         });
+
+        // auto-generate MonthlyClosing after opening balance upload
+        if ($type === 'opening') {
+            $this->calc->generateMonthlyClosing($clientId, $warehouseId, $month);
+        }
 
         return response()->json(['message' => 'تم حفظ البيانات بنجاح من ملف الإكسيل']);
     }

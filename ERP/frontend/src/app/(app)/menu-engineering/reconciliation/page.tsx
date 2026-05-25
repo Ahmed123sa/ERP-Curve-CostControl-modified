@@ -46,10 +46,15 @@ export default function ReconciliationPage() {
     enabled: !!branchId,
   });
 
-  // ── Build unique ingredient list from all recipes ──
+  // ── Filter out excluded/inactive recipes for reconciliation display ──
+  const visibleRecipes = useMemo(() => {
+    return allRecipes.filter((r: any) => r.status === 'active' && !r.exclude_from_reconciliation);
+  }, [allRecipes]);
+
+  // ── Build unique ingredient list from visible recipes ──
   const ingIndex = useMemo(() => {
     const seen: Record<string, string> = {};
-    for (const r of allRecipes) {
+    for (const r of visibleRecipes) {
       for (const it of r.items ?? []) {
         if (!seen[it.ingredient_id]) seen[it.ingredient_id] = it.ingredient_name;
       }
@@ -57,10 +62,10 @@ export default function ReconciliationPage() {
     return { ids: Object.keys(seen), names: seen };
   }, [allRecipes]);
 
-  // ── Group recipes by category ──
+  // ── Group visible recipes by category ──
   const grouped = useMemo(() => {
     const map: Record<string, any[]> = {};
-    for (const r of allRecipes) {
+    for (const r of visibleRecipes) {
       const cat = r.category || 'أخرى';
       if (!map[cat]) map[cat] = [];
       map[cat].push(r);
@@ -77,7 +82,7 @@ export default function ReconciliationPage() {
   // ── Theoretical calc helpers ──
   const theoForRecipe = (rid: string) => {
     if (!ingIndex.ids.length) return {};
-    const recipe = allRecipes.find((r: any) => r.id === rid);
+    const recipe = visibleRecipes.find((r: any) => r.id === rid);
     if (!recipe) return {};
     const sold = getSold(rid);
     const out: Record<string, number> = {};
@@ -189,13 +194,13 @@ export default function ReconciliationPage() {
           <div className="text-center text-gray-400 py-20">الرجاء اختيار الفرع</div>
         )}
 
-        {branchId && allRecipes.length === 0 && (
+        {branchId && visibleRecipes.length === 0 && (
           <div className="text-center text-gray-400 py-20 bg-white border rounded-xl">
-            لا توجد وصفات لهذا الفرع
+            لا توجد وصفات نشطة لهذا الفرع
           </div>
         )}
 
-        {branchId && allRecipes.length > 0 && (
+        {branchId && visibleRecipes.length > 0 && (
           <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
             <table className="w-full text-sm border-collapse" style={{ minWidth: ingIds.length * 130 + 300 }}>
               {/* ─── Column headers ─── */}

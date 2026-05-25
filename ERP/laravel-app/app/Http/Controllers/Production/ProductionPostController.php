@@ -24,9 +24,7 @@ class ProductionPostController extends Controller
         $totalCost = 0;
         foreach ($recipe->ingredients as $ing) {
             $qty = (float) $ing->qty;
-            $unitCost = $ing->unit_cost !== null
-                ? (float) $ing->unit_cost
-                : (float) (Item::find($ing->item_id)?->default_cost ?? 0);
+            $unitCost = (float) (Item::find($ing->item_id)?->default_cost ?? 0);
             $totalCost += $qty * $unitCost;
         }
 

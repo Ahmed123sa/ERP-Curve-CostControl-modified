@@ -13,11 +13,13 @@ class MenuReconciliationService
 {
     public function detailedReconcile(string $clientId, string $warehouseId, string $from, string $to, array $inlineSales = []): array
     {
-        // 1. Get ALL active recipes for this branch (or global)
+        // 1. Get active recipes for this branch (or global), excluding box items
         $recipes = MenuRecipe::where('client_id', $clientId)
             ->where(function ($q) use ($warehouseId) {
                 $q->where('branch_id', $warehouseId)->orWhereNull('branch_id');
             })
+            ->where('status', 'active')
+            ->where('exclude_from_reconciliation', false)
             ->with('items')
             ->get();
 

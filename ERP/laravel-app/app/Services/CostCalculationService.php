@@ -103,11 +103,6 @@ class CostCalculationService
         $endOfMonth   = $startOfMonth->copy()->endOfMonth();
         $prevMonth    = $startOfMonth->copy()->subDay()->toDateString();
 
-        // 1. أول المدة (من الشهور السابقة)
-        $openingQtyFromPrev = $this->currentStock($clientId, $warehouseId, $itemId, $prevMonth);
-        $openingAvgFromPrev = $this->weightedAverageCost($clientId, $warehouseId, $itemId, $prevMonth);
-        $openingValueFromPrev = round($openingQtyFromPrev * $openingAvgFromPrev, 2);
-
         // 2. تجميع الحركات في الشهر الحالي
         $ledger = StockLedger::where('client_id', $clientId)
             ->where('warehouse_id', $warehouseId)
@@ -119,9 +114,19 @@ class CostCalculationService
         $openingQtyThisMonth = (float) $ledger->where('voucher_type', 'opening')->sum('qty');
         $openingValThisMonth = (float) $ledger->where('voucher_type', 'opening')->sum('total_cost');
 
-        // أول المدة النهائي = (السابق + أي أرصدة افتتاحية مضافة يدوياً في هذا الشهر)
-        $openingQty   = $openingQtyFromPrev + $openingQtyThisMonth;
-        $openingValue = $openingValueFromPrev + $openingValThisMonth;
+        // أول المدة = الرصيد الافتتاحي اللي المستخدم دخله (ثابت، مش بيتأثر بالمسحوبات)
+        // لو مفيش رصيد افتتاحي للشهر الحالي → نستخدم رصيد نهاية الشهر السابق كـ fallback
+        $hasOpeningThisMonth = $ledger->where('voucher_type', 'opening')->isNotEmpty();
+        if ($hasOpeningThisMonth) {
+            $openingQty   = $openingQtyThisMonth;
+            $openingValue = $openingValThisMonth;
+        } else {
+            $openingQtyFromPrev = $this->currentStock($clientId, $warehouseId, $itemId, $prevMonth);
+            $openingAvgFromPrev = $this->weightedAverageCost($clientId, $warehouseId, $itemId, $prevMonth);
+            $openingValueFromPrev = round($openingQtyFromPrev * $openingAvgFromPrev, 2);
+            $openingQty   = $openingQtyFromPrev;
+            $openingValue = $openingValueFromPrev;
+        }
 
         // مشتريات (خارجي)
         $purchasesQty = (float) $ledger->where('voucher_type', 'purchase')->where('movement_type', 'in')->sum('qty');

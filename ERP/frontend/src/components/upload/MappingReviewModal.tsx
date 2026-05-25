@@ -6,7 +6,7 @@ import { api } from '@/lib/api';
 
 interface Props {
   voucher: any;
-  onResolve: (resolvedLines: any[]) => void;
+  onResolve: (updatedVoucher: any) => void;
   onClose: () => void;
 }
 

@@ -5,6 +5,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Production\Recipe;
 use App\Models\Production\RecipeIngredient;
 use App\Models\Item;
+use App\Services\ActivityLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -15,7 +16,7 @@ class RecipeController extends Controller
     {
         $clientId = $request->user()->current_client_id;
         $recipes = Recipe::where('client_id', $clientId)
-            ->with(['ingredients', 'outputItem:id,name,unit', 'outputWarehouse:id,name'])
+            ->with(['ingredients.item:id,name,unit,default_cost', 'outputItem:id,name,unit,default_cost', 'outputWarehouse:id,name'])
             ->orderBy('name')
             ->get();
         return response()->json($recipes);
@@ -66,19 +67,19 @@ class RecipeController extends Controller
                 'recipe_id' => $recipe->id,
                 'item_id'   => $ing['item_id'],
                 'qty'       => $ing['qty'],
-                'unit_cost' => $ing['unit_cost'] ?? null,
+                'unit_cost' => null,
             ]);
         }
 
         $this->syncOutputCost($recipe, $data);
 
-        $recipe->load(['ingredients', 'outputItem:id,name,unit', 'outputWarehouse:id,name']);
+        $recipe->load(['ingredients.item:id,name,unit,default_cost', 'outputItem:id,name,unit,default_cost', 'outputWarehouse:id,name']);
         return response()->json($recipe, 201);
     }
 
     public function show(Request $request, Recipe $recipe): JsonResponse
     {
-        $recipe->load(['ingredients', 'outputItem:id,name,unit', 'outputWarehouse:id,name']);
+        $recipe->load(['ingredients.item:id,name,unit,default_cost', 'outputItem:id,name,unit,default_cost', 'outputWarehouse:id,name']);
         return response()->json($recipe);
     }
 
@@ -114,7 +115,7 @@ class RecipeController extends Controller
                         $ingredient->update([
                             'item_id'   => $ing['item_id'],
                             'qty'       => $ing['qty'],
-                            'unit_cost' => $ing['unit_cost'] ?? null,
+                            'unit_cost' => null,
                         ]);
                         $keepIds[] = $ing['id'];
                         continue;
@@ -125,7 +126,7 @@ class RecipeController extends Controller
                     'recipe_id' => $recipe->id,
                     'item_id'   => $ing['item_id'],
                     'qty'       => $ing['qty'],
-                    'unit_cost' => $ing['unit_cost'] ?? null,
+                    'unit_cost' => null,
                 ]);
                 $keepIds[] = $new->id;
             }
@@ -136,7 +137,7 @@ class RecipeController extends Controller
 
         $this->syncOutputCost($recipe, $data);
 
-        $recipe->load(['ingredients', 'outputItem:id,name,unit', 'outputWarehouse:id,name']);
+        $recipe->load(['ingredients.item:id,name,unit,default_cost', 'outputItem:id,name,unit,default_cost', 'outputWarehouse:id,name']);
         return response()->json($recipe);
     }
 
@@ -149,8 +150,9 @@ class RecipeController extends Controller
         foreach ($recipes as $recipe) {
             $data = [
                 'production_qty' => $recipe->production_qty ?? 1,
+                'ingredients'    => $recipe->ingredients->toArray(),
+                'sizes'          => $recipe->sizes,
             ];
-            $data['ingredients'] = $recipe->ingredients->toArray();
 
             $this->syncOutputCost($recipe, $data);
             $updated++;
@@ -173,18 +175,26 @@ class RecipeController extends Controller
         $totalCost = 0;
         foreach ($ingredients as $ing) {
             $qty = (float) ($ing['qty'] ?? 0);
-            $unitCost = isset($ing['unit_cost']) && $ing['unit_cost'] !== null
-                ? (float) $ing['unit_cost']
-                : (Item::find($ing['item_id'])?->default_cost ?? 0);
+            $unitCost = (Item::find($ing['item_id'])?->default_cost ?? 0);
             $totalCost += $qty * $unitCost;
         }
 
         $pricePerKgOutput = $totalCost / $productionQty;
 
-        // تحديث المنتج الرئيسي
+        // تحديث المنتج الرئيسي + تسجيل ActivityLog
+        $oldMainCost = (float) (Item::find($recipe->item_id)?->default_cost ?? 0);
         Item::where('id', $recipe->item_id)->update(['default_cost' => $pricePerKgOutput]);
+        if ((float) $pricePerKgOutput !== $oldMainCost) {
+            ActivityLogger::log(
+                action: 'price_updated',
+                entityType: 'Item',
+                entityId: $recipe->item_id,
+                oldValues: ['default_cost' => $oldMainCost],
+                newValues: ['default_cost' => round($pricePerKgOutput, 4), 'source' => 'recipe_sync'],
+            );
+        }
 
-        // تحديث كل مقاس حسب وزنه
+        // تحديث كل مقاس حسب وزنه + تسجيل ActivityLog
         $sizes = $data['sizes'] ?? $recipe->sizes ?? [];
         if (is_array($sizes) && count($sizes)) {
             foreach ($sizes as $size) {
@@ -192,7 +202,17 @@ class RecipeController extends Controller
                 if ($grams <= 0) continue;
                 $variantPrice = ($grams / 1000) * $pricePerKgOutput;
                 if (!empty($size['item_id'])) {
+                    $oldVariantCost = (float) (Item::find($size['item_id'])?->default_cost ?? 0);
                     Item::where('id', $size['item_id'])->update(['default_cost' => round($variantPrice, 4)]);
+                    if ((float) $variantPrice !== $oldVariantCost) {
+                        ActivityLogger::log(
+                            action: 'price_updated',
+                            entityType: 'Item',
+                            entityId: $size['item_id'],
+                            oldValues: ['default_cost' => $oldVariantCost],
+                            newValues: ['default_cost' => round($variantPrice, 4), 'source' => 'recipe_sync'],
+                        );
+                    }
                 }
             }
         }

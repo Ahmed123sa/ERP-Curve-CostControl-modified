@@ -53,6 +53,8 @@ class MenuRecipeController extends Controller
             'items_count'       => (int) $r->items_count,
             'total_cost'        => $r->total_cost,
             'cost_per_portion'  => $r->cost_per_portion,
+            'exclude_from_reconciliation' => (bool) $r->exclude_from_reconciliation,
+            'exclude_from_menu' => (bool) $r->exclude_from_menu,
             'items'             => $withItems ? $r->items->map(fn($i) => [
                 'ingredient_id'   => $i->ingredient_id,
                 'ingredient_name' => $i->ingredient?->name ?? '—',
@@ -77,6 +79,8 @@ class MenuRecipeController extends Controller
             'target_food_cost_pct' => 'nullable|numeric|min:0|max:100',
             'prep_instructions' => 'nullable|string',
             'status' => 'nullable|string|in:draft,active,inactive',
+            'exclude_from_reconciliation' => 'boolean',
+            'exclude_from_menu' => 'boolean',
         ]);
 
         $data['client_id'] = $request->user()->current_client_id;
@@ -87,7 +91,7 @@ class MenuRecipeController extends Controller
             ->where('name', $data['name'])
             ->where('branch_id', $data['branch_id'] ?? null)
             ->where('menu_id', $data['menu_id'] ?? null)
-            ->withTrashed()->exists();
+            ->exists();
 
         if ($exists) {
             return response()->json(['message' => 'يوجد صنف بنفس الاسم لهذا الفرع/القائمة بالفعل'], 422);
@@ -139,6 +143,8 @@ class MenuRecipeController extends Controller
                 'prep_instructions' => $recipe->prep_instructions,
                 'status'            => $recipe->status,
                 'version'           => $recipe->version,
+                'exclude_from_reconciliation' => (bool) $recipe->exclude_from_reconciliation,
+                'exclude_from_menu' => (bool) $recipe->exclude_from_menu,
                 'items'             => $items,
             ],
             'totals' => $totals,
@@ -160,7 +166,9 @@ class MenuRecipeController extends Controller
             'selling_price' => 'nullable|numeric|min:0',
             'target_food_cost_pct' => 'nullable|numeric|min:0|max:100',
             'prep_instructions' => 'nullable|string',
-            'status' => 'nullable|string|in:draft,active,archived',
+            'status' => 'nullable|string|in:draft,active,inactive,archived',
+            'exclude_from_reconciliation' => 'boolean',
+            'exclude_from_menu' => 'boolean',
         ]);
 
         if (isset($data['name']) && $data['name'] !== $recipe->name) {
@@ -169,7 +177,7 @@ class MenuRecipeController extends Controller
                 ->where('branch_id', $data['branch_id'] ?? $recipe->branch_id)
                 ->where('menu_id', $data['menu_id'] ?? $recipe->menu_id)
                 ->where('id', '!=', $recipe->id)
-                ->withTrashed()->exists();
+                ->exists();
             if ($exists) {
                 return response()->json(['message' => 'يوجد صنف بنفس الاسم لهذا الفرع/القائمة بالفعل'], 422);
             }
@@ -191,6 +199,67 @@ class MenuRecipeController extends Controller
             ->findOrFail($id);
         $recipe->delete();
         return response()->json(['message' => 'deleted']);
+    }
+
+    public function copy(Request $request, string $id): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+        $sourceRecipe = MenuRecipe::where('client_id', $clientId)
+            ->with('items')
+            ->findOrFail($id);
+
+        $data = $request->validate([
+            'name' => 'required|string|max:255',
+            'category' => 'nullable|string|max:50',
+        ]);
+
+        $exists = MenuRecipe::where('client_id', $clientId)
+            ->where('name', $data['name'])
+            ->where('menu_id', $sourceRecipe->menu_id)
+            ->where('branch_id', $sourceRecipe->branch_id)
+            ->exists();
+        if ($exists) {
+            return response()->json(['message' => 'يوجد صنف بنفس الاسم لهذا الفرع/القائمة بالفعل'], 422);
+        }
+
+        DB::transaction(function () use ($sourceRecipe, $data, $clientId, $request) {
+            $newRecipe = MenuRecipe::create([
+                'client_id' => $clientId,
+                'branch_id' => $sourceRecipe->branch_id,
+                'menu_id' => $sourceRecipe->menu_id,
+                'name' => $data['name'],
+                'code' => $sourceRecipe->code,
+                'category' => $data['category'] ?? $sourceRecipe->category,
+                'recipe_type' => $sourceRecipe->recipe_type,
+                'portions' => $sourceRecipe->portions,
+                'selling_price' => $sourceRecipe->selling_price,
+                'target_food_cost_pct' => $sourceRecipe->target_food_cost_pct,
+                'prep_instructions' => $sourceRecipe->prep_instructions,
+                'status' => 'draft',
+                'version' => 1,
+                'created_by' => $request->user()->id,
+            ]);
+
+            foreach ($sourceRecipe->items as $item) {
+                MenuRecipeItem::create([
+                    'recipe_id' => $newRecipe->id,
+                    'ingredient_id' => $item->ingredient_id,
+                    'qty' => $item->qty,
+                    'weight_g' => $item->weight_g,
+                    'volume_ml' => $item->volume_ml,
+                    'purchase_unit' => $item->purchase_unit,
+                    'purchase_unit_price' => $item->purchase_unit_price,
+                    'recipe_unit' => $item->recipe_unit,
+                    'conversion_factor' => $item->conversion_factor,
+                    'yield_pct' => $item->yield_pct,
+                    'ep_cost' => $item->ep_cost,
+                    'line_total' => $item->line_total,
+                    'sort_order' => $item->sort_order,
+                ]);
+            }
+        });
+
+        return response()->json(['message' => 'تم نسخ الصنف بنجاح'], 201);
     }
 
     // ── Bulk update ──

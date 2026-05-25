@@ -413,7 +413,16 @@ function PriceChangesTab({ data }: { data: any }) {
                 <td className={`px-3 py-2 text-end font-mono font-bold ${c.total_impact >= 0 ? 'text-red-600' : 'text-green-600'}`}>
                   {c.total_impact > 0 ? '+' : ''}{c.total_impact.toLocaleString()} ج
                 </td>
-                <td className="px-3 py-2 text-end text-gray-500 text-xs">{c.source || '—'}</td>
+                <td className="px-3 py-2 text-end text-gray-500 text-xs">
+                  {c.source_type === 'activity_log' ? (
+                    <span className="inline-flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-orange-400 inline-block" />
+                      {c.source || '—'}
+                    </span>
+                  ) : (
+                    c.source || '—'
+                  )}
+                </td>
                 <td className="px-3 py-2 text-end text-gray-400 text-xs">{c.date ? new Date(c.date).toLocaleDateString('ar-EG') : '—'}</td>
               </tr>
             ))}

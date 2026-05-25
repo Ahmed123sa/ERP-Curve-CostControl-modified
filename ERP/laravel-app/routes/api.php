@@ -92,6 +92,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/closing/export-pdf', [ClosingController::class, 'exportPdf']);
     });
 
+    // Edit Mode في التقفيل (نفس صلاحية تعديل الفاتورة)
+    Route::middleware('permission:vouchers.purchase')->group(function () {
+        Route::get('/closing/cell-orders', [ClosingController::class, 'cellOrders']);
+        Route::get('/closing/monthly-orders', [ClosingController::class, 'monthlyOrders']);
+        Route::patch('/closing/edit-daily-cell', [ClosingController::class, 'editDailyCell']);
+        Route::patch('/closing/edit-cell-value', [ClosingController::class, 'editCellValue']);
+    });
+
     // ── Mappings (إدارة ربط الأسماء) ─────────────────────
     Route::middleware('permission:mappings')->group(function () {
         Route::get('/mappings', [MappingController::class, 'index']);
@@ -151,6 +159,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('daily', [\App\Http\Controllers\Production\DailyProductionController::class, 'store']);
         Route::get('post-preview', [\App\Http\Controllers\Production\ProductionPostController::class, 'preview']);
         Route::post('post', [\App\Http\Controllers\Production\ProductionPostController::class, 'post']);
+        Route::get('market-prices/scrape', [\App\Http\Controllers\Production\MarketPriceController::class, 'scrape']);
+        Route::get('market-prices', [\App\Http\Controllers\Production\MarketPriceController::class, 'index']);
+        Route::get('market-prices/items', [\App\Http\Controllers\Production\MarketPriceController::class, 'items']);
+        Route::post('market-prices/items', [\App\Http\Controllers\Production\MarketPriceController::class, 'addItem']);
+        Route::delete('market-prices/items/{id}', [\App\Http\Controllers\Production\MarketPriceController::class, 'removeItem']);
+        Route::post('market-prices', [\App\Http\Controllers\Production\MarketPriceController::class, 'updatePrices']);
+        Route::get('market-prices/latest', [\App\Http\Controllers\Production\MarketPriceController::class, 'latest']);
+        Route::apiResource('slaughter', \App\Http\Controllers\Production\SlaughterController::class)->except(['edit', 'create']);
+        Route::post('slaughter/{slaughter}/post', [\App\Http\Controllers\Production\SlaughterController::class, 'postToProduction']);
     });
 
     // ── Menu Engineering Module ──────────────────────────
@@ -158,12 +175,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('menus', \App\Http\Controllers\MenuEngineering\MenuEngineeringMenuController::class);
         Route::get('/menus/{menu}/export-excel', [\App\Http\Controllers\MenuEngineering\MenuExportController::class, 'exportMenuExcel']);
         Route::get('/menus/{menu}/export-pdf', [\App\Http\Controllers\MenuEngineering\MenuExportController::class, 'exportMenuPdf']);
+        Route::post('/menus/{menu}/copy', [\App\Http\Controllers\MenuEngineering\MenuEngineeringMenuController::class, 'copy']);
         Route::apiResource('categories', \App\Http\Controllers\MenuEngineering\MenuCategoryController::class);
         Route::get('/ingredients', [\App\Http\Controllers\MenuEngineering\MenuIngredientController::class, 'index']);
         Route::get('/unit-conversions', [\App\Http\Controllers\MenuEngineering\MenuUnitConversionController::class, 'index']);
         Route::post('/recipes/bulk-update-item-quantity', [\App\Http\Controllers\MenuEngineering\MenuRecipeController::class, 'bulkUpdateItemQuantity']);
         Route::apiResource('recipes', \App\Http\Controllers\MenuEngineering\MenuRecipeController::class);
         Route::post('/recipes/{recipe}/sync-items', [\App\Http\Controllers\MenuEngineering\MenuRecipeController::class, 'syncItems']);
+        Route::post('/recipes/{recipe}/copy', [\App\Http\Controllers\MenuEngineering\MenuRecipeController::class, 'copy']);
         Route::get('/recipes/{recipe}/versions', [\App\Http\Controllers\MenuEngineering\MenuRecipeController::class, 'versions']);
         Route::post('/recipes/{recipe}/versions', [\App\Http\Controllers\MenuEngineering\MenuRecipeController::class, 'createVersion']);
         Route::get('/report/summary', [\App\Http\Controllers\MenuEngineering\MenuReportController::class, 'summary']);
