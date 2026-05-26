@@ -185,6 +185,8 @@ export default function MenuEngineeringPage() {
   const [editingPrice, setEditingPrice] = useState('');
   const [editingMenuId, setEditingMenuId] = useState<string | null>(null);
   const [editingMenuName, setEditingMenuName] = useState('');
+  const [showMoveCategoryModal, setShowMoveCategoryModal] = useState(false);
+  const [moveCategoryTarget, setMoveCategoryTarget] = useState('');
   const [showBulkUpdateModal, setShowBulkUpdateModal] = useState(false);
   const [bulkUpdateIngredient, setBulkUpdateIngredient] = useState<{ name: string; id: string; currentQty: number } | null>(null);
   const [bulkUpdateQty, setBulkUpdateQty] = useState<number>(0);
@@ -197,11 +199,33 @@ export default function MenuEngineeringPage() {
   const [copyRecipeSource, setCopyRecipeSource] = useState<any>(null);
   const [copyRecipeName, setCopyRecipeName] = useState('');
   const [copyRecipeCategory, setCopyRecipeCategory] = useState('');
+  const [showCopyCategoryModal, setShowCopyCategoryModal] = useState(false);
+  const [copyCategorySource, setCopyCategorySource] = useState<any>(null);
+  const [copyCategoryName, setCopyCategoryName] = useState('');
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState('');
+  const [editingStatusId, setEditingStatusId] = useState<string | null>(null);
+  const [editingStatus, setEditingStatus] = useState('');
+  const [showBulkAddModal, setShowBulkAddModal] = useState(false);
+  const [bulkAddIngredientId, setBulkAddIngredientId] = useState('');
+  const [bulkAddQty, setBulkAddQty] = useState(0);
+  const [showBulkReplaceModal, setShowBulkReplaceModal] = useState(false);
+  const [bulkReplaceOldName, setBulkReplaceOldName] = useState('');
+  const [bulkReplaceOldId, setBulkReplaceOldId] = useState('');
+  const [bulkReplaceNewId, setBulkReplaceNewId] = useState('');
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [bulkDeleteIngredientName, setBulkDeleteIngredientName] = useState('');
+  const [bulkDeleteIngredientId, setBulkDeleteIngredientId] = useState('');
 
   const renameRecipeMutation = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) => api.put(`/menu-engineering/recipes/${id}`, { name }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['menu-recipes'] });
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || 'فشل إعادة التسمية');
+    },
+    onSettled: () => {
       setEditingNameId(null);
     },
   });
@@ -212,6 +236,20 @@ export default function MenuEngineeringPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['menu-recipes'] });
       setEditingPriceId(null);
+    },
+  });
+
+  const updateStatusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      api.put(`/menu-engineering/recipes/${id}`, { status }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['menu-recipes'] });
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || 'فشل تغيير الحالة');
+    },
+    onSettled: () => {
+      setEditingStatusId(null);
     },
   });
 
@@ -237,6 +275,98 @@ export default function MenuEngineeringPage() {
     },
     onError: (err: any) => {
       toast.error(err?.response?.data?.message || 'حدث خطأ');
+    },
+  });
+
+  const copyCategoryMutation = useMutation({
+    mutationFn: (data: any) => api.post(`/menu-engineering/categories/${data.category}/copy`, { name: data.name, menu_id: selectedMenu?.id }),
+    onSuccess: (res) => {
+      toast.success(res.data?.message || 'تم نسخ التصنيف بنجاح');
+      qc.invalidateQueries({ queryKey: ['menu-recipes'] });
+      qc.invalidateQueries({ queryKey: ['menu-categories'] });
+      setShowCopyCategoryModal(false);
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || 'حدث خطأ');
+    },
+  });
+
+  const bulkCopyRecipesMutation = useMutation({
+    mutationFn: (ids: string[]) => api.post('/menu-engineering/recipes/bulk-copy', { ids }),
+    onSuccess: (res) => {
+      toast.success(res.data?.message || 'تم نسخ الأصناف بنجاح');
+      setSelectedIds(new Set());
+      qc.invalidateQueries({ queryKey: ['menu-recipes'] });
+      qc.invalidateQueries({ queryKey: ['menu-categories'] });
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || 'حدث خطأ');
+    },
+  });
+
+  const bulkMoveCategoryMutation = useMutation({
+    mutationFn: ({ ids, category }: { ids: string[]; category: string }) =>
+      api.post('/menu-engineering/recipes/bulk-move-category', { ids, category }),
+    onSuccess: (res) => {
+      toast.success(res.data?.message || 'تم نقل الأصناف بنجاح');
+      setSelectedIds(new Set());
+      setShowMoveCategoryModal(false);
+      qc.invalidateQueries({ queryKey: ['menu-recipes'] });
+      qc.invalidateQueries({ queryKey: ['menu-categories'] });
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || 'حدث خطأ');
+    },
+  });
+
+  const bulkAddItemMutation = useMutation({
+    mutationFn: (data: any) => api.post('/menu-engineering/recipes/bulk-add-item', data),
+    onSuccess: (res) => {
+      toast.success(res.data?.message || 'تم إضافة الصنف بنجاح');
+      setShowBulkAddModal(false);
+      qc.invalidateQueries({ queryKey: ['menu-recipe', selectedRecipe?.id] });
+      qc.invalidateQueries({ queryKey: ['menu-recipes'] });
+      if (selectedRecipe?.id) loadRecipeSheet(selectedRecipe.id);
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || 'حدث خطأ');
+    },
+  });
+
+  const bulkReplaceItemMutation = useMutation({
+    mutationFn: (data: any) => api.post('/menu-engineering/recipes/bulk-replace-item', data),
+    onSuccess: (res) => {
+      toast.success(res.data?.message || 'تم استبدال الصنف بنجاح');
+      setShowBulkReplaceModal(false);
+      qc.invalidateQueries({ queryKey: ['menu-recipe', selectedRecipe?.id] });
+      qc.invalidateQueries({ queryKey: ['menu-recipes'] });
+      if (selectedRecipe?.id) loadRecipeSheet(selectedRecipe.id);
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || 'حدث خطأ');
+    },
+  });
+
+  const bulkDeleteItemMutation = useMutation({
+    mutationFn: (data: any) => api.post('/menu-engineering/recipes/bulk-delete-item', data),
+    onSuccess: (res) => {
+      toast.success(res.data?.message || 'تم حذف الصنف بنجاح');
+      setShowBulkDeleteModal(false);
+      qc.invalidateQueries({ queryKey: ['menu-recipe', selectedRecipe?.id] });
+      qc.invalidateQueries({ queryKey: ['menu-recipes'] });
+      if (selectedRecipe?.id) loadRecipeSheet(selectedRecipe.id);
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || 'حدث خطأ');
+    },
+  });
+
+  const renameCategoryMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) => api.put(`/menu-engineering/categories/${id}`, { name }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['menu-categories'] });
+      qc.invalidateQueries({ queryKey: ['menu-recipes'] });
+      setEditingCategoryId(null);
     },
   });
 
@@ -479,8 +609,22 @@ export default function MenuEngineeringPage() {
           <div className="space-y-2 max-h-64 overflow-y-auto">
             {modalCategories.map((c: any) => (
               <div key={c.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
-                <span className="text-sm">{c.name}</span>
-                <button onClick={() => { if (confirm(`حذف "${c.name}"?`)) deleteCategoryMutation.mutate(c.id); }} className="text-red-500 hover:text-red-700 text-xs px-2 py-1">✕</button>
+                {editingCategoryId === c.id ? (
+                  <input autoFocus value={editingCategoryName} onChange={(e) => setEditingCategoryName(e.target.value)}
+                    onBlur={() => { if (editingCategoryName.trim()) renameCategoryMutation.mutate({ id: c.id, name: editingCategoryName.trim() }); else setEditingCategoryId(null); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setEditingCategoryId(null); }}
+                    className="border border-blue-300 rounded px-2 py-0.5 text-sm outline-none flex-1 ml-2" />
+                ) : (
+                  <span className="text-sm cursor-pointer hover:text-blue-600 flex items-center gap-1"
+                    onClick={() => { setEditingCategoryId(c.id); setEditingCategoryName(c.name); }}>
+                    {c.name}
+                    <span className="text-gray-300 hover:text-blue-500 text-xs">✏️</span>
+                  </span>
+                )}
+                <div className="flex gap-1">
+                  <button onClick={() => { setCopyCategorySource(c); setCopyCategoryName(c.name + ' (نسخة)'); setShowCopyCategoryModal(true); }} className="text-blue-400 hover:text-blue-600 text-xs px-2 py-1" title="نسخ التصنيف">📋</button>
+                  <button onClick={() => { if (confirm(`حذف "${c.name}"?`)) deleteCategoryMutation.mutate(c.id); }} className="text-red-500 hover:text-red-700 text-xs px-2 py-1">✕</button>
+                </div>
               </div>
             ))}
             {modalCategories.length === 0 && (
@@ -518,11 +662,14 @@ export default function MenuEngineeringPage() {
             {categories.map((c: any) => (
               <div
                 key={c.id}
-                onClick={() => { setSelectedCategory(c); setLevel('items'); }}
-                className="bg-white border-2 border-gray-200 rounded-2xl p-6 cursor-pointer hover:border-green-400 hover:shadow-lg transition-all text-center"
+                className="bg-white border-2 border-gray-200 rounded-2xl p-6 cursor-pointer hover:border-green-400 hover:shadow-lg transition-all text-center relative"
               >
-                <div className="text-2xl mb-1">{c.icon || '📋'}</div>
-                <div className="font-bold text-gray-700">{c.name}</div>
+                <div onClick={() => { setSelectedCategory(c); setLevel('items'); }}>
+                  <div className="text-2xl mb-1">{c.icon || '📋'}</div>
+                  <div className="font-bold text-gray-700">{c.name}</div>
+                </div>
+                <button onClick={(e) => { e.stopPropagation(); setCopyCategorySource(c); setCopyCategoryName(c.name + ' (نسخة)'); setShowCopyCategoryModal(true); }}
+                  className="text-[11px] text-blue-500 hover:text-blue-700 mt-2 font-medium" title="نسخ التصنيف">📋 نسخ</button>
               </div>
             ))}
           </div>
@@ -601,11 +748,21 @@ export default function MenuEngineeringPage() {
         </div>
 
         {selectedIds.size > 0 && (
-          <button onClick={() => {
-            if (confirm(`حذف ${selectedIds.size} صنف(أصناف)؟`)) bulkDeleteRecipesMutation.mutate(Array.from(selectedIds));
-          }} className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">
-            ✕ حذف المحدد ({selectedIds.size})
-          </button>
+          <>
+            <button onClick={() => {
+              if (confirm(`حذف ${selectedIds.size} صنف(أصناف)؟`)) bulkDeleteRecipesMutation.mutate(Array.from(selectedIds));
+            }} className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">
+              ✕ حذف المحدد ({selectedIds.size})
+            </button>
+            <button onClick={() => bulkCopyRecipesMutation.mutate(Array.from(selectedIds))}
+              className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">
+              📋 نسخ المحدد ({selectedIds.size})
+            </button>
+            <button onClick={() => { setMoveCategoryTarget(''); setShowMoveCategoryModal(true); }}
+              className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700">
+              📂 نقل المحدد ({selectedIds.size})
+            </button>
+          </>
         )}
       </div>
 
@@ -626,17 +783,36 @@ export default function MenuEngineeringPage() {
               <div className="font-bold text-sm text-gray-800 mb-1">
                 {editingNameId === r.id ? (
                   <input autoFocus value={editingName} onChange={(e) => setEditingName(e.target.value)}
-                    onBlur={() => { if (editingName.trim()) renameRecipeMutation.mutate({ id: r.id, name: editingName.trim() }); else setEditingNameId(null); }}
+                    onBlur={() => { const val = editingName.trim(); setEditingNameId(null); if (val) renameRecipeMutation.mutate({ id: r.id, name: val }); }}
                     onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setEditingNameId(null); }}
+                    onClick={(e) => e.stopPropagation()}
                     className="border border-blue-300 rounded px-1 py-0.5 text-sm w-full outline-none text-center" />
                 ) : (
-                  <span className="cursor-pointer hover:text-blue-600 border-b border-dashed border-gray-300"
-                    onDoubleClick={(e) => { e.stopPropagation(); setEditingNameId(r.id); setEditingName(r.name); }}>
+                  <span className="inline-flex items-center gap-1">
                     {r.name}
+                    <span className="text-gray-300 hover:text-blue-500 text-xs cursor-pointer" title="إعادة تسمية"
+                      onClick={(e) => { e.stopPropagation(); setEditingNameId(r.id); setEditingName(r.name); }}>✏️</span>
                   </span>
                 )}
               </div>
-              <div className={`text-xs px-2 py-0.5 rounded-full inline-block ${r.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{r.status}</div>
+              <div className="text-xs" onClick={(e) => e.stopPropagation()}>
+                {editingStatusId === r.id ? (
+                  <select value={editingStatus} onChange={(e) => setEditingStatus(e.target.value)}
+                    onBlur={() => { if (editingStatus) updateStatusMutation.mutate({ id: r.id, status: editingStatus }); else setEditingStatusId(null); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLSelectElement).blur(); if (e.key === 'Escape') setEditingStatusId(null); }}
+                    autoFocus className="border border-blue-300 rounded px-1 py-0.5 text-xs outline-none bg-white">
+                    <option value="draft">draft</option>
+                    <option value="active">active</option>
+                    <option value="inactive">inactive</option>
+                    <option value="archived">archived</option>
+                  </select>
+                ) : (
+                  <span className={`inline-block px-2 py-0.5 rounded-full cursor-pointer hover:opacity-80 ${r.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}
+                    onClick={(e) => { e.stopPropagation(); setEditingStatusId(r.id); setEditingStatus(r.status); }}>
+                    {r.status}
+                  </span>
+                )}
+              </div>
               <div className="mt-2 text-xs text-blue-700 font-mono">{r.total_cost?.toFixed(2)} ج</div>
               <div className="text-xs font-mono" onClick={(e) => e.stopPropagation()}>
                 {editingPriceId === r.id ? (
@@ -709,18 +885,35 @@ export default function MenuEngineeringPage() {
                   <td className="px-4 py-3 font-medium text-gray-800">
                     {editingNameId === r.id ? (
                       <input autoFocus value={editingName} onChange={(e) => setEditingName(e.target.value)}
-                        onBlur={() => { if (editingName.trim()) renameRecipeMutation.mutate({ id: r.id, name: editingName.trim() }); else setEditingNameId(null); }}
+                        onBlur={() => { const val = editingName.trim(); setEditingNameId(null); if (val) renameRecipeMutation.mutate({ id: r.id, name: val }); }}
                         onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setEditingNameId(null); }}
+                        onClick={(e) => e.stopPropagation()}
                         className="border border-blue-300 rounded px-2 py-0.5 text-sm w-full outline-none" />
                     ) : (
-                      <span className="cursor-pointer hover:text-blue-600 border-b border-dashed border-gray-300"
-                        onDoubleClick={(e) => { e.stopPropagation(); setEditingNameId(r.id); setEditingName(r.name); }}>
+                      <span className="inline-flex items-center gap-1">
                         {r.name}
+                        <span className="text-gray-300 hover:text-blue-500 text-xs cursor-pointer" title="إعادة تسمية"
+                          onClick={(e) => { e.stopPropagation(); setEditingNameId(r.id); setEditingName(r.name); }}>✏️</span>
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${r.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{r.status}</span>
+                  <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                    {editingStatusId === r.id ? (
+                      <select value={editingStatus} onChange={(e) => setEditingStatus(e.target.value)}
+                        onBlur={() => { if (editingStatus) updateStatusMutation.mutate({ id: r.id, status: editingStatus }); else setEditingStatusId(null); }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLSelectElement).blur(); if (e.key === 'Escape') setEditingStatusId(null); }}
+                        autoFocus className="border border-blue-300 rounded px-1 py-0.5 text-xs outline-none bg-white">
+                        <option value="draft">draft</option>
+                        <option value="active">active</option>
+                        <option value="inactive">inactive</option>
+                        <option value="archived">archived</option>
+                      </select>
+                    ) : (
+                      <span className={`text-xs px-2 py-0.5 rounded-full cursor-pointer hover:opacity-80 ${r.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}
+                        onClick={(e) => { e.stopPropagation(); setEditingStatusId(r.id); setEditingStatus(r.status); }}>
+                        {r.status}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-left font-mono text-blue-700 font-medium">{r.total_cost?.toFixed(2)} ج</td>
                   <td className="px-4 py-3 text-left font-mono" onClick={(e) => e.stopPropagation()}>
@@ -826,6 +1019,41 @@ export default function MenuEngineeringPage() {
                 setBulkRecipeIds(recipes.map((r: any) => r.id));
                 setShowBulkUpdateModal(true);
               }} className="px-3 py-1.5 bg-amber-100 text-amber-700 rounded-lg text-sm hover:bg-amber-200">📊 تحديث الكمية للكل</button>
+              <button onClick={() => {
+                setBulkAddIngredientId('');
+                setBulkAddQty(0);
+                setBulkRecipeIds(recipes.map((r: any) => r.id));
+                setShowBulkAddModal(true);
+              }} className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-sm hover:bg-blue-200">➕ إضافة صنف للكل</button>
+              <button onClick={() => {
+                const hot = hotRef.current?.hotInstance;
+                if (!hot) return;
+                const sel = hot.getSelectedLast();
+                let row = sel ? sel[0] : selectedRowRef.current;
+                if (row < 0) row = 0;
+                const data = hot.getData();
+                const r = data[row];
+                if (!r || !r[0] || !ingredientIdMap[r[0]]) { toast.error('اختر صنفاً صحيحاً أولاً'); return; }
+                setBulkReplaceOldName(r[0]);
+                setBulkReplaceOldId(ingredientIdMap[r[0]]);
+                setBulkReplaceNewId('');
+                setBulkRecipeIds(recipes.map((r: any) => r.id));
+                setShowBulkReplaceModal(true);
+              }} className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg text-sm hover:bg-purple-200">🔄 استبدال صنف</button>
+              <button onClick={() => {
+                const hot = hotRef.current?.hotInstance;
+                if (!hot) return;
+                const sel = hot.getSelectedLast();
+                let row = sel ? sel[0] : selectedRowRef.current;
+                if (row < 0) row = 0;
+                const data = hot.getData();
+                const r = data[row];
+                if (!r || !r[0] || !ingredientIdMap[r[0]]) { toast.error('اختر صنفاً صحيحاً أولاً'); return; }
+                setBulkDeleteIngredientName(r[0]);
+                setBulkDeleteIngredientId(ingredientIdMap[r[0]]);
+                setBulkRecipeIds(recipes.map((r: any) => r.id));
+                setShowBulkDeleteModal(true);
+              }} className="px-3 py-1.5 bg-red-100 text-red-700 rounded-lg text-sm hover:bg-red-200">🗑️ مسح صنف من الكل</button>
               <button onClick={handleSaveSheet} disabled={saveItemsMutation.isPending} className="px-4 py-1.5 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50">
                 {saveItemsMutation.isPending ? '...' : '💾 حفظ الشيت'}
               </button>
@@ -1142,6 +1370,237 @@ export default function MenuEngineeringPage() {
     );
   };
 
+  const renderCopyCategoryModal = () => {
+    if (!showCopyCategoryModal) return null;
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setShowCopyCategoryModal(false)}>
+        <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <h3 className="text-lg font-bold mb-1">نسخ التصنيف</h3>
+          <p className="text-sm text-gray-500 mb-4">إنشاء نسخة من التصنيف "{copyCategorySource?.name}" بكل أصنافه</p>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">اسم التصنيف الجديد</label>
+              <input value={copyCategoryName} onChange={(e) => setCopyCategoryName(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none" />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => copyCategoryMutation.mutate({ category: copyCategorySource?.id, name: copyCategoryName })}
+                disabled={!copyCategoryName.trim() || copyCategoryMutation.isPending}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
+                {copyCategoryMutation.isPending ? '...' : 'نسخ التصنيف'}
+              </button>
+              <button onClick={() => setShowCopyCategoryModal(false)} className="px-4 py-2 text-gray-500 border border-gray-200 rounded-lg text-sm hover:bg-gray-50">إلغاء</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ── Bulk Add Item Modal ──
+  const renderBulkAddModal = () => {
+    if (!showBulkAddModal) return null;
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setShowBulkAddModal(false)}>
+        <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <h3 className="text-lg font-bold mb-4">إضافة صنف للكل</h3>
+
+          <div className="mb-4">
+            <label className="text-xs text-gray-500 block mb-1">الصنف</label>
+            <select value={bulkAddIngredientId} onChange={(e) => setBulkAddIngredientId(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none">
+              <option value="">-- اختر الصنف --</option>
+              {ingredients.map((i: any) => (
+                <option key={i.id} value={i.id}>{i.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="mb-4">
+            <label className="text-xs text-gray-500 block mb-1">الكمية</label>
+            <input type="number" step="0.001" value={bulkAddQty}
+              onChange={(e) => setBulkAddQty(parseFloat(e.target.value) || 0)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none" />
+          </div>
+
+          <div className="mb-4">
+            <label className="text-xs text-gray-500 block mb-2">اختر الريسيبيات</label>
+            <div className="max-h-48 overflow-y-auto border border-gray-100 rounded-lg divide-y divide-gray-50">
+              {recipes.map((r: any) => (
+                <label key={r.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer text-sm">
+                  <input type="checkbox" checked={bulkRecipeIds.includes(r.id)}
+                    onChange={() => setBulkRecipeIds(prev => prev.includes(r.id) ? prev.filter(id => id !== r.id) : [...prev, r.id])}
+                    className="accent-blue-600" />
+                  {r.name}
+                </label>
+              ))}
+              {recipes.length === 0 && <p className="p-3 text-gray-400 text-sm text-center">لا توجد ريسبيات</p>}
+            </div>
+            <button onClick={() => {
+              if (bulkRecipeIds.length === recipes.length) setBulkRecipeIds([]);
+              else setBulkRecipeIds(recipes.map((r: any) => r.id));
+            }} className="text-xs text-blue-600 hover:underline mt-1">
+              {bulkRecipeIds.length === recipes.length ? 'إلغاء تحديد الكل' : 'تحديد الكل'}
+            </button>
+          </div>
+
+          <div className="flex gap-2">
+            <button onClick={() => {
+              if (!bulkAddIngredientId) { toast.error('اختر صنفاً'); return; }
+              if (bulkRecipeIds.length === 0) { toast.error('اختر ريسيبي واحد على الأقل'); return; }
+              bulkAddItemMutation.mutate({ ingredient_id: bulkAddIngredientId, qty: bulkAddQty, recipe_ids: bulkRecipeIds });
+            }} disabled={!bulkAddIngredientId || bulkAddItemMutation.isPending}
+              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
+              {bulkAddItemMutation.isPending ? '...' : 'إضافة'}
+            </button>
+            <button onClick={() => setShowBulkAddModal(false)} className="px-4 py-2 text-gray-500 border border-gray-200 rounded-lg text-sm hover:bg-gray-50">إلغاء</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ── Bulk Replace Item Modal ──
+  const renderBulkReplaceModal = () => {
+    if (!showBulkReplaceModal) return null;
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setShowBulkReplaceModal(false)}>
+        <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <h3 className="text-lg font-bold mb-1">استبدال صنف</h3>
+          <p className="text-sm text-gray-500 mb-4">استبدال "{bulkReplaceOldName}" بصنف آخر في الريسيبيات المحددة</p>
+
+          <div className="mb-4">
+            <label className="text-xs text-gray-500 block mb-1">الصنف الجديد</label>
+            <select value={bulkReplaceNewId} onChange={(e) => setBulkReplaceNewId(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none">
+              <option value="">-- اختر الصنف --</option>
+              {ingredients.filter((i: any) => i.id !== bulkReplaceOldId).map((i: any) => (
+                <option key={i.id} value={i.id}>{i.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="mb-4">
+            <label className="text-xs text-gray-500 block mb-2">اختر الريسيبيات</label>
+            <div className="max-h-48 overflow-y-auto border border-gray-100 rounded-lg divide-y divide-gray-50">
+              {recipes.map((r: any) => (
+                <label key={r.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer text-sm">
+                  <input type="checkbox" checked={bulkRecipeIds.includes(r.id)}
+                    onChange={() => setBulkRecipeIds(prev => prev.includes(r.id) ? prev.filter(id => id !== r.id) : [...prev, r.id])}
+                    className="accent-purple-600" />
+                  {r.name}
+                </label>
+              ))}
+              {recipes.length === 0 && <p className="p-3 text-gray-400 text-sm text-center">لا توجد ريسبيات</p>}
+            </div>
+            <button onClick={() => {
+              if (bulkRecipeIds.length === recipes.length) setBulkRecipeIds([]);
+              else setBulkRecipeIds(recipes.map((r: any) => r.id));
+            }} className="text-xs text-blue-600 hover:underline mt-1">
+              {bulkRecipeIds.length === recipes.length ? 'إلغاء تحديد الكل' : 'تحديد الكل'}
+            </button>
+          </div>
+
+          <div className="flex gap-2">
+            <button onClick={() => {
+              if (!bulkReplaceNewId) { toast.error('اختر الصنف الجديد'); return; }
+              if (bulkRecipeIds.length === 0) { toast.error('اختر ريسيبي واحد على الأقل'); return; }
+              bulkReplaceItemMutation.mutate({ old_ingredient_id: bulkReplaceOldId, new_ingredient_id: bulkReplaceNewId, recipe_ids: bulkRecipeIds });
+            }} disabled={!bulkReplaceNewId || bulkReplaceItemMutation.isPending}
+              className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 disabled:opacity-50">
+              {bulkReplaceItemMutation.isPending ? '...' : 'استبدال'}
+            </button>
+            <button onClick={() => setShowBulkReplaceModal(false)} className="px-4 py-2 text-gray-500 border border-gray-200 rounded-lg text-sm hover:bg-gray-50">إلغاء</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ── Bulk Delete Item Modal ──
+  const renderBulkDeleteModal = () => {
+    if (!showBulkDeleteModal) return null;
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setShowBulkDeleteModal(false)}>
+        <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <h3 className="text-lg font-bold mb-1">مسح صنف من الريسيبيات</h3>
+          <p className="text-sm text-gray-500 mb-4">مسح "{bulkDeleteIngredientName}" من الريسيبيات المحددة</p>
+
+          <div className="mb-4">
+            <label className="text-xs text-gray-500 block mb-2">اختر الريسيبيات المطلوب مسح الصنف منها</label>
+            <div className="max-h-48 overflow-y-auto border border-gray-100 rounded-lg divide-y divide-gray-50">
+              {recipes.map((r: any) => (
+                <label key={r.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer text-sm">
+                  <input type="checkbox" checked={bulkRecipeIds.includes(r.id)}
+                    onChange={() => setBulkRecipeIds(prev => prev.includes(r.id) ? prev.filter(id => id !== r.id) : [...prev, r.id])}
+                    className="accent-red-600" />
+                  {r.name}
+                </label>
+              ))}
+              {recipes.length === 0 && <p className="p-3 text-gray-400 text-sm text-center">لا توجد ريسبيات</p>}
+            </div>
+            <button onClick={() => {
+              if (bulkRecipeIds.length === recipes.length) setBulkRecipeIds([]);
+              else setBulkRecipeIds(recipes.map((r: any) => r.id));
+            }} className="text-xs text-blue-600 hover:underline mt-1">
+              {bulkRecipeIds.length === recipes.length ? 'إلغاء تحديد الكل' : 'تحديد الكل'}
+            </button>
+          </div>
+
+          <div className="flex gap-2">
+            <button onClick={() => {
+              if (bulkRecipeIds.length === 0) { toast.error('اختر ريسيبي واحد على الأقل'); return; }
+              if (!confirm(`مسح "${bulkDeleteIngredientName}" من ${bulkRecipeIds.length} ريسيبي؟`)) return;
+              bulkDeleteItemMutation.mutate({ ingredient_id: bulkDeleteIngredientId, recipe_ids: bulkRecipeIds });
+            }} disabled={bulkDeleteItemMutation.isPending}
+              className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 disabled:opacity-50">
+              {bulkDeleteItemMutation.isPending ? '...' : 'مسح'}
+            </button>
+            <button onClick={() => setShowBulkDeleteModal(false)} className="px-4 py-2 text-gray-500 border border-gray-200 rounded-lg text-sm hover:bg-gray-50">إلغاء</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderMoveCategoryModal = () => {
+    if (!showMoveCategoryModal) return null;
+    const targetCategories = categories.filter((c: any) => c.name !== selectedCategory?.name);
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setShowMoveCategoryModal(false)}>
+        <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <h3 className="text-lg font-bold mb-1">نقل الأصناف</h3>
+          <p className="text-sm text-gray-500 mb-4">نقل {selectedIds.size} صنف من "{selectedCategory?.name}" إلى تصنيف آخر</p>
+
+          <div className="space-y-2 max-h-64 overflow-y-auto mb-4">
+            {targetCategories.length === 0 ? (
+              <p className="text-gray-400 text-sm text-center py-4">لا توجد تصنيفات أخرى</p>
+            ) : targetCategories.map((c: any) => (
+              <div key={c.id}
+                onClick={() => setMoveCategoryTarget(c.name)}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer border transition-all text-sm ${moveCategoryTarget === c.name ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-100 hover:border-gray-300'}`}
+              >
+                <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${moveCategoryTarget === c.name ? 'border-blue-500' : 'border-gray-300'}`}>
+                  {moveCategoryTarget === c.name && <div className="w-2 h-2 rounded-full bg-blue-500" />}
+                </div>
+                {c.name}
+              </div>
+            ))}
+          </div>
+
+          <div className="flex gap-2">
+            <button onClick={() => { if (moveCategoryTarget) bulkMoveCategoryMutation.mutate({ ids: Array.from(selectedIds), category: moveCategoryTarget }); }}
+              disabled={!moveCategoryTarget || bulkMoveCategoryMutation.isPending}
+              className="flex-1 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700 disabled:opacity-50">
+              {bulkMoveCategoryMutation.isPending ? '...' : `نقل إلى "${moveCategoryTarget || '...'}"`}
+            </button>
+            <button onClick={() => setShowMoveCategoryModal(false)} className="px-4 py-2 text-gray-500 border border-gray-200 rounded-lg text-sm hover:bg-gray-50">إلغاء</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full bg-gray-50/50" dir="rtl">
       <PageHeader
@@ -1156,8 +1615,13 @@ export default function MenuEngineeringPage() {
         {level === 'sheet' && renderSheet()}
         {renderCategoryModal()}
         {renderBulkUpdateModal()}
+        {renderBulkAddModal()}
+        {renderBulkReplaceModal()}
+        {renderBulkDeleteModal()}
         {renderCopyMenuModal()}
         {renderCopyRecipeModal()}
+        {renderCopyCategoryModal()}
+        {renderMoveCategoryModal()}
       </div>
     </div>
   );

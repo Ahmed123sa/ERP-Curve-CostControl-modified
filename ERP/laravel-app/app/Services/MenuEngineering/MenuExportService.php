@@ -3,6 +3,7 @@ namespace App\Services\MenuEngineering;
 
 use App\Models\Client;
 use App\Models\MenuEngineering\MenuCategory;
+use App\Models\Branch;
 use App\Models\MenuEngineering\MenuEngineeringMenu;
 use App\Models\MenuEngineering\MenuRecipe;
 use Mpdf\Mpdf;
@@ -134,8 +135,14 @@ class MenuExportService
             .footer { text-align: center; font-size: 7px; color: #999; margin-top: 10px; }
         </style></head><body>';
 
-        $html .= '<div class="brand">Curve — نظام إدارة التكاليف</div>';
-        $html .= '<div class="menu-title">' . e($menu->name) . ' — ' . date('Y-m-d') . '</div>';
+        $branchName = $menu->branch_id ? Branch::find($menu->branch_id)?->name : null;
+        $menuTitle = e($menu->name);
+        if ($branchName) {
+            $menuTitle = e($branchName) . ' - ' . $menuTitle;
+        }
+
+        $html .= '<div class="brand">Curve Cost Control System - Ahmed Ali</div>';
+        $html .= '<div class="menu-title">' . $menuTitle . ' — ' . date('Y-m-d') . '</div>';
 
         foreach ($categories as $catName) {
             if (empty($grouped[$catName])) continue;
@@ -175,12 +182,12 @@ class MenuExportService
             <td></td></tr>';
         $html .= '</tbody></table>';
 
-        $html .= '<div class="footer">تم التصدير بواسطة Curve — نظام إدارة التكاليف</div>';
+        $html .= '<div class="footer">تم التصدير بواسطة Curve Cost Control System - Ahmed Ali</div>';
         $html .= '</body></html>';
 
         $mpdf = $this->createMpdf();
         if ($client->logo && Storage::disk('public')->exists($client->logo)) {
-            $mpdf->SetWatermarkImage(Storage::disk('public')->path($client->logo), 0.12);
+            $mpdf->SetWatermarkImage(Storage::disk('public')->path($client->logo), 0.05, '20');
             $mpdf->showWatermarkImage = true;
         }
         $mpdf->WriteHTML($html);
@@ -223,18 +230,30 @@ class MenuExportService
         $sheet->setTitle('تقرير التكاليف');
 
         $row = 1;
-        $this->writeBrandingRow($sheet, $row, $client, null, 10);
-        $row += 2;
+        $this->writeBrandingRow($sheet, $row, $client, null, 4);
+
+        // Report date with branch/menu info
+        $branchName = $branchId ? Branch::find($branchId)?->name : null;
+        $menuName = $menuId ? MenuEngineeringMenu::find($menuId)?->name : null;
+        $title = 'تقرير تكاليف المنيو — ' . date('Y-m-d');
+        if ($branchName || $menuName) {
+            $title .= ' — ' . trim(($branchName ?? '') . ' - ' . ($menuName ?? ''), ' - ');
+        }
+        $sheet->mergeCells('A' . $row . ':D' . $row);
+        $sheet->setCellValue('A' . $row, $title);
+        $sheet->getStyle('A' . $row)->getFont()->setSize(10)->getColor()->setARGB('FF666666');
+        $row++;
+
+        $row++;
 
         // Overall summary
-        $sheet->mergeCells('A' . $row . ':F' . $row);
+        $sheet->mergeCells('A' . $row . ':D' . $row);
         $sheet->setCellValue('A' . $row, 'ملخص التقرير');
         $sheet->getStyle('A' . $row)->getFont()->setBold(true)->setSize(12)->getColor()->setARGB('FF1e3a5f');
         $row++;
         $overallPct = $overallPrice > 0 ? round(($overallCost / $overallPrice) * 100, 2) : 0;
         $summaryData = [
-            ['إجمالي التكلفة', number_format($overallCost, 2) . ' ج'],
-            ['إجمالي سعر البيع', number_format($overallPrice, 2) . ' ج'],
+            ['الدايركت كوست', number_format($overallCost, 2) . ' ج'],
             ['نسبة التكلفة الإجمالية', $overallPct . '%'],
         ];
         foreach ($summaryData as $sd) {
@@ -248,13 +267,17 @@ class MenuExportService
 
         // Per category tables
         foreach ($grouped as $catName => $items) {
-            $sheet->mergeCells('A' . $row . ':F' . $row);
+            $catCost = array_sum(array_column($items, 'total_cost'));
+            $catPrice = array_sum(array_column($items, 'selling_price'));
+            $catPct = $catPrice > 0 ? round(($catCost / $catPrice) * 100, 2) : 0;
+
+            $sheet->mergeCells('A' . $row . ':D' . $row);
             $sheet->setCellValue('A' . $row, $catName);
             $sheet->getStyle('A' . $row)->getFont()->setBold(true)->setSize(11)->getColor()->setARGB('FF1e3a5f');
             $sheet->getStyle('A' . $row)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FFe8f0fe');
             $row++;
 
-            $headers = ['الصنف', 'التكلفة', 'سعر البيع', 'نسبة التكلفة', 'الحالة'];
+            $headers = ['الصنف', 'التكلفة', 'سعر البيع', 'نسبة التكلفة'];
             foreach ($headers as $ci => $h) {
                 $col = Coordinate::stringFromColumnIndex($ci + 1);
                 $sheet->setCellValue($col . $row, $h);
@@ -273,11 +296,26 @@ class MenuExportService
                 if ($it['cost_pct'] > 35) {
                     $sheet->getStyle($pctCell)->getFont()->getColor()->setARGB('FFdc3545');
                 }
-                $sheet->setCellValue('E' . $row, $it['status']);
                 $row++;
             }
+
+            // Category subtotal row
+            $sheet->mergeCells('A' . $row . ':B' . $row);
+            $sheet->setCellValue('A' . $row, 'إجمالي التصنيف');
+            $sheet->setCellValue('C' . $row, number_format($catPrice, 2));
+            $sheet->setCellValue('D' . $row, $catPct . '%');
+            $sheet->getStyle('A' . $row . ':D' . $row)->getFont()->setBold(true);
+            $sheet->getStyle('A' . $row . ':D' . $row)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FFd4edda');
+            $row++;
+
             $row++;
         }
+
+        // Column widths
+        $sheet->getColumnDimension('A')->setWidth(40);
+        $sheet->getColumnDimension('B')->setWidth(16);
+        $sheet->getColumnDimension('C')->setWidth(16);
+        $sheet->getColumnDimension('D')->setWidth(16);
 
         $filename = 'تقرير_تكاليف_المنيو.xlsx';
         $writer = new Xlsx($spreadsheet);
@@ -314,45 +352,58 @@ class MenuExportService
         }
 
         $html = '<html><head><meta charset="utf-8"><style>
-            body { font-family: dejavusans; direction: rtl; font-size: 8px; }
-            .brand { text-align: center; font-size: 14px; font-weight: bold; color: #1e3a5f; }
-            .title { text-align: center; font-size: 11px; color: #333; margin-bottom: 8px; }
-            .cat-title { font-size: 10px; font-weight: bold; color: #1e3a5f; background: #e8f0fe; padding: 4px 6px; margin: 8px 0 3px 0; }
-            table { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
-            th { background: #1e3a5f; color: white; font-weight: bold; padding: 3px 4px; border: 1px solid #2d4a7a; font-size: 7px; }
-            td { padding: 2px 4px; border: 1px solid #ccc; font-size: 7px; }
+            body { font-family: dejavusans; direction: rtl; font-size: 11px; }
+            .brand { text-align: center; font-size: 20px; font-weight: bold; color: #1e3a5f; margin-bottom: 4px; }
+            .title { text-align: center; font-size: 14px; color: #555; margin-bottom: 12px; }
+            .cat-title { font-size: 13px; font-weight: bold; color: #1e3a5f; background: #e8f0fe; padding: 6px 10px; margin: 12px 0 6px 0; border-radius: 4px; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+            th { background: #1e3a5f; color: white; font-weight: bold; padding: 6px 10px; border: 1px solid #2d4a7a; font-size: 12px; }
+            td { padding: 5px 10px; border: 1px solid #ccc; font-size: 13px; }
             tr:nth-child(even) { background: #f8fafc; }
             .cost-high { color: #dc3545; font-weight: bold; }
-            .footer { text-align: center; font-size: 7px; color: #999; margin-top: 8px; }
+            .footer { text-align: center; font-size: 9px; color: #999; margin-top: 12px; }
         </style></head><body>';
 
-        $html .= '<div class="brand">Curve — نظام إدارة التكاليف</div>';
-        $html .= '<div class="title">تقرير تكاليف المنيو — ' . date('Y-m-d') . '</div>';
+        $branchName = $branchId ? Branch::find($branchId)?->name : null;
+        $menuName = $menuId ? MenuEngineeringMenu::find($menuId)?->name : null;
+        $subtitle = '';
+        if ($branchName || $menuName) {
+            $subtitle = ' — ' . trim(($branchName ?? '') . ' - ' . ($menuName ?? ''), ' - ');
+        }
+
+        $html .= '<div class="brand">Curve Cost Control System - Ahmed Ali</div>';
+        $html .= '<div class="title">تقرير تكاليف المنيو — ' . date('Y-m-d') . $subtitle . '</div>';
 
         $overallPct = $overallPrice > 0 ? round(($overallCost / $overallPrice) * 100, 2) : 0;
-        $html .= '<table><tr><th>إجمالي التكلفة</th><th>إجمالي سعر البيع</th><th>نسبة التكلفة الإجمالية</th></tr>';
+        $html .= '<table><tr><th>الدايركت كوست</th><th>نسبة التكلفة الإجمالية</th></tr>';
         $html .= '<tr><td style="text-align:center">' . number_format($overallCost, 2) . ' ج</td>
-            <td style="text-align:center">' . number_format($overallPrice, 2) . ' ج</td>
             <td style="text-align:center;' . ($overallPct > 35 ? 'font-weight:bold;color:#dc3545' : '') . '">' . $overallPct . '%</td></tr></table>';
 
         foreach ($grouped as $catName => $items) {
-            $html .= '<div class="cat-title">' . e($catName) . '</div>';
-            $html .= '<table><thead><tr><th>الصنف</th><th>التكلفة</th><th>سعر البيع</th><th>نسبة التكلفة</th><th>الحالة</th></tr></thead><tbody>';
+            $catCost = array_sum(array_column($items, 'total_cost'));
+            $catPrice = array_sum(array_column($items, 'selling_price'));
+            $catPct = $catPrice > 0 ? round(($catCost / $catPrice) * 100, 2) : 0;
+
+            $html .= '<div class="cat-title">' . e($catName) . ' — الدايركت كوست: ' . number_format($catCost, 2) . ' ج — نسبة التكلفة: ' . $catPct . '%</div>';
+            $html .= '<table><thead><tr><th>الصنف</th><th>التكلفة</th><th>سعر البيع</th><th>نسبة التكلفة</th></tr></thead><tbody>';
             foreach ($items as $it) {
                 $pctClass = $it['cost_pct'] > 35 ? ' class="cost-high"' : '';
                 $html .= '<tr><td>' . e($it['name']) . '</td>
                     <td style="text-align:left">' . number_format($it['total_cost'], 2) . ' ج</td>
                     <td style="text-align:left">' . number_format($it['selling_price'], 2) . ' ج</td>
-                    <td style="text-align:left"' . $pctClass . '>' . $it['cost_pct'] . '%</td>
-                    <td>' . $it['status'] . '</td></tr>';
+                    <td style="text-align:left"' . $pctClass . '>' . $it['cost_pct'] . '%</td></tr>';
             }
             $html .= '</tbody></table>';
         }
 
-        $html .= '<div class="footer">تم التصدير بواسطة Curve — نظام إدارة التكاليف</div>';
+        $html .= '<div class="footer">تم التصدير بواسطة Curve Cost Control System - Ahmed Ali</div>';
         $html .= '</body></html>';
 
         $mpdf = $this->createMpdf();
+        if ($client->logo && Storage::disk('public')->exists($client->logo)) {
+            $mpdf->SetWatermarkImage(Storage::disk('public')->path($client->logo), 0.05, '20');
+            $mpdf->showWatermarkImage = true;
+        }
         $mpdf->WriteHTML($html);
         $content = $mpdf->Output('', 'S');
         return response()->streamDownload(function () use ($content) {
@@ -366,7 +417,7 @@ class MenuExportService
     {
         $colLetter = Coordinate::stringFromColumnIndex($colCount);
         $sheet->mergeCells('A' . $row . ':' . $colLetter . $row);
-        $sheet->setCellValue('A' . $row, 'Curve — نظام إدارة التكاليف');
+        $sheet->setCellValue('A' . $row, 'Curve Cost Control System - Ahmed Ali');
         $sheet->getStyle('A' . $row)->getFont()->setBold(true)->setSize(14)->getColor()->setARGB('FF1e3a5f');
         $sheet->getRowDimension($row)->setRowHeight(30);
 
@@ -383,7 +434,12 @@ class MenuExportService
 
         if ($menu) {
             $sheet->mergeCells('A' . $row . ':' . $colLetter . $row);
-            $sheet->setCellValue('A' . $row, $menu->name . ' — ' . date('Y-m-d'));
+            $branchName = $menu->branch_id ? Branch::find($menu->branch_id)?->name : null;
+            $menuTitle = $menu->name;
+            if ($branchName) {
+                $menuTitle = $branchName . ' - ' . $menuTitle;
+            }
+            $sheet->setCellValue('A' . $row, $menuTitle . ' — ' . date('Y-m-d'));
             $sheet->getStyle('A' . $row)->getFont()->setSize(10)->getColor()->setARGB('FF666666');
             $row++;
         }

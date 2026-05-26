@@ -227,7 +227,7 @@ class ReportExportService
 
         // Branding row
         $sheet->mergeCells('B1:' . Coordinate::stringFromColumnIndex($colCount) . '1');
-        $sheet->setCellValue('B1', 'Curve — نظام إدارة التكاليف');
+        $sheet->setCellValue('B1', 'Curve Cost Control System - Ahmed Ali');
         $sheet->getStyle('B1')->getFont()->setBold(true)->setSize(16)->getColor()->setARGB('FF1e3a5f');
         $sheet->getStyle('B1')->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER);
         $sheet->getStyle('B1')->getAlignment()->setVertical(\PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_CENTER);
@@ -369,7 +369,7 @@ class ReportExportService
 
         $footerRow = $sumRowStart + count($summaryData);
         $sheet->mergeCells('A' . $footerRow . ':' . Coordinate::stringFromColumnIndex($colCount) . $footerRow);
-        $sheet->setCellValue('A' . $footerRow, 'تم التصدير بواسطة Curve — نظام إدارة التكاليف');
+        $sheet->setCellValue('A' . $footerRow, 'تم التصدير بواسطة Curve Cost Control System - Ahmed Ali');
         $sheet->getStyle('A' . $footerRow)->getFont()->setItalic(true)->setSize(9)->getColor()->setARGB('FF999999');
         $sheet->getStyle('A' . $footerRow)->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER);
 
@@ -407,7 +407,7 @@ class ReportExportService
 
         $html .= '<div class="header">';
         $html .= $logoHtml;
-        $html .= '<h1>Curve — نظام إدارة التكاليف</h1>';
+        $html .= '<h1>Curve Cost Control System - Ahmed Ali</h1>';
         $html .= '<div class="sub">' . $wh->name . ' — ' . $month . '</div>';
         $html .= '</div>';
 
@@ -474,7 +474,7 @@ class ReportExportService
         }
         $html .= '</table>';
         $html .= '<div style="clear:both;"></div>';
-        $html .= '<div class="footer">تم التصدير بواسطة Curve — نظام إدارة التكاليف</div>';
+        $html .= '<div class="footer">تم التصدير بواسطة Curve Cost Control System - Ahmed Ali</div>';
         $html .= '</body></html>';
 
         return $this->streamPdf($html, "تقفيل_{$month}_{$wh->name}.pdf");
@@ -577,7 +577,7 @@ class ReportExportService
             .empty-row td { border: none; height: 5px; }
             .note { font-size: 8px; color: #6b7280; text-align: center; margin-top: 8px; }
         </style></head><body>';
-        $html .= '<div style="text-align:center;font-size:16px;font-weight:bold;color:#1e3a5f;margin-bottom:4px;">Curve — نظام إدارة التكاليف</div>';
+        $html .= '<div style="text-align:center;font-size:16px;font-weight:bold;color:#1e3a5f;margin-bottom:4px;">Curve Cost Control System - Ahmed Ali</div>';
         $html .= '<h2>' . $title . '</h2>';
         $html .= '<div class="subtitle">' . $month . '</div>';
         $html .= '<table>';
@@ -600,7 +600,7 @@ class ReportExportService
             $html .= '</tr>';
         }
         $html .= '</table>';
-        $html .= '<div class="note">تم التصدير بواسطة Curve — نظام إدارة التكاليف</div>';
+        $html .= '<div class="note">تم التصدير بواسطة Curve Cost Control System - Ahmed Ali</div>';
         $html .= '</body></html>';
         return $html;
     }
@@ -614,7 +614,7 @@ class ReportExportService
         // Branding row
         $colCount = count($rows[0] ?? []);
         $sheet->mergeCells(Coordinate::stringFromColumnIndex(1) . '1:' . Coordinate::stringFromColumnIndex(max($colCount, 1)) . '1');
-        $sheet->setCellValue('A1', 'Curve — نظام إدارة التكاليف');
+        $sheet->setCellValue('A1', 'Curve Cost Control System - Ahmed Ali');
         $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14)->getColor()->setARGB('FF1e3a5f');
         $sheet->getRowDimension(1)->setRowHeight(30);
         $dataStart = 2;
@@ -626,7 +626,7 @@ class ReportExportService
         // Footer branding
         $footerRow = count($rows) + $dataStart;
         $sheet->mergeCells(Coordinate::stringFromColumnIndex(1) . $footerRow . ':' . Coordinate::stringFromColumnIndex(max($colCount, 1)) . $footerRow);
-        $sheet->setCellValue('A' . $footerRow, 'تم التصدير بواسطة Curve — نظام إدارة التكاليف');
+        $sheet->setCellValue('A' . $footerRow, 'تم التصدير بواسطة Curve Cost Control System - Ahmed Ali');
         $sheet->getStyle('A' . $footerRow)->getFont()->setItalic(true)->setSize(9)->getColor()->setARGB('FF999999');
         $writer = new Xlsx($spreadsheet);
         return response()->streamDownload(function () use ($writer) {

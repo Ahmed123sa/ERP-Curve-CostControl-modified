@@ -60,9 +60,10 @@ class MenuReportController extends Controller
             $catCost = array_sum(array_column($items, 'total_cost'));
             $catPrice = array_sum(array_column($items, 'selling_price'));
             $categories[] = [
-                'name'     => $name,
-                'avg_cost' => count($items) > 0 ? round($catCost / count($items), 2) : 0,
-                'items'    => $items,
+                'name'       => $name,
+                'total_cost' => round($catCost, 2),
+                'cost_pct'   => $catPrice > 0 ? round(($catCost / $catPrice) * 100, 2) : 0,
+                'items'      => $items,
             ];
         }
 

@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/ui/AppShell';
 const TABS = [
   { href: '/production',          label: 'الإنتاج اليومي' },
   { href: '/production/slaughter', label: 'تصفية ذبيحة' },
+  { href: '/production/processing', label: 'معالجة المواد' },
   { href: '/production/recipes',  label: 'إدارة الوصفات' },
   { href: '/production/market-prices', label: 'أسعار البورصة' },
 ];

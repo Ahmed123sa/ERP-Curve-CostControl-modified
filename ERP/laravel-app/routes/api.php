@@ -168,6 +168,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('market-prices/latest', [\App\Http\Controllers\Production\MarketPriceController::class, 'latest']);
         Route::apiResource('slaughter', \App\Http\Controllers\Production\SlaughterController::class)->except(['edit', 'create']);
         Route::post('slaughter/{slaughter}/post', [\App\Http\Controllers\Production\SlaughterController::class, 'postToProduction']);
+        Route::apiResource('processing', \App\Http\Controllers\Production\ProcessingBatchController::class)->except(['edit', 'create']);
     });
 
     // ── Menu Engineering Module ──────────────────────────
@@ -177,10 +178,16 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/menus/{menu}/export-pdf', [\App\Http\Controllers\MenuEngineering\MenuExportController::class, 'exportMenuPdf']);
         Route::post('/menus/{menu}/copy', [\App\Http\Controllers\MenuEngineering\MenuEngineeringMenuController::class, 'copy']);
         Route::apiResource('categories', \App\Http\Controllers\MenuEngineering\MenuCategoryController::class);
+        Route::post('/categories/{category}/copy', [\App\Http\Controllers\MenuEngineering\MenuCategoryController::class, 'copy']);
         Route::get('/ingredients', [\App\Http\Controllers\MenuEngineering\MenuIngredientController::class, 'index']);
         Route::get('/unit-conversions', [\App\Http\Controllers\MenuEngineering\MenuUnitConversionController::class, 'index']);
         Route::post('/recipes/bulk-update-item-quantity', [\App\Http\Controllers\MenuEngineering\MenuRecipeController::class, 'bulkUpdateItemQuantity']);
         Route::apiResource('recipes', \App\Http\Controllers\MenuEngineering\MenuRecipeController::class);
+        Route::post('/recipes/bulk-copy', [\App\Http\Controllers\MenuEngineering\MenuRecipeController::class, 'bulkCopy']);
+        Route::post('/recipes/bulk-move-category', [\App\Http\Controllers\MenuEngineering\MenuRecipeController::class, 'bulkMoveCategory']);
+        Route::post('/recipes/bulk-add-item', [\App\Http\Controllers\MenuEngineering\MenuRecipeController::class, 'bulkAddItem']);
+        Route::post('/recipes/bulk-replace-item', [\App\Http\Controllers\MenuEngineering\MenuRecipeController::class, 'bulkReplaceItem']);
+        Route::post('/recipes/bulk-delete-item', [\App\Http\Controllers\MenuEngineering\MenuRecipeController::class, 'bulkDeleteItem']);
         Route::post('/recipes/{recipe}/sync-items', [\App\Http\Controllers\MenuEngineering\MenuRecipeController::class, 'syncItems']);
         Route::post('/recipes/{recipe}/copy', [\App\Http\Controllers\MenuEngineering\MenuRecipeController::class, 'copy']);
         Route::get('/recipes/{recipe}/versions', [\App\Http\Controllers\MenuEngineering\MenuRecipeController::class, 'versions']);

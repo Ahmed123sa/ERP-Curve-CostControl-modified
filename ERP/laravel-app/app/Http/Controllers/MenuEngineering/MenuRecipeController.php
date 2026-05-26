@@ -381,6 +381,235 @@ class MenuRecipeController extends Controller
         return response()->json(['data' => $version], 201);
     }
 
+    // ── Bulk copy ──
+
+    public function bulkCopy(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'ids' => 'required|array|min:1',
+            'ids.*' => 'required|string',
+        ]);
+
+        $clientId = $request->user()->current_client_id;
+        $copied = 0;
+
+        DB::transaction(function () use ($data, $clientId, $request, &$copied) {
+            $recipes = MenuRecipe::where('client_id', $clientId)
+                ->whereIn('id', $data['ids'])
+                ->with('items')
+                ->get();
+
+            foreach ($recipes as $recipe) {
+                $newName = $recipe->name . ' (نسخة)';
+                $suffix = 2;
+                while (MenuRecipe::where('client_id', $clientId)
+                    ->where('menu_id', $recipe->menu_id)
+                    ->where('branch_id', $recipe->branch_id)
+                    ->where('name', $newName)->exists()
+                ) {
+                    $newName = $recipe->name . ' (نسخة ' . $suffix . ')';
+                    $suffix++;
+                }
+
+                $newRecipe = MenuRecipe::create([
+                    'client_id' => $clientId,
+                    'branch_id' => $recipe->branch_id,
+                    'menu_id' => $recipe->menu_id,
+                    'name' => $newName,
+                    'code' => $recipe->code,
+                    'category' => $recipe->category,
+                    'recipe_type' => $recipe->recipe_type,
+                    'portions' => $recipe->portions,
+                    'selling_price' => $recipe->selling_price,
+                    'target_food_cost_pct' => $recipe->target_food_cost_pct,
+                    'prep_instructions' => $recipe->prep_instructions,
+                    'status' => 'draft',
+                    'version' => 1,
+                    'created_by' => $request->user()->id,
+                ]);
+
+                foreach ($recipe->items as $item) {
+                    $newRecipe->items()->create([
+                        'ingredient_id' => $item->ingredient_id,
+                        'qty' => $item->qty,
+                        'weight_g' => $item->weight_g,
+                        'volume_ml' => $item->volume_ml,
+                        'purchase_unit' => $item->purchase_unit,
+                        'purchase_unit_price' => $item->purchase_unit_price,
+                        'recipe_unit' => $item->recipe_unit,
+                        'conversion_factor' => $item->conversion_factor,
+                        'yield_pct' => $item->yield_pct,
+                        'ep_cost' => $item->ep_cost,
+                        'line_total' => $item->line_total,
+                        'sort_order' => $item->sort_order,
+                    ]);
+                }
+
+                $copied++;
+            }
+        });
+
+        return response()->json(['message' => "تم نسخ $copied صنف بنجاح", 'copied' => $copied], 201);
+    }
+
+    public function bulkMoveCategory(Request $request): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+        $data = $request->validate([
+            'ids' => 'required|array',
+            'ids.*' => 'required|string',
+            'category' => 'required|string|max:100',
+        ]);
+
+        $updated = MenuRecipe::where('client_id', $clientId)
+            ->whereIn('id', $data['ids'])
+            ->update(['category' => $data['category']]);
+
+        return response()->json(['message' => "تم نقل $updated صنف بنجاح", 'updated' => $updated]);
+    }
+
+    public function bulkAddItem(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'ingredient_id' => 'required|string',
+            'qty' => 'required|numeric|min:0',
+            'recipe_ids' => 'required|array|min:1',
+            'recipe_ids.*' => 'required|string',
+        ]);
+
+        $clientId = $request->user()->current_client_id;
+
+        $validRecipeIds = MenuRecipe::where('client_id', $clientId)
+            ->whereIn('id', $data['recipe_ids'])
+            ->pluck('id')
+            ->toArray();
+
+        if (empty($validRecipeIds)) {
+            return response()->json(['message' => 'لا توجد ريسبيات صالحة'], 404);
+        }
+
+        $added = 0;
+        DB::transaction(function () use ($data, $validRecipeIds, &$added) {
+            foreach ($validRecipeIds as $recipeId) {
+                $exists = MenuRecipeItem::where('recipe_id', $recipeId)
+                    ->where('ingredient_id', $data['ingredient_id'])->exists();
+                if ($exists) continue;
+
+                $maxSort = MenuRecipeItem::where('recipe_id', $recipeId)->max('sort_order') ?? 0;
+
+                $item = MenuRecipeItem::create([
+                    'recipe_id' => $recipeId,
+                    'ingredient_id' => $data['ingredient_id'],
+                    'qty' => $data['qty'],
+                    'purchase_unit' => 'kg',
+                    'purchase_unit_price' => 0,
+                    'recipe_unit' => 'g',
+                    'conversion_factor' => 1,
+                    'yield_pct' => 100,
+                    'ep_cost' => 0,
+                    'line_total' => 0,
+                    'sort_order' => $maxSort + 1,
+                ]);
+
+                $this->calc->calculateItem($item);
+                $item->save();
+                $added++;
+            }
+
+            if ($added > 0) {
+                MenuRecipe::whereIn('id', $validRecipeIds)->update(['updated_at' => now()]);
+            }
+        });
+
+        return response()->json(['message' => "تم إضافة $added صنف بنجاح", 'added' => $added]);
+    }
+
+    public function bulkReplaceItem(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'old_ingredient_id' => 'required|string',
+            'new_ingredient_id' => 'required|string',
+            'recipe_ids' => 'required|array|min:1',
+            'recipe_ids.*' => 'required|string',
+        ]);
+
+        $clientId = $request->user()->current_client_id;
+
+        $validRecipeIds = MenuRecipe::where('client_id', $clientId)
+            ->whereIn('id', $data['recipe_ids'])
+            ->pluck('id')
+            ->toArray();
+
+        if (empty($validRecipeIds)) {
+            return response()->json(['message' => 'لا توجد ريسبيات صالحة'], 404);
+        }
+
+        if ($data['old_ingredient_id'] === $data['new_ingredient_id']) {
+            return response()->json(['message' => 'الصنف القديم والجديد متطابق'], 422);
+        }
+
+        $replaced = 0;
+        DB::transaction(function () use ($data, $validRecipeIds, &$replaced) {
+            foreach ($validRecipeIds as $recipeId) {
+                $oldItem = MenuRecipeItem::where('recipe_id', $recipeId)
+                    ->where('ingredient_id', $data['old_ingredient_id'])->first();
+                if (!$oldItem) continue;
+
+                $existingItem = MenuRecipeItem::where('recipe_id', $recipeId)
+                    ->where('ingredient_id', $data['new_ingredient_id'])->first();
+
+                if ($existingItem) {
+                    $existingItem->qty += $oldItem->qty;
+                    $this->calc->calculateItem($existingItem);
+                    $existingItem->save();
+                    $oldItem->delete();
+                } else {
+                    $oldItem->ingredient_id = $data['new_ingredient_id'];
+                    $this->calc->calculateItem($oldItem);
+                    $oldItem->save();
+                }
+
+                $replaced++;
+            }
+
+            if ($replaced > 0) {
+                MenuRecipe::whereIn('id', $validRecipeIds)->update(['updated_at' => now()]);
+            }
+        });
+
+        return response()->json(['message' => "تم استبدال $replaced صنف بنجاح", 'replaced' => $replaced]);
+    }
+
+    public function bulkDeleteItem(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'ingredient_id' => 'required|string',
+            'recipe_ids' => 'required|array|min:1',
+            'recipe_ids.*' => 'required|string',
+        ]);
+
+        $clientId = $request->user()->current_client_id;
+
+        $validRecipeIds = MenuRecipe::where('client_id', $clientId)
+            ->whereIn('id', $data['recipe_ids'])
+            ->pluck('id')
+            ->toArray();
+
+        if (empty($validRecipeIds)) {
+            return response()->json(['message' => 'لا توجد ريسبيات صالحة'], 404);
+        }
+
+        $deleted = MenuRecipeItem::where('ingredient_id', $data['ingredient_id'])
+            ->whereIn('recipe_id', $validRecipeIds)
+            ->delete();
+
+        if ($deleted > 0) {
+            MenuRecipe::whereIn('id', $validRecipeIds)->update(['updated_at' => now()]);
+        }
+
+        return response()->json(['message' => "تم حذف $deleted صنف بنجاح", 'deleted' => $deleted]);
+    }
+
     // ── Private ──
 
     private function createVersionSnapshot(MenuRecipe $recipe): void
