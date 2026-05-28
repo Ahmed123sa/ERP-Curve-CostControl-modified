@@ -162,6 +162,9 @@ export default function FinancialDailyPage() {
   const [isEditing, setIsEditing] = useState(true);
   const [showSaved, setShowSaved] = useState(false);
   const [showCatModal, setShowCatModal] = useState(false);
+  const [calcExpr, setCalcExpr] = useState('');
+  const [calcResult, setCalcResult] = useState<string | null>(null);
+  const [calcOpen, setCalcOpen] = useState(false);
 
   const { data } = useQuery({
     queryKey: ['financial-daily', month],
@@ -321,8 +324,21 @@ export default function FinancialDailyPage() {
   const inpCls = 'w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-left outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 bg-white';
   const inpRoCls = isReadOnly ? ' bg-gray-100 text-gray-500 cursor-default' : '';
   const inpAmt = `${inpCls} font-medium${inpRoCls}`;
-  const inpQty = `${inpCls} text-gray-500 w-16 text-center${inpRoCls}`;
+  const inpQty = `${inpCls} text-gray-500 w-20 text-center no-spinner${inpRoCls}`;
   const inpDesc = `${inpCls} text-gray-500${isReadOnly ? ' cursor-default' : ' cursor-pointer'}${inpRoCls}`;
+
+  function handleCalc() {
+    if (!calcExpr.trim()) { setCalcResult(null); return; }
+    try {
+      const sanitized = calcExpr.replace(/[^0-9+\-*/().%]/g, '');
+      const result = Function('"use strict"; return (' + sanitized + ')')();
+      if (isFinite(result)) {
+        setCalcResult(Number.isInteger(result) ? String(result) : result.toFixed(3));
+      } else {
+        setCalcResult('خطأ');
+      }
+    } catch { setCalcResult('خطأ'); }
+  }
 
   return (
     <div className="flex flex-col h-full bg-gray-50/50" dir="rtl">
@@ -381,7 +397,12 @@ export default function FinancialDailyPage() {
         }
       />
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          <style>{`
+            .no-spinner::-webkit-inner-spin-button,
+            .no-spinner::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+            .no-spinner { -moz-appearance: textfield; }
+          `}</style>
+          <div className="flex-1 overflow-y-auto p-6 space-y-4">
         <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2">
             <label className="text-sm font-medium text-gray-600">الشهر</label>
@@ -408,6 +429,31 @@ export default function FinancialDailyPage() {
               })}
             </div>
           </div>
+        </div>
+
+        {/* Quick Calculator */}
+        <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+          <button onClick={() => setCalcOpen(!calcOpen)} className="w-full px-5 py-2 flex items-center gap-2 hover:bg-gray-50 transition-colors text-sm text-gray-500">
+            <span className="text-lg">🧮</span> حاسبة سريعة
+            <span className="mr-auto text-gray-300">{calcOpen ? '▲' : '▼'}</span>
+          </button>
+          {calcOpen && (
+            <div className="px-5 py-3 border-t border-gray-100 bg-gray-50/50 flex flex-wrap items-center gap-3">
+              <input type="text" value={calcExpr} onChange={(e) => setCalcExpr(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleCalc(); }}
+                placeholder="أدخل العملية الحسابية مثل 150+200*3"
+                className="flex-1 min-w-[250px] border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 font-mono text-left" />
+              <button onClick={handleCalc} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 font-medium shadow-sm">احسب</button>
+              {calcResult !== null && (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-500">=</span>
+                  <span className="text-lg font-bold text-green-700 font-mono">{calcResult}</span>
+                  <button onClick={() => { navigator.clipboard.writeText(calcResult); toast.success('تم النسخ'); }}
+                    className="text-xs text-blue-500 hover:text-blue-700">نسخ</button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
@@ -442,7 +488,7 @@ export default function FinancialDailyPage() {
                   {cats.map((c) => {
                     const isPur = (c as any).is_purchase;
                     return (
-                      <th key={c.id} colSpan={3} className={`px-2 py-2 border-b border-l border-gray-200 font-bold min-w-[260px] whitespace-nowrap text-center ${isPur ? 'bg-amber-50 text-amber-800' : 'text-gray-700 bg-gray-50/50'}`}>
+                      <th key={c.id} colSpan={3} className={`px-2 py-2 border-b border-l border-gray-200 font-bold min-w-[300px] whitespace-nowrap text-center ${isPur ? 'bg-amber-50 text-amber-800' : 'text-gray-700 bg-gray-50/50'}`}>
                         {c.name}
                         {isPur && <span className="mr-1 text-[10px] bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded-full">مشتريات</span>}
                       </th>
@@ -454,8 +500,8 @@ export default function FinancialDailyPage() {
                   <th className="sticky right-0 z-30 bg-white px-2 py-1.5 border-b border-l border-gray-200"></th>
                   {cats.map((c) => (
                     <React.Fragment key={c.id}>
-                      <th className="px-2 py-1.5 border-b border-l border-gray-200 text-gray-400 font-medium bg-white/80 text-[11px] w-16">الكمية</th>
-                      <th className="px-2 py-1.5 border-b border-l border-gray-200 text-gray-400 font-medium bg-white/80 text-[11px]">المبلغ</th>
+                      <th className="px-2 py-1.5 border-b border-l border-gray-200 text-gray-400 font-medium bg-white/80 text-[11px] w-20">الكمية</th>
+                      <th className="px-2 py-1.5 border-b border-l border-gray-200 text-gray-400 font-medium bg-white/80 text-[11px] w-24">المبلغ</th>
                       <th className="px-2 py-1.5 border-b border-l border-gray-200 text-gray-400 font-medium bg-white/80 text-[11px]">البيان</th>
                     </React.Fragment>
                   ))}
