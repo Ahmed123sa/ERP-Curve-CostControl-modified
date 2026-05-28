@@ -249,6 +249,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/employees', [\App\Http\Controllers\Financial\AdvanceController::class, 'employees']);
         Route::post('/employees', [\App\Http\Controllers\Financial\AdvanceController::class, 'storeEmployee']);
         Route::put('/employees/{id}', [\App\Http\Controllers\Financial\AdvanceController::class, 'updateEmployee']);
+        Route::get('/advances/export/excel', [\App\Http\Controllers\Financial\AdvanceController::class, 'exportExcel']);
         Route::get('/advances', [\App\Http\Controllers\Financial\AdvanceController::class, 'index']);
         Route::post('/advances', [\App\Http\Controllers\Financial\AdvanceController::class, 'store']);
         Route::delete('/advances/{id}', [\App\Http\Controllers\Financial\AdvanceController::class, 'destroy']);

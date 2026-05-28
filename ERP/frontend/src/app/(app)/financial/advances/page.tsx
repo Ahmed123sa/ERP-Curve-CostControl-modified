@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { financialApi } from '@/lib/financial/api';
+import { api } from '@/lib/api';
 import { PageHeader } from '@/components/ui/AppShell';
 import toast from 'react-hot-toast';
 
@@ -68,6 +69,22 @@ export default function FinancialAdvancesPage() {
       <PageHeader
         title="السلف"
         subtitle="إدارة سلف الموظفين اليومية"
+        actions={
+          <button onClick={() => {
+            api.get('/financial/advances/export/excel', { params: { month }, responseType: 'blob' })
+              .then((r) => {
+                const url = window.URL.createObjectURL(new Blob([r.data]));
+                const a = document.createElement('a'); a.href = url;
+                a.download = `سلف_الموظفين_${month}.xlsx`; a.click();
+                window.URL.revokeObjectURL(url);
+                toast.success('تم التصدير');
+              })
+              .catch(() => toast.error('فشل التصدير'));
+          }}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 shadow-sm font-medium">
+            ⬇ تصدير إكسل
+          </button>
+        }
       />
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
