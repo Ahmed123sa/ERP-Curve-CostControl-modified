@@ -159,6 +159,7 @@ export default function FinancialDailyPage() {
   const [notes, setNotes] = useState('');
   const [rows, setRows] = useState<ExRow[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(true);
   const [showSaved, setShowSaved] = useState(false);
   const [showCatModal, setShowCatModal] = useState(false);
 
@@ -191,6 +192,7 @@ export default function FinancialDailyPage() {
     );
     if (found) {
       setEditingId(found.id);
+      setIsEditing(false);
       setSales(String(found.total_sales));
       setNotes(found.notes || '');
       const rawRows: ExRow[] = [];
@@ -221,6 +223,7 @@ export default function FinancialDailyPage() {
       })));
     } else {
       setEditingId(null);
+      setIsEditing(true);
       setSales('');
       setNotes('');
       setRows(Array.from({ length: 12 }, () => ({
@@ -233,6 +236,7 @@ export default function FinancialDailyPage() {
     mutationFn: (body: any) => editingId ? financialApi.updateDailyEntry(editingId, body) : financialApi.storeDailyEntry(body),
     onSuccess: () => {
       toast.success(editingId ? 'تم التحديث' : 'تم الحفظ');
+      setIsEditing(false);
       qc.invalidateQueries({ queryKey: ['financial-daily', month] });
     },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'خطأ'),
@@ -242,7 +246,7 @@ export default function FinancialDailyPage() {
     mutationFn: (id: string) => financialApi.deleteDailyEntry(id),
     onSuccess: () => {
       toast.success('تم الحذف');
-      setEditingId(null); setSales(''); setNotes('');
+      setEditingId(null); setIsEditing(true); setSales(''); setNotes('');
       setRows([{ amounts: {}, quantities: {}, descriptions: {}, itemIds: {} }]);
       qc.invalidateQueries({ queryKey: ['financial-daily', month] });
     },
@@ -313,10 +317,12 @@ export default function FinancialDailyPage() {
     setRows(copy);
   }
 
+  const isReadOnly = editingId !== null && !isEditing;
   const inpCls = 'w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-left outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 bg-white';
-  const inpAmt = `${inpCls} font-medium`;
-  const inpQty = `${inpCls} text-gray-500 w-16 text-center`;
-  const inpDesc = `${inpCls} text-gray-500 cursor-pointer`;
+  const inpRoCls = isReadOnly ? ' bg-gray-100 text-gray-500 cursor-default' : '';
+  const inpAmt = `${inpCls} font-medium${inpRoCls}`;
+  const inpQty = `${inpCls} text-gray-500 w-16 text-center${inpRoCls}`;
+  const inpDesc = `${inpCls} text-gray-500${isReadOnly ? ' cursor-default' : ' cursor-pointer'}${inpRoCls}`;
 
   return (
     <div className="flex flex-col h-full bg-gray-50/50" dir="rtl">
@@ -413,7 +419,13 @@ export default function FinancialDailyPage() {
               {savedEntry && <span className="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full">✓ مسجلة</span>}
             </div>
             <div className="flex gap-2">
-              {editingId && (
+              {editingId && !isEditing && (
+                <button onClick={() => setIsEditing(true)}
+                  className="text-sm text-blue-600 hover:text-blue-800 border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-50 font-medium">
+                  ✏️ تعديل
+                </button>
+              )}
+              {editingId && isEditing && (
                 <button onClick={handleDelete}
                   className="text-sm text-red-500 hover:text-red-700 border border-red-200 px-3 py-1 rounded-lg hover:bg-red-50">
                   حذف
@@ -458,7 +470,7 @@ export default function FinancialDailyPage() {
                       <td className="sticky right-0 z-10 bg-white px-2 py-1 border-l border-gray-50 text-center">
                         <div className="flex items-center justify-center gap-1">
                           <span className="text-gray-400 text-xs font-medium">{i + 1}</span>
-                          <button onClick={() => delRow(i)} className="text-red-200 hover:text-red-400 text-[10px]">✕</button>
+                          {!isReadOnly && <button onClick={() => delRow(i)} className="text-red-200 hover:text-red-400 text-[10px]">✕</button>}
                         </div>
                       </td>
                       {cats.map((c) => (
@@ -466,11 +478,13 @@ export default function FinancialDailyPage() {
                           <td className="px-1 py-0.5 border-l border-gray-50">
                             <input type="number" value={r.quantities[c.id] ?? ''}
                               onChange={(e) => setCell(i, c.id, 'quantities', e.target.value)}
+                              disabled={isReadOnly}
                               className={inpQty} placeholder="0" />
                           </td>
                           <td className="px-1 py-0.5 border-l border-gray-50">
                             <input type="number" value={r.amounts[c.id] ?? ''}
                               onChange={(e) => setCell(i, c.id, 'amounts', e.target.value)}
+                              disabled={isReadOnly}
                               className={inpAmt} placeholder="0" />
                           </td>
                           <td className="px-1 py-0.5 border-l border-gray-50" style={{ minWidth: 160 }}>
@@ -481,6 +495,7 @@ export default function FinancialDailyPage() {
                               displayValue={r.descriptions[c.id] || ''}
                               onSelect={(itemId, itemName) => handleItemSelect(i, c.id, itemId, itemName)}
                               onTextChange={(text) => setCell(i, c.id, 'descriptions', text)}
+                              disabled={isReadOnly}
                               className={inpDesc}
                             />
                           </td>
@@ -514,7 +529,7 @@ export default function FinancialDailyPage() {
           </div>
 
           <div className="px-5 py-3 border-t border-gray-100 bg-gray-50/70 flex items-center gap-3">
-            <button onClick={addRow} className="px-4 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-sm hover:bg-blue-100 hover:border-blue-300 font-medium transition-all shadow-sm flex items-center gap-1">
+            <button onClick={addRow} disabled={isReadOnly} className="px-4 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-sm hover:bg-blue-100 hover:border-blue-300 font-medium transition-all shadow-sm flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed">
               <span className="text-lg leading-none">+</span> إضافة صف
             </button>
             <span className="text-xs text-gray-400">({rows.length} صفوف)</span>
@@ -524,7 +539,8 @@ export default function FinancialDailyPage() {
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium text-gray-700">إجمالي المبيعات:</span>
               <input type="number" value={sales} onChange={(e) => setSales(e.target.value)}
-                className="w-32 border border-green-300 rounded-lg px-3 py-1.5 text-base font-bold text-green-700 text-left outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                disabled={isReadOnly}
+                className="w-32 border border-green-300 rounded-lg px-3 py-1.5 text-base font-bold text-green-700 text-left outline-none focus:ring-2 focus:ring-green-500 bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
                 placeholder="0" />
               <span className="text-xs text-gray-400">جنيه</span>
             </div>
@@ -533,12 +549,13 @@ export default function FinancialDailyPage() {
               <span>صافي اليوم: <strong className={netDaily >= 0 ? 'text-green-700' : 'text-red-700'}>{netDaily.toFixed(2)}</strong></span>
             </div>
             <input value={notes} onChange={(e) => setNotes(e.target.value)}
+              disabled={isReadOnly}
               placeholder="ملاحظات..."
-              className="border-0 border-b border-dashed border-gray-300 px-1 py-1 text-sm outline-none focus:border-blue-400 bg-transparent w-48 text-left" />
+              className="border-0 border-b border-dashed border-gray-300 px-1 py-1 text-sm outline-none focus:border-blue-400 bg-transparent w-48 text-left disabled:cursor-not-allowed" />
             <div className="mr-auto flex gap-2">
-              <button onClick={handleSave} disabled={saveMutation.isPending}
+              <button onClick={handleSave} disabled={isReadOnly || saveMutation.isPending}
                 className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 font-medium shadow-sm">
-                {saveMutation.isPending ? '...جاري' : (editingId ? 'تحديث' : 'حفظ اليومية')}
+                {saveMutation.isPending ? '...جاري' : (!editingId ? 'حفظ اليومية' : isEditing ? 'تحديث' : 'تعديل')}
               </button>
             </div>
           </div>
@@ -591,7 +608,7 @@ export default function FinancialDailyPage() {
 }
 
 function ItemSelectCell({
-  categoryId, isPurchase, value, displayValue, onSelect, onTextChange, className,
+  categoryId, isPurchase, value, displayValue, onSelect, onTextChange, className, disabled,
 }: {
   categoryId: string;
   isPurchase: boolean;
@@ -600,6 +617,7 @@ function ItemSelectCell({
   onSelect: (itemId: string, itemName: string) => void;
   onTextChange: (text: string) => void;
   className: string;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -632,6 +650,7 @@ function ItemSelectCell({
     return (
       <input type="text" value={displayValue}
         onChange={(e) => onTextChange(e.target.value)}
+        disabled={disabled}
         placeholder="..." className={className} />
     );
   }
@@ -642,8 +661,9 @@ function ItemSelectCell({
         ref={inputRef}
         type="text"
         value={displayValue}
-        onClick={() => { setOpen(true); setSearch(''); }}
+        onClick={() => { if (!disabled) { setOpen(true); setSearch(''); } }}
         onChange={(e) => {
+          if (disabled) return;
           onTextChange(e.target.value);
           setSearch(e.target.value);
           if (!open) setOpen(true);
