@@ -162,8 +162,8 @@ export default function FinancialDailyPage() {
   const [isEditing, setIsEditing] = useState(true);
   const [showSaved, setShowSaved] = useState(false);
   const [showCatModal, setShowCatModal] = useState(false);
+  const [focusedCat, setFocusedCat] = useState<string | null>(null);
   const [calcExpr, setCalcExpr] = useState('');
-  const [calcResult, setCalcResult] = useState<string | null>(null);
   const [calcOpen, setCalcOpen] = useState(false);
 
   const { data } = useQuery({
@@ -323,21 +323,18 @@ export default function FinancialDailyPage() {
   const isReadOnly = editingId !== null && !isEditing;
   const inpCls = 'w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-left outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 bg-white';
   const inpRoCls = isReadOnly ? ' bg-gray-100 text-gray-500 cursor-default' : '';
-  const inpAmt = `${inpCls} font-medium${inpRoCls}`;
+  const inpAmt = `${inpCls} font-medium no-spinner${inpRoCls}`;
   const inpQty = `${inpCls} text-gray-500 w-20 text-center no-spinner${inpRoCls}`;
   const inpDesc = `${inpCls} text-gray-500${isReadOnly ? ' cursor-default' : ' cursor-pointer'}${inpRoCls}`;
 
-  function handleCalc() {
-    if (!calcExpr.trim()) { setCalcResult(null); return; }
+  function computeCalc(expr: string): string | null {
+    if (!expr.trim()) return null;
     try {
-      const sanitized = calcExpr.replace(/[^0-9+\-*/().%]/g, '');
-      const result = Function('"use strict"; return (' + sanitized + ')')();
-      if (isFinite(result)) {
-        setCalcResult(Number.isInteger(result) ? String(result) : result.toFixed(3));
-      } else {
-        setCalcResult('خطأ');
-      }
-    } catch { setCalcResult('خطأ'); }
+      const sanitized = expr.replace(/[^0-9+\-*/().%]/g, '');
+      const r = Function('"use strict"; return (' + sanitized + ')')();
+      if (isFinite(r)) return Number.isInteger(r) ? String(r) : r.toFixed(3);
+    } catch {}
+    return null;
   }
 
   return (
@@ -434,24 +431,25 @@ export default function FinancialDailyPage() {
         {/* Quick Calculator */}
         <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
           <button onClick={() => setCalcOpen(!calcOpen)} className="w-full px-5 py-2 flex items-center gap-2 hover:bg-gray-50 transition-colors text-sm text-gray-500">
-            <span className="text-lg">🧮</span> حاسبة سريعة
+            <span className="text-lg">🧮</span> حاسبة
             <span className="mr-auto text-gray-300">{calcOpen ? '▲' : '▼'}</span>
           </button>
           {calcOpen && (
             <div className="px-5 py-3 border-t border-gray-100 bg-gray-50/50 flex flex-wrap items-center gap-3">
               <input type="text" value={calcExpr} onChange={(e) => setCalcExpr(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleCalc(); }}
                 placeholder="أدخل العملية الحسابية مثل 150+200*3"
                 className="flex-1 min-w-[250px] border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 font-mono text-left" />
-              <button onClick={handleCalc} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 font-medium shadow-sm">احسب</button>
-              {calcResult !== null && (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-500">=</span>
-                  <span className="text-lg font-bold text-green-700 font-mono">{calcResult}</span>
-                  <button onClick={() => { navigator.clipboard.writeText(calcResult); toast.success('تم النسخ'); }}
-                    className="text-xs text-blue-500 hover:text-blue-700">نسخ</button>
-                </div>
-              )}
+              {(() => {
+                const result = computeCalc(calcExpr);
+                return result !== null ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-500">=</span>
+                    <span className="text-lg font-bold text-green-700 font-mono">{result}</span>
+                    <button onClick={() => { navigator.clipboard.writeText(result); toast.success('تم النسخ'); }}
+                      className="text-xs text-blue-500 hover:text-blue-700">نسخ</button>
+                  </div>
+                ) : null;
+              })()}
             </div>
           )}
         </div>
@@ -487,8 +485,10 @@ export default function FinancialDailyPage() {
                   <th className="sticky right-0 z-30 bg-gray-100 px-2 py-2 border-b border-l border-gray-200 min-w-[40px] text-gray-600 font-bold text-sm">#</th>
                   {cats.map((c) => {
                     const isPur = (c as any).is_purchase;
+                    const isFocused = focusedCat === c.id;
                     return (
-                      <th key={c.id} colSpan={3} className={`px-2 py-2 border-b border-l border-gray-200 font-bold min-w-[300px] whitespace-nowrap text-center ${isPur ? 'bg-amber-50 text-amber-800' : 'text-gray-700 bg-gray-50/50'}`}>
+                      <th key={c.id} colSpan={3} className={`px-2 py-2 border-b border-l border-gray-200 font-bold min-w-[300px] whitespace-nowrap text-center transition-colors
+                        ${isFocused ? 'bg-blue-100 text-blue-800 ring-2 ring-inset ring-blue-300' : isPur ? 'bg-amber-50 text-amber-800' : 'text-gray-700 bg-gray-50/50'}`}>
                         {c.name}
                         {isPur && <span className="mr-1 text-[10px] bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded-full">مشتريات</span>}
                       </th>
@@ -498,13 +498,16 @@ export default function FinancialDailyPage() {
                 </tr>
                 <tr className="sticky top-[38px] z-20 bg-gradient-to-b from-gray-50 to-white shadow-sm">
                   <th className="sticky right-0 z-30 bg-white px-2 py-1.5 border-b border-l border-gray-200"></th>
-                  {cats.map((c) => (
-                    <React.Fragment key={c.id}>
-                      <th className="px-2 py-1.5 border-b border-l border-gray-200 text-gray-400 font-medium bg-white/80 text-[11px] w-20">الكمية</th>
-                      <th className="px-2 py-1.5 border-b border-l border-gray-200 text-gray-400 font-medium bg-white/80 text-[11px] w-24">المبلغ</th>
-                      <th className="px-2 py-1.5 border-b border-l border-gray-200 text-gray-400 font-medium bg-white/80 text-[11px]">البيان</th>
-                    </React.Fragment>
-                  ))}
+                  {cats.map((c) => {
+                    const isFocused = focusedCat === c.id;
+                    return (
+                      <React.Fragment key={c.id}>
+                        <th className={`px-2 py-1.5 border-b border-l border-gray-200 text-gray-400 font-medium text-[11px] w-20 transition-colors ${isFocused ? 'bg-blue-50' : 'bg-white/80'}`}>الكمية</th>
+                        <th className={`px-2 py-1.5 border-b border-l border-gray-200 text-gray-400 font-medium text-[11px] w-24 transition-colors ${isFocused ? 'bg-blue-50' : 'bg-white/80'}`}>المبلغ</th>
+                        <th className={`px-2 py-1.5 border-b border-l border-gray-200 text-gray-400 font-medium text-[11px] transition-colors ${isFocused ? 'bg-blue-50' : 'bg-white/80'}`}>البيان</th>
+                      </React.Fragment>
+                    );
+                  })}
                   <th className="px-2 py-1.5 border-b border-gray-200 text-gray-400 font-medium bg-white/80 text-[11px]"></th>
                 </tr>
               </thead>
@@ -519,34 +522,44 @@ export default function FinancialDailyPage() {
                           {!isReadOnly && <button onClick={() => delRow(i)} className="text-red-200 hover:text-red-400 text-[10px]">✕</button>}
                         </div>
                       </td>
-                      {cats.map((c) => (
-                        <React.Fragment key={c.id}>
-                          <td className="px-1 py-0.5 border-l border-gray-50">
-                            <input type="number" value={r.quantities[c.id] ?? ''}
-                              onChange={(e) => setCell(i, c.id, 'quantities', e.target.value)}
-                              disabled={isReadOnly}
-                              className={inpQty} placeholder="0" />
-                          </td>
-                          <td className="px-1 py-0.5 border-l border-gray-50">
-                            <input type="number" value={r.amounts[c.id] ?? ''}
-                              onChange={(e) => setCell(i, c.id, 'amounts', e.target.value)}
-                              disabled={isReadOnly}
-                              className={inpAmt} placeholder="0" />
-                          </td>
-                          <td className="px-1 py-0.5 border-l border-gray-50" style={{ minWidth: 160 }}>
-                            <ItemSelectCell
-                              categoryId={c.id}
-                              isPurchase={(c as any).is_purchase}
-                              value={r.itemIds[c.id] || ''}
-                              displayValue={r.descriptions[c.id] || ''}
-                              onSelect={(itemId, itemName) => handleItemSelect(i, c.id, itemId, itemName)}
-                              onTextChange={(text) => setCell(i, c.id, 'descriptions', text)}
-                              disabled={isReadOnly}
-                              className={inpDesc}
-                            />
-                          </td>
-                        </React.Fragment>
-                      ))}
+                      {cats.map((c) => {
+                        const isFocused = focusedCat === c.id;
+                        const bgCell = isFocused ? 'bg-blue-50/30' : '';
+                        return (
+                          <React.Fragment key={c.id}>
+                            <td className={`px-1 py-0.5 border-l border-gray-50 transition-colors ${bgCell}`}>
+                              <input type="number" value={r.quantities[c.id] ?? ''}
+                                onChange={(e) => setCell(i, c.id, 'quantities', e.target.value)}
+                                onFocus={() => setFocusedCat(c.id)}
+                                onBlur={() => setFocusedCat(null)}
+                                disabled={isReadOnly}
+                                className={inpQty} placeholder="0" />
+                            </td>
+                            <td className={`px-1 py-0.5 border-l border-gray-50 transition-colors ${bgCell}`}>
+                              <input type="number" value={r.amounts[c.id] ?? ''}
+                                onChange={(e) => setCell(i, c.id, 'amounts', e.target.value)}
+                                onFocus={() => setFocusedCat(c.id)}
+                                onBlur={() => setFocusedCat(null)}
+                                disabled={isReadOnly}
+                                className={inpAmt} placeholder="0" />
+                            </td>
+                            <td className={`px-1 py-0.5 border-l border-gray-50 transition-colors ${bgCell}`} style={{ minWidth: 160 }}>
+                              <ItemSelectCell
+                                categoryId={c.id}
+                                isPurchase={(c as any).is_purchase}
+                                value={r.itemIds[c.id] || ''}
+                                displayValue={r.descriptions[c.id] || ''}
+                                onSelect={(itemId, itemName) => handleItemSelect(i, c.id, itemId, itemName)}
+                                onTextChange={(text) => setCell(i, c.id, 'descriptions', text)}
+                                onFocus={() => setFocusedCat(c.id)}
+                                onBlur={() => setFocusedCat(null)}
+                                disabled={isReadOnly}
+                                className={inpDesc}
+                              />
+                            </td>
+                          </React.Fragment>
+                        );
+                      })}
                       <td className="px-2 py-1 text-left font-medium text-red-600 bg-red-50/20">
                         {rowTotal > 0 ? rowTotal.toFixed(2) : ''}
                       </td>
@@ -654,7 +667,7 @@ export default function FinancialDailyPage() {
 }
 
 function ItemSelectCell({
-  categoryId, isPurchase, value, displayValue, onSelect, onTextChange, className, disabled,
+  categoryId, isPurchase, value, displayValue, onSelect, onTextChange, className, disabled, onFocus, onBlur,
 }: {
   categoryId: string;
   isPurchase: boolean;
@@ -664,6 +677,8 @@ function ItemSelectCell({
   onTextChange: (text: string) => void;
   className: string;
   disabled?: boolean;
+  onFocus?: () => void;
+  onBlur?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -696,6 +711,7 @@ function ItemSelectCell({
     return (
       <input type="text" value={displayValue}
         onChange={(e) => onTextChange(e.target.value)}
+        onFocus={onFocus} onBlur={onBlur}
         disabled={disabled}
         placeholder="..." className={className} />
     );
@@ -707,7 +723,8 @@ function ItemSelectCell({
         ref={inputRef}
         type="text"
         value={displayValue}
-        onClick={() => { if (!disabled) { setOpen(true); setSearch(''); } }}
+        onFocus={() => { if (!disabled) { setOpen(true); setSearch(''); } onFocus?.(); }}
+        onBlur={onBlur}
         onChange={(e) => {
           if (disabled) return;
           onTextChange(e.target.value);
