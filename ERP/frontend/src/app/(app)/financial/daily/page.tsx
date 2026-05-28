@@ -1,9 +1,10 @@
 'use client';
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { financialApi } from '@/lib/financial/api';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/ui/AppShell';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import toast from 'react-hot-toast';
 
 function CatModal({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -13,18 +14,23 @@ function CatModal({ open, onClose }: { open: boolean; onClose: () => void }) {
     queryFn: () => financialApi.categories(),
     enabled: open,
   });
+  const [sorted, setSorted] = useState<any[]>([]);
+  useEffect(() => { if (catList.length) setSorted([...catList]); }, [catList]);
+
   const [newName, setNewName] = useState('');
+  const [newIsPurchase, setNewIsPurchase] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+  const [editIsPurchase, setEditIsPurchase] = useState(false);
 
   const addCat = useMutation({
-    mutationFn: (name: string) => api.post('/financial/categories', { name }).then((r) => r.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['financial-categories'] }); setNewName(''); toast.success('تمت الإضافة'); },
+    mutationFn: (data: { name: string; is_purchase: boolean }) => api.post('/financial/categories', data).then((r) => r.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['financial-categories'] }); setNewName(''); setNewIsPurchase(false); toast.success('تمت الإضافة'); },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'خطأ'),
   });
 
   const editCat = useMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) => api.put(`/financial/categories/${id}`, { name }).then((r) => r.data),
+    mutationFn: ({ id, name, is_purchase }: { id: string; name: string; is_purchase: boolean }) => api.put(`/financial/categories/${id}`, { name, is_purchase }).then((r) => r.data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['financial-categories'] }); setEditId(null); toast.success('تم التحديث'); },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'خطأ'),
   });
@@ -34,6 +40,36 @@ function CatModal({ open, onClose }: { open: boolean; onClose: () => void }) {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['financial-categories'] }); toast.success('تم الحذف'); },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'خطأ'),
   });
+
+  const reorderCat = useMutation({
+    mutationFn: (cats: { id: string; sort_order: number }[]) => api.put('/financial/categories/reorder', { categories: cats }).then((r) => r.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['financial-categories'] }); },
+    onError: (e: any) => toast.error(e?.response?.data?.message || 'خطأ'),
+  });
+
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+
+  function handleDragStart(idx: number) {
+    if (editId) return;
+    setDragIdx(idx);
+  }
+
+  function handleDragOver(e: React.DragEvent, idx: number) {
+    if (dragIdx === null || dragIdx === idx || editId) return;
+    e.preventDefault();
+    const arr = [...sorted];
+    const [moved] = arr.splice(dragIdx, 1);
+    arr.splice(idx, 0, moved);
+    setDragIdx(idx);
+    setSorted(arr);
+  }
+
+  function handleDragEnd() {
+    if (dragIdx === null) return;
+    const ordered = sorted.map((c: any, i: number) => ({ id: c.id, sort_order: i }));
+    reorderCat.mutate(ordered);
+    setDragIdx(null);
+  }
 
   if (!open) return null;
 
@@ -49,26 +85,51 @@ function CatModal({ open, onClose }: { open: boolean; onClose: () => void }) {
             <input value={newName} onChange={(e) => setNewName(e.target.value)}
               placeholder="اسم الفئة الجديدة"
               className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-              onKeyDown={(e) => { if (e.key === 'Enter' && newName) addCat.mutate(newName); }} />
-            <button onClick={() => newName && addCat.mutate(newName)} disabled={!newName || addCat.isPending}
+              onKeyDown={(e) => { if (e.key === 'Enter' && newName) addCat.mutate({ name: newName, is_purchase: newIsPurchase }); }} />
+            <button onClick={() => newName && addCat.mutate({ name: newName, is_purchase: newIsPurchase })} disabled={!newName || addCat.isPending}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap">إضافة</button>
           </div>
+          <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+            <input type="checkbox" checked={newIsPurchase} onChange={(e) => setNewIsPurchase(e.target.checked)}
+              className="w-4 h-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500" />
+            مشتريات (تظهر في وارد مخزن)
+          </label>
           <div className="divide-y divide-gray-50 max-h-52 overflow-y-auto border border-gray-100 rounded-lg">
-            {catList.map((c: any) => (
-              <div key={c.id} className="px-3 py-2 flex items-center justify-between hover:bg-gray-50">
+            {sorted.map((c: any, idx: number) => (
+              <div key={c.id}
+                draggable={editId !== c.id}
+                onDragStart={() => handleDragStart(idx)}
+                onDragOver={(e) => handleDragOver(e, idx)}
+                onDragEnd={handleDragEnd}
+                className={`px-3 py-2 flex items-center justify-between transition-colors
+                  ${dragIdx === idx ? 'opacity-40 bg-blue-50' : 'hover:bg-gray-50'}
+                  ${editId === c.id ? 'bg-blue-50/40' : 'cursor-grab active:cursor-grabbing'}`}>
                 {editId === c.id ? (
-                  <div className="flex gap-2 items-center flex-1">
+                  <div className="flex flex-col gap-2 flex-1">
                     <input value={editName} onChange={(e) => setEditName(e.target.value)}
-                      className="flex-1 border border-gray-200 rounded px-2 py-1 text-sm"
-                      onKeyDown={(e) => { if (e.key === 'Enter') editCat.mutate({ id: c.id, name: editName }); }} />
-                    <button onClick={() => editCat.mutate({ id: c.id, name: editName })} className="text-green-600 text-xs font-medium">حفظ</button>
-                    <button onClick={() => setEditId(null)} className="text-gray-400 text-xs">إلغاء</button>
+                      className="w-full border border-gray-200 rounded px-2 py-1 text-sm"
+                      onKeyDown={(e) => { if (e.key === 'Enter') editCat.mutate({ id: c.id, name: editName, is_purchase: editIsPurchase }); }} />
+                    <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
+                      <input type="checkbox" checked={editIsPurchase} onChange={(e) => setEditIsPurchase(e.target.checked)}
+                        className="w-3.5 h-3.5 rounded border-gray-300 text-amber-600 focus:ring-amber-500" />
+                      مشتريات
+                    </label>
+                    <div className="flex gap-2">
+                      <button onClick={() => editCat.mutate({ id: c.id, name: editName, is_purchase: editIsPurchase })} className="text-green-600 text-xs font-medium">حفظ</button>
+                      <button onClick={() => setEditId(null)} className="text-gray-400 text-xs">إلغاء</button>
+                    </div>
                   </div>
                 ) : (
                   <>
-                    <span className="text-sm text-gray-700">{c.name}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-300 cursor-grab select-none text-sm">⠿</span>
+                      <span className="text-sm text-gray-700 flex items-center gap-2">
+                        {c.name}
+                        {c.is_purchase && <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">مشتريات</span>}
+                      </span>
+                    </div>
                     <div className="flex gap-2">
-                      <button onClick={() => { setEditId(c.id); setEditName(c.name); }} className="text-blue-500 text-xs hover:text-blue-700">تعديل</button>
+                      <button onClick={() => { setEditId(c.id); setEditName(c.name); setEditIsPurchase(c.is_purchase); }} className="text-blue-500 text-xs hover:text-blue-700">تعديل</button>
                       <button onClick={() => { if (confirm(`حذف "${c.name}"?`)) delCat.mutate(c.id); }} className="text-red-400 text-xs hover:text-red-600">حذف</button>
                     </div>
                   </>
@@ -84,7 +145,9 @@ function CatModal({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 type ExRow = {
   amounts: Record<string, string>;
+  quantities: Record<string, string>;
   descriptions: Record<string, string>;
+  itemIds: Record<string, string>;
 };
 
 export default function FinancialDailyPage() {
@@ -114,7 +177,6 @@ export default function FinancialDailyPage() {
   const daysInMonth = new Date(parseInt(month.slice(0, 4)), parseInt(month.slice(5, 7)), 0).getDate();
   const savedEntry = entries.find((e: any) => e.date.slice(0, 10) === `${month}-${String(selectedDay).padStart(2, '0')}`);
 
-  // Computed: per category total
   const catTotals = cats.reduce((acc, c) => {
     acc[c.id] = rows.reduce((s, r) => s + (parseFloat(r.amounts[c.id]) || 0), 0);
     return acc;
@@ -122,7 +184,6 @@ export default function FinancialDailyPage() {
   const totalExpenses = Object.values(catTotals).reduce((s, v) => s + v, 0);
   const netDaily = (parseFloat(sales) || 0) - totalExpenses;
 
-  // Load day
   const loadDay = useCallback((day: number) => {
     setSelectedDay(day);
     const found = entries.find((e: any) =>
@@ -132,33 +193,39 @@ export default function FinancialDailyPage() {
       setEditingId(found.id);
       setSales(String(found.total_sales));
       setNotes(found.notes || '');
-      // Build rows from flat details (one detail per row per category)
       const rawRows: ExRow[] = [];
       for (const det of (found.details || [])) {
         const cat = det.expense_category_id;
-        // Try to find an existing row that doesn't have this cat filled
         let placed = false;
         for (const r of rawRows) {
           if (!r.amounts[cat] && !r.descriptions[cat]) {
             r.amounts[cat] = String(det.amount);
+            r.quantities[cat] = det.quantity != null ? String(det.quantity) : '';
             r.descriptions[cat] = det.description || '';
+            r.itemIds[cat] = det.item_id || '';
             placed = true;
             break;
           }
         }
         if (!placed) {
-          const r: ExRow = { amounts: {}, descriptions: {} };
-          r.amounts[cat] = String(det.amount);
-          r.descriptions[cat] = det.description || '';
-          rawRows.push(r);
+          rawRows.push({
+            amounts: { [cat]: String(det.amount) },
+            quantities: { [cat]: det.quantity != null ? String(det.quantity) : '' },
+            descriptions: { [cat]: det.description || '' },
+            itemIds: { [cat]: det.item_id || '' },
+          });
         }
       }
-      setRows(rawRows.length > 0 ? rawRows : Array.from({ length: 7 }, () => ({ amounts: {}, descriptions: {} })));
+      setRows(rawRows.length > 0 ? rawRows : Array.from({ length: 12 }, () => ({
+        amounts: {}, quantities: {}, descriptions: {}, itemIds: {},
+      })));
     } else {
       setEditingId(null);
       setSales('');
       setNotes('');
-      setRows(Array.from({ length: 7 }, () => ({ amounts: {}, descriptions: {} })));
+      setRows(Array.from({ length: 12 }, () => ({
+        amounts: {}, quantities: {}, descriptions: {}, itemIds: {},
+      })));
     }
   }, [entries, month]);
 
@@ -175,7 +242,8 @@ export default function FinancialDailyPage() {
     mutationFn: (id: string) => financialApi.deleteDailyEntry(id),
     onSuccess: () => {
       toast.success('تم الحذف');
-      setEditingId(null); setSales(''); setNotes(''); setRows([{ amounts: {}, descriptions: {} }]);
+      setEditingId(null); setSales(''); setNotes('');
+      setRows([{ amounts: {}, quantities: {}, descriptions: {}, itemIds: {} }]);
       qc.invalidateQueries({ queryKey: ['financial-daily', month] });
     },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'خطأ'),
@@ -183,8 +251,7 @@ export default function FinancialDailyPage() {
 
   function handleSave() {
     if (!sales) { toast.error('أدخل المبيعات'); return; }
-    // Flatten rows into details array
-    const details: { expense_category_id: string; amount: number; description?: string }[] = [];
+    const details: any[] = [];
     for (const r of rows) {
       for (const c of cats) {
         const amt = parseFloat(r.amounts[c.id]) || 0;
@@ -192,7 +259,9 @@ export default function FinancialDailyPage() {
           details.push({
             expense_category_id: c.id,
             amount: amt,
+            quantity: r.quantities[c.id] ? parseFloat(r.quantities[c.id]) : null,
             description: r.descriptions[c.id] || undefined,
+            item_id: r.itemIds[c.id] || null,
           });
         }
       }
@@ -210,23 +279,44 @@ export default function FinancialDailyPage() {
   }
 
   function addRow() {
-    setRows([...rows, { amounts: {}, descriptions: {} }]);
+    setRows([...rows, { amounts: {}, quantities: {}, descriptions: {}, itemIds: {} }]);
   }
 
   function delRow(i: number) {
-    if (rows.length <= 1) { setRows([{ amounts: {}, descriptions: {} }]); return; }
+    if (rows.length <= 1) {
+      setRows([{ amounts: {}, quantities: {}, descriptions: {}, itemIds: {} }]);
+      return;
+    }
     setRows(rows.filter((_, j) => j !== i));
   }
 
-  function setCell(i: number, catId: string, field: 'amounts' | 'descriptions', val: string) {
-    const copy = rows.map((r) => ({ amounts: { ...r.amounts }, descriptions: { ...r.descriptions } }));
+  function setCell(i: number, catId: string, field: 'amounts' | 'quantities' | 'descriptions' | 'itemIds', val: string) {
+    const copy = rows.map((r) => ({
+      amounts: { ...r.amounts },
+      quantities: { ...r.quantities },
+      descriptions: { ...r.descriptions },
+      itemIds: { ...r.itemIds },
+    }));
     copy[i][field][catId] = val;
+    setRows(copy);
+  }
+
+  function handleItemSelect(i: number, catId: string, itemId: string, itemName: string) {
+    const copy = rows.map((r) => ({
+      amounts: { ...r.amounts },
+      quantities: { ...r.quantities },
+      descriptions: { ...r.descriptions },
+      itemIds: { ...r.itemIds },
+    }));
+    copy[i].itemIds[catId] = itemId;
+    copy[i].descriptions[catId] = itemName;
     setRows(copy);
   }
 
   const inpCls = 'w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-left outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 bg-white';
   const inpAmt = `${inpCls} font-medium`;
-  const inpDesc = `${inpCls} text-gray-500`;
+  const inpQty = `${inpCls} text-gray-500 w-16 text-center`;
+  const inpDesc = `${inpCls} text-gray-500 cursor-pointer`;
 
   return (
     <div className="flex flex-col h-full bg-gray-50/50" dir="rtl">
@@ -235,6 +325,34 @@ export default function FinancialDailyPage() {
         subtitle="إدخال المصروفات والمبيعات — نظام الأعمدة"
         actions={
           <div className="flex gap-2">
+            <button onClick={() => {
+              api.get('/financial/daily-entries/export/warehouse-incoming', { params: { month, day: selectedDay }, responseType: 'blob' })
+                .then((r) => {
+                  const url = window.URL.createObjectURL(new Blob([r.data]));
+                  const a = document.createElement('a'); a.href = url;
+                  a.download = `وارد_مخزن_${selectedDay}_${month.split('-')[1]}.xlsx`; a.click();
+                  window.URL.revokeObjectURL(url);
+                  toast.success('تم التصدير');
+                })
+                .catch(() => toast.error('فشل التصدير'));
+            }}
+              className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700 shadow-sm font-medium">
+              🏭 وارد مخزن اليوم
+            </button>
+            <button onClick={() => {
+              api.get('/financial/daily-entries/export/single-day', { params: { month, day: selectedDay }, responseType: 'blob' })
+                .then((r) => {
+                  const url = window.URL.createObjectURL(new Blob([r.data]));
+                  const a = document.createElement('a'); a.href = url;
+                  a.download = `اليومية_${month}_يوم${selectedDay}.xlsx`; a.click();
+                  window.URL.revokeObjectURL(url);
+                  toast.success('تم التصدير');
+                })
+                .catch(() => toast.error('فشل التصدير'));
+            }}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 shadow-sm font-medium">
+              📄 تصدير اليومية
+            </button>
             <button onClick={() => {
               api.get('/financial/daily-entries/export/excel', { params: { month }, responseType: 'blob' })
                 .then((r) => {
@@ -247,7 +365,7 @@ export default function FinancialDailyPage() {
                 .catch(() => toast.error('فشل التصدير'));
             }}
               className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 shadow-sm font-medium">
-              ⬇ تصدير إكسل
+              ⬇ تصدير كل الشهر
             </button>
             <button onClick={() => setShowCatModal(true)}
               className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm hover:bg-gray-50 shadow-sm">
@@ -258,7 +376,6 @@ export default function FinancialDailyPage() {
       />
 
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        {/* Month + Day Selector */}
         <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2">
             <label className="text-sm font-medium text-gray-600">الشهر</label>
@@ -287,9 +404,7 @@ export default function FinancialDailyPage() {
           </div>
         </div>
 
-        {/* Daily Entry Sheet — like Excel Sheet 1 */}
         <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
-          {/* Card Header */}
           <div className="bg-gradient-to-l from-blue-50 to-white px-5 py-3 border-b border-gray-100 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <span className="font-bold text-gray-900">
@@ -307,25 +422,27 @@ export default function FinancialDailyPage() {
             </div>
           </div>
 
-          {/* Excel-like Grid */}
           <div className="overflow-auto max-h-[500px]" style={{ direction: 'ltr' }}>
-            <table className="text-xs border-collapse" style={{ direction: 'rtl', minWidth: cats.length * 200 + 60 }}>
-              {/* Header Row 1: Category names */}
+            <table className="text-xs border-collapse" style={{ direction: 'rtl', minWidth: cats.length * 280 + 80 }}>
               <thead>
                 <tr className="sticky top-0 z-20 bg-gradient-to-b from-gray-100 to-gray-50 shadow-sm">
                   <th className="sticky right-0 z-30 bg-gray-100 px-2 py-2 border-b border-l border-gray-200 min-w-[40px] text-gray-600 font-bold text-sm">#</th>
-                  {cats.map((c) => (
-                    <th key={c.id} colSpan={2} className="px-2 py-2 border-b border-l border-gray-200 text-gray-700 font-bold bg-gray-50/50 min-w-[180px] whitespace-nowrap text-center">
-                      {c.name}
-                    </th>
-                  ))}
+                  {cats.map((c) => {
+                    const isPur = (c as any).is_purchase;
+                    return (
+                      <th key={c.id} colSpan={3} className={`px-2 py-2 border-b border-l border-gray-200 font-bold min-w-[260px] whitespace-nowrap text-center ${isPur ? 'bg-amber-50 text-amber-800' : 'text-gray-700 bg-gray-50/50'}`}>
+                        {c.name}
+                        {isPur && <span className="mr-1 text-[10px] bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded-full">مشتريات</span>}
+                      </th>
+                    );
+                  })}
                   <th className="px-2 py-2 border-b border-gray-200 min-w-[80px] text-red-700 font-bold bg-red-50/50 text-center">الإجمالي</th>
                 </tr>
-                {/* Header Row 2: Sub-columns */}
                 <tr className="sticky top-[38px] z-20 bg-gradient-to-b from-gray-50 to-white shadow-sm">
                   <th className="sticky right-0 z-30 bg-white px-2 py-1.5 border-b border-l border-gray-200"></th>
                   {cats.map((c) => (
                     <React.Fragment key={c.id}>
+                      <th className="px-2 py-1.5 border-b border-l border-gray-200 text-gray-400 font-medium bg-white/80 text-[11px] w-16">الكمية</th>
                       <th className="px-2 py-1.5 border-b border-l border-gray-200 text-gray-400 font-medium bg-white/80 text-[11px]">المبلغ</th>
                       <th className="px-2 py-1.5 border-b border-l border-gray-200 text-gray-400 font-medium bg-white/80 text-[11px]">البيان</th>
                     </React.Fragment>
@@ -338,21 +455,34 @@ export default function FinancialDailyPage() {
                   const rowTotal = cats.reduce((s, c) => s + (parseFloat(r.amounts[c.id]) || 0), 0);
                   return (
                     <tr key={i} className="hover:bg-blue-50/20 transition-colors border-b border-gray-50">
-                      <td className="sticky right-0 z-10 bg-white px-2 py-1 border-l border-gray-50 text-center text-gray-400 text-xs font-medium">
-                        {i + 1}
-                        <button onClick={() => delRow(i)} className="mr-1 text-red-200 hover:text-red-400">✕</button>
+                      <td className="sticky right-0 z-10 bg-white px-2 py-1 border-l border-gray-50 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <span className="text-gray-400 text-xs font-medium">{i + 1}</span>
+                          <button onClick={() => delRow(i)} className="text-red-200 hover:text-red-400 text-[10px]">✕</button>
+                        </div>
                       </td>
                       {cats.map((c) => (
                         <React.Fragment key={c.id}>
+                          <td className="px-1 py-0.5 border-l border-gray-50">
+                            <input type="number" value={r.quantities[c.id] ?? ''}
+                              onChange={(e) => setCell(i, c.id, 'quantities', e.target.value)}
+                              className={inpQty} placeholder="0" />
+                          </td>
                           <td className="px-1 py-0.5 border-l border-gray-50">
                             <input type="number" value={r.amounts[c.id] ?? ''}
                               onChange={(e) => setCell(i, c.id, 'amounts', e.target.value)}
                               className={inpAmt} placeholder="0" />
                           </td>
-                          <td className="px-1 py-0.5 border-l border-gray-50">
-                            <input value={r.descriptions[c.id] ?? ''}
-                              onChange={(e) => setCell(i, c.id, 'descriptions', e.target.value)}
-                              className={inpDesc} placeholder="..." />
+                          <td className="px-1 py-0.5 border-l border-gray-50" style={{ minWidth: 160 }}>
+                            <ItemSelectCell
+                              categoryId={c.id}
+                              isPurchase={(c as any).is_purchase}
+                              value={r.itemIds[c.id] || ''}
+                              displayValue={r.descriptions[c.id] || ''}
+                              onSelect={(itemId, itemName) => handleItemSelect(i, c.id, itemId, itemName)}
+                              onTextChange={(text) => setCell(i, c.id, 'descriptions', text)}
+                              className={inpDesc}
+                            />
                           </td>
                         </React.Fragment>
                       ))}
@@ -363,12 +493,12 @@ export default function FinancialDailyPage() {
                   );
                 })}
               </tbody>
-              {/* Totals Row */}
               <tfoot>
                 <tr className="sticky bottom-0 z-20 bg-gradient-to-t from-gray-200 to-gray-100 border-t-2 border-gray-300 font-bold shadow-sm">
                   <td className="sticky right-0 z-30 bg-gray-200 px-2 py-2 border-t border-l border-gray-300 text-center text-sm">SUM</td>
                   {cats.map((c) => (
                     <React.Fragment key={c.id}>
+                      <td className="px-2 py-2 border-t border-l border-gray-300"></td>
                       <td className="px-2 py-2 border-t border-l border-gray-300 text-left text-gray-800 text-sm font-bold">
                         {catTotals[c.id] > 0 ? catTotals[c.id].toFixed(2) : ''}
                       </td>
@@ -383,7 +513,6 @@ export default function FinancialDailyPage() {
             </table>
           </div>
 
-          {/* Add Row Button */}
           <div className="px-5 py-3 border-t border-gray-100 bg-gray-50/70 flex items-center gap-3">
             <button onClick={addRow} className="px-4 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-sm hover:bg-blue-100 hover:border-blue-300 font-medium transition-all shadow-sm flex items-center gap-1">
               <span className="text-lg leading-none">+</span> إضافة صف
@@ -391,7 +520,6 @@ export default function FinancialDailyPage() {
             <span className="text-xs text-gray-400">({rows.length} صفوف)</span>
           </div>
 
-          {/* Bottom: Sales + Notes + Save */}
           <div className="px-5 py-3 border-t border-gray-100 bg-gray-50 flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium text-gray-700">إجمالي المبيعات:</span>
@@ -416,7 +544,6 @@ export default function FinancialDailyPage() {
           </div>
         </div>
 
-        {/* Saved Entries for the Month */}
         <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
           <button onClick={() => setShowSaved(!showSaved)} className="w-full px-5 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors">
             <h3 className="font-semibold text-gray-800">اليوميات المسجلة لهذا الشهر</h3>
@@ -459,6 +586,105 @@ export default function FinancialDailyPage() {
       </div>
 
       <CatModal open={showCatModal} onClose={() => setShowCatModal(false)} />
+    </div>
+  );
+}
+
+function ItemSelectCell({
+  categoryId, isPurchase, value, displayValue, onSelect, onTextChange, className,
+}: {
+  categoryId: string;
+  isPurchase: boolean;
+  value: string;
+  displayValue: string;
+  onSelect: (itemId: string, itemName: string) => void;
+  onTextChange: (text: string) => void;
+  className: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const wrapperRef = React.useRef<HTMLDivElement>(null);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const { data: items = [] } = useQuery({
+    queryKey: ['financial-items', categoryId],
+    queryFn: () => financialApi.items(categoryId),
+    enabled: open && isPurchase,
+  });
+
+  React.useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const filtered = React.useMemo(() => {
+    if (!search.trim()) return items;
+    const q = search.toLowerCase();
+    return items.filter((o: any) => o.name.toLowerCase().includes(q));
+  }, [items, search]);
+
+  if (!isPurchase) {
+    return (
+      <input type="text" value={displayValue}
+        onChange={(e) => onTextChange(e.target.value)}
+        placeholder="..." className={className} />
+    );
+  }
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <input
+        ref={inputRef}
+        type="text"
+        value={displayValue}
+        onClick={() => { setOpen(true); setSearch(''); }}
+        onChange={(e) => {
+          onTextChange(e.target.value);
+          setSearch(e.target.value);
+          if (!open) setOpen(true);
+        }}
+        placeholder="..."
+        className={className}
+      />
+      {open && (
+        <div className="absolute z-50 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden" style={{ minWidth: 200 }}>
+          <div className="p-2 border-b border-gray-100">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="ابحث عن صنف..."
+              className="w-full border border-gray-200 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:border-blue-300"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+          <div className="max-h-48 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <div className="px-3 py-4 text-sm text-gray-400 text-center">
+                {search ? 'لا توجد نتائج' : 'لا توجد أصناف لهذه الفئة'}
+              </div>
+            ) : (
+              filtered.map((opt: any) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onMouseDown={() => { onSelect(opt.id, opt.name); setOpen(false); }}
+                  className={`w-full text-right px-3 py-2 text-sm flex items-center justify-between hover:bg-blue-50
+                    ${value === opt.id ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700'}`}
+                >
+                  <span>{opt.name}</span>
+                  {opt.unit && <span className="text-xs text-gray-400">{opt.unit}</span>}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

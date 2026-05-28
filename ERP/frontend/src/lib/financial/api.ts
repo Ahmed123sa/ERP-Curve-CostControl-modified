@@ -27,6 +27,9 @@ export const financialApi = {
   deleteDailyEntry: (id: string) =>
     api.delete(`/financial/daily-entries/${id}`).then((r) => r.data),
 
+  items: (categoryId?: string) =>
+    api.get('/financial/daily-entries/items', { params: { category_id: categoryId } }).then((r) => r.data.items),
+
   // Monthly Summaries
   monthlySummaries: (month?: number, year?: number) =>
     api.get('/financial/monthly-summaries', { params: { month, year } }).then((r) => r.data),

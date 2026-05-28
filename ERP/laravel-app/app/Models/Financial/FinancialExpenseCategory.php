@@ -2,7 +2,9 @@
 
 namespace App\Models\Financial;
 
+use App\Models\Item;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
 class FinancialExpenseCategory extends Model
@@ -11,11 +13,12 @@ class FinancialExpenseCategory extends Model
     public $incrementing = false;
 
     protected $fillable = [
-        'id', 'client_id', 'name', 'code', 'sort_order', 'is_active',
+        'id', 'client_id', 'name', 'code', 'sort_order', 'is_active', 'is_purchase',
     ];
 
     protected $casts = [
         'is_active' => 'boolean',
+        'is_purchase' => 'boolean',
         'sort_order' => 'integer',
     ];
 
@@ -28,5 +31,10 @@ class FinancialExpenseCategory extends Model
                 $model->id = (string) Str::uuid();
             }
         });
+    }
+
+    public function items(): HasMany
+    {
+        return $this->hasMany(Item::class, 'expense_category_id');
     }
 }

@@ -217,11 +217,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('financial')->middleware('permission:financial.daily')->group(function () {
         Route::get('/categories', [\App\Http\Controllers\Financial\DailyEntryController::class, 'categories']);
         Route::post('/categories', [\App\Http\Controllers\Financial\DailyEntryController::class, 'storeCategory']);
+        Route::put('/categories/reorder', [\App\Http\Controllers\Financial\DailyEntryController::class, 'reorderCategories']);
         Route::put('/categories/{id}', [\App\Http\Controllers\Financial\DailyEntryController::class, 'updateCategory']);
         Route::delete('/categories/{id}', [\App\Http\Controllers\Financial\DailyEntryController::class, 'destroyCategory']);
         Route::get('/daily-entries', [\App\Http\Controllers\Financial\DailyEntryController::class, 'index']);
         Route::post('/daily-entries', [\App\Http\Controllers\Financial\DailyEntryController::class, 'store']);
         Route::get('/daily-entries/export/excel', [\App\Http\Controllers\Financial\DailyEntryController::class, 'exportExcel']);
+        Route::get('/daily-entries/export/single-day', [\App\Http\Controllers\Financial\DailyEntryController::class, 'exportSingleDay']);
+        Route::get('/daily-entries/export/warehouse-incoming', [\App\Http\Controllers\Financial\DailyEntryController::class, 'exportWarehouseIncoming']);
+        Route::get('/daily-entries/items', [\App\Http\Controllers\Financial\DailyEntryController::class, 'items']);
         Route::get('/daily-entries/{id}', [\App\Http\Controllers\Financial\DailyEntryController::class, 'show']);
         Route::put('/daily-entries/{id}', [\App\Http\Controllers\Financial\DailyEntryController::class, 'update']);
         Route::delete('/daily-entries/{id}', [\App\Http\Controllers\Financial\DailyEntryController::class, 'destroy']);
