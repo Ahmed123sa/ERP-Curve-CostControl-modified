@@ -132,4 +132,12 @@ class DailyEntryController extends Controller
 
         return response()->json(['message' => 'تم حذف اليومية']);
     }
+
+    public function exportExcel(Request $request): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $clientId = $request->user()->current_client_id;
+        $month = $request->query('month', now()->format('Y-m'));
+
+        return $this->service->exportExcel($clientId, $month);
+    }
 }

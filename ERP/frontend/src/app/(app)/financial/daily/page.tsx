@@ -1,5 +1,5 @@
 'use client';
-import { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { financialApi } from '@/lib/financial/api';
 import { api } from '@/lib/api';
@@ -82,6 +82,11 @@ function CatModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   );
 }
 
+type ExRow = {
+  amounts: Record<string, string>;
+  descriptions: Record<string, string>;
+};
+
 export default function FinancialDailyPage() {
   const qc = useQueryClient();
   const now = new Date();
@@ -89,14 +94,12 @@ export default function FinancialDailyPage() {
   const [selectedDay, setSelectedDay] = useState(now.getDate());
   const [sales, setSales] = useState('');
   const [notes, setNotes] = useState('');
-  const [rows, setRows] = useState<{ cat_id: string; amount: string; desc: string }[]>([]);
+  const [rows, setRows] = useState<ExRow[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
   const [showSaved, setShowSaved] = useState(false);
   const [showCatModal, setShowCatModal] = useState(false);
-  const originalRef = useRef<{ sales: string; notes: string; rows: { cat_id: string; amount: string; desc: string }[] } | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data } = useQuery({
     queryKey: ['financial-daily', month],
     queryFn: () => financialApi.dailyEntries(month),
   });
@@ -106,63 +109,63 @@ export default function FinancialDailyPage() {
     queryFn: () => financialApi.categories(),
   });
 
-  const entries = (data as any)?.entries || [];
+  const cats = catList as { id: string; name: string }[];
+  const entries: any[] = (data as any)?.entries || [];
   const daysInMonth = new Date(parseInt(month.slice(0, 4)), parseInt(month.slice(5, 7)), 0).getDate();
-
   const savedEntry = entries.find((e: any) => e.date.slice(0, 10) === `${month}-${String(selectedDay).padStart(2, '0')}`);
-  const totalExpenses = rows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
-  const netDaily = (parseFloat(sales) || 0) - totalExpenses;
-  const isViewing = !!editingId && !isEditing;
 
-  // Load day data
+  // Computed: per category total
+  const catTotals = cats.reduce((acc, c) => {
+    acc[c.id] = rows.reduce((s, r) => s + (parseFloat(r.amounts[c.id]) || 0), 0);
+    return acc;
+  }, {} as Record<string, number>);
+  const totalExpenses = Object.values(catTotals).reduce((s, v) => s + v, 0);
+  const netDaily = (parseFloat(sales) || 0) - totalExpenses;
+
+  // Load day
   const loadDay = useCallback((day: number) => {
     setSelectedDay(day);
     const found = entries.find((e: any) =>
       e.date.slice(0, 10) === `${month}-${String(day).padStart(2, '0')}`
     );
     if (found) {
-      const loadedSales = String(found.total_sales);
-      const loadedNotes = found.notes || '';
-      const loadedRows = (found.details || []).map((d: any) => ({
-        cat_id: d.expense_category_id,
-        amount: String(d.amount),
-        desc: d.description || '',
-      }));
       setEditingId(found.id);
-      setIsEditing(false);
-      setSales(loadedSales);
-      setNotes(loadedNotes);
-      setRows(loadedRows);
-      originalRef.current = { sales: loadedSales, notes: loadedNotes, rows: loadedRows };
+      setSales(String(found.total_sales));
+      setNotes(found.notes || '');
+      // Build rows from flat details (one detail per row per category)
+      const rawRows: ExRow[] = [];
+      for (const det of (found.details || [])) {
+        const cat = det.expense_category_id;
+        // Try to find an existing row that doesn't have this cat filled
+        let placed = false;
+        for (const r of rawRows) {
+          if (!r.amounts[cat] && !r.descriptions[cat]) {
+            r.amounts[cat] = String(det.amount);
+            r.descriptions[cat] = det.description || '';
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) {
+          const r: ExRow = { amounts: {}, descriptions: {} };
+          r.amounts[cat] = String(det.amount);
+          r.descriptions[cat] = det.description || '';
+          rawRows.push(r);
+        }
+      }
+      setRows(rawRows.length > 0 ? rawRows : Array.from({ length: 7 }, () => ({ amounts: {}, descriptions: {} })));
     } else {
       setEditingId(null);
-      setIsEditing(false);
       setSales('');
       setNotes('');
-      setRows([]);
-      originalRef.current = null;
+      setRows(Array.from({ length: 7 }, () => ({ amounts: {}, descriptions: {} })));
     }
   }, [entries, month]);
-
-  const enterEditMode = () => {
-    originalRef.current = { sales, notes, rows: [...rows] };
-    setIsEditing(true);
-  };
-
-  const cancelEdit = () => {
-    if (originalRef.current) {
-      setSales(originalRef.current.sales);
-      setNotes(originalRef.current.notes);
-      setRows(originalRef.current.rows);
-    }
-    setIsEditing(false);
-  };
 
   const saveMutation = useMutation({
     mutationFn: (body: any) => editingId ? financialApi.updateDailyEntry(editingId, body) : financialApi.storeDailyEntry(body),
     onSuccess: () => {
       toast.success(editingId ? 'تم التحديث' : 'تم الحفظ');
-      setIsEditing(false);
       qc.invalidateQueries({ queryKey: ['financial-daily', month] });
     },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'خطأ'),
@@ -172,8 +175,7 @@ export default function FinancialDailyPage() {
     mutationFn: (id: string) => financialApi.deleteDailyEntry(id),
     onSuccess: () => {
       toast.success('تم الحذف');
-      setEditingId(null); setIsEditing(false); setSales(''); setNotes(''); setRows([]);
-      originalRef.current = null;
+      setEditingId(null); setSales(''); setNotes(''); setRows([{ amounts: {}, descriptions: {} }]);
       qc.invalidateQueries({ queryKey: ['financial-daily', month] });
     },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'خطأ'),
@@ -181,15 +183,25 @@ export default function FinancialDailyPage() {
 
   function handleSave() {
     if (!sales) { toast.error('أدخل المبيعات'); return; }
+    // Flatten rows into details array
+    const details: { expense_category_id: string; amount: number; description?: string }[] = [];
+    for (const r of rows) {
+      for (const c of cats) {
+        const amt = parseFloat(r.amounts[c.id]) || 0;
+        if (amt > 0) {
+          details.push({
+            expense_category_id: c.id,
+            amount: amt,
+            description: r.descriptions[c.id] || undefined,
+          });
+        }
+      }
+    }
     saveMutation.mutate({
       date: `${month}-${String(selectedDay).padStart(2, '0')}`,
       total_sales: parseFloat(sales),
       notes: notes || undefined,
-      details: rows.filter((r) => r.cat_id && r.amount).map((r) => ({
-        expense_category_id: r.cat_id,
-        amount: parseFloat(r.amount),
-        description: r.desc || undefined,
-      })),
+      details,
     });
   }
 
@@ -198,34 +210,50 @@ export default function FinancialDailyPage() {
   }
 
   function addRow() {
-    setRows([...rows, { cat_id: catList[0]?.id || '', amount: '', desc: '' }]);
-  }
-
-  function updRow(i: number, field: string, val: string) {
-    if (isViewing) return;
-    const copy = [...rows]; (copy[i] as any)[field] = val; setRows(copy);
+    setRows([...rows, { amounts: {}, descriptions: {} }]);
   }
 
   function delRow(i: number) {
-    if (isViewing) return;
+    if (rows.length <= 1) { setRows([{ amounts: {}, descriptions: {} }]); return; }
     setRows(rows.filter((_, j) => j !== i));
   }
 
-  const inputClass = () =>
-    isViewing
-      ? 'bg-gray-50 text-gray-500 cursor-default border-gray-100'
-      : 'bg-white text-gray-900 border-gray-200 focus:ring-2 focus:ring-blue-500';
+  function setCell(i: number, catId: string, field: 'amounts' | 'descriptions', val: string) {
+    const copy = rows.map((r) => ({ amounts: { ...r.amounts }, descriptions: { ...r.descriptions } }));
+    copy[i][field][catId] = val;
+    setRows(copy);
+  }
+
+  const inpCls = 'w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-left outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 bg-white';
+  const inpAmt = `${inpCls} font-medium`;
+  const inpDesc = `${inpCls} text-gray-500`;
 
   return (
     <div className="flex flex-col h-full bg-gray-50/50" dir="rtl">
       <PageHeader
         title="اليومية المالية"
-        subtitle="إدخال المصروفات والمبيعات اليومية"
+        subtitle="إدخال المصروفات والمبيعات — نظام الأعمدة"
         actions={
-          <button onClick={() => setShowCatModal(true)}
-            className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm hover:bg-gray-50 shadow-sm">
-            إدارة الفئات
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => {
+              api.get('/financial/daily-entries/export/excel', { params: { month }, responseType: 'blob' })
+                .then((r) => {
+                  const url = window.URL.createObjectURL(new Blob([r.data]));
+                  const a = document.createElement('a'); a.href = url;
+                  a.download = `اليوميات_${month}.xlsx`; a.click();
+                  window.URL.revokeObjectURL(url);
+                  toast.success('تم التصدير');
+                })
+                .catch(() => toast.error('فشل التصدير'));
+            }}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 shadow-sm font-medium">
+              ⬇ تصدير إكسل
+            </button>
+            <button onClick={() => setShowCatModal(true)}
+              className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm hover:bg-gray-50 shadow-sm">
+              إدارة الفئات
+            </button>
+          </div>
         }
       />
 
@@ -259,22 +287,18 @@ export default function FinancialDailyPage() {
           </div>
         </div>
 
-        {/* Daily Entry Card */}
+        {/* Daily Entry Sheet — like Excel Sheet 1 */}
         <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
           {/* Card Header */}
           <div className="bg-gradient-to-l from-blue-50 to-white px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-            <div>
-              <span className="font-bold text-gray-900">اليوم: {selectedDay}/{month}</span>
-              {savedEntry && <span className="mr-3 text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full">✓ مسجلة</span>}
+            <div className="flex items-center gap-3">
+              <span className="font-bold text-gray-900">
+                كافيه — يوم {selectedDay}/{month}
+              </span>
+              {savedEntry && <span className="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full">✓ مسجلة</span>}
             </div>
             <div className="flex gap-2">
-              {isViewing && (
-                <button onClick={enterEditMode}
-                  className="text-sm text-blue-600 hover:text-blue-800 border border-blue-200 px-3 py-1 rounded-lg hover:bg-blue-50">
-                  تعديل
-                </button>
-              )}
-              {isEditing && (
+              {editingId && (
                 <button onClick={handleDelete}
                   className="text-sm text-red-500 hover:text-red-700 border border-red-200 px-3 py-1 rounded-lg hover:bg-red-50">
                   حذف
@@ -283,109 +307,111 @@ export default function FinancialDailyPage() {
             </div>
           </div>
 
-          {/* View mode banner */}
-          {isViewing && (
-            <div className="px-5 py-2 bg-amber-50 border-b border-amber-100 text-sm text-amber-700">
-              أنت في وضع العرض. اضغط <strong>تعديل</strong> لتعديل البيانات.
-            </div>
-          )}
-
-          {/* Sales Input */}
-          <div className="px-5 py-3 border-b border-gray-100 bg-gradient-to-l from-green-50/50 to-white">
-            <div className="flex items-center gap-4 flex-wrap">
-              <span className="text-sm font-medium text-gray-700">إجمالي المبيعات:</span>
-              <input type="number" value={sales}
-                disabled={isViewing}
-                onChange={(e) => { if (!isViewing) setSales(e.target.value); }}
-                className={`w-40 rounded-lg px-3 py-2 text-lg font-bold text-green-700 text-left border ${inputClass()}`}
-                placeholder="0" />
-              <span className="text-sm text-gray-400">جنيه</span>
-              <div className="flex gap-4 mr-auto text-sm">
-                <span>المصروفات: <strong className="text-red-600">{totalExpenses.toFixed(2)}</strong></span>
-                <span>الصافي: <strong className={netDaily >= 0 ? 'text-green-600' : 'text-red-600'}>{netDaily.toFixed(2)}</strong></span>
-              </div>
-            </div>
-          </div>
-
-          {/* Expenses Table */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-right">
+          {/* Excel-like Grid */}
+          <div className="overflow-auto max-h-[500px]" style={{ direction: 'ltr' }}>
+            <table className="text-xs border-collapse" style={{ direction: 'rtl', minWidth: cats.length * 200 + 60 }}>
+              {/* Header Row 1: Category names */}
               <thead>
-                <tr className="bg-gray-50 border-y border-gray-100">
-                  <th className="px-3 py-2.5 text-gray-500 font-medium w-8">#</th>
-                  <th className="px-3 py-2.5 text-gray-500 font-medium">البيان (الوصف)</th>
-                  <th className="px-3 py-2.5 text-gray-500 font-medium w-48">الفئة</th>
-                  <th className="px-3 py-2.5 text-gray-500 font-medium w-36">المبلغ</th>
-                  <th className="px-3 py-2.5 w-10"></th>
+                <tr className="sticky top-0 z-20 bg-gradient-to-b from-gray-100 to-gray-50 shadow-sm">
+                  <th className="sticky right-0 z-30 bg-gray-100 px-2 py-2 border-b border-l border-gray-200 min-w-[40px] text-gray-600 font-bold text-sm">#</th>
+                  {cats.map((c) => (
+                    <th key={c.id} colSpan={2} className="px-2 py-2 border-b border-l border-gray-200 text-gray-700 font-bold bg-gray-50/50 min-w-[180px] whitespace-nowrap text-center">
+                      {c.name}
+                    </th>
+                  ))}
+                  <th className="px-2 py-2 border-b border-gray-200 min-w-[80px] text-red-700 font-bold bg-red-50/50 text-center">الإجمالي</th>
+                </tr>
+                {/* Header Row 2: Sub-columns */}
+                <tr className="sticky top-[38px] z-20 bg-gradient-to-b from-gray-50 to-white shadow-sm">
+                  <th className="sticky right-0 z-30 bg-white px-2 py-1.5 border-b border-l border-gray-200"></th>
+                  {cats.map((c) => (
+                    <React.Fragment key={c.id}>
+                      <th className="px-2 py-1.5 border-b border-l border-gray-200 text-gray-400 font-medium bg-white/80 text-[11px]">المبلغ</th>
+                      <th className="px-2 py-1.5 border-b border-l border-gray-200 text-gray-400 font-medium bg-white/80 text-[11px]">البيان</th>
+                    </React.Fragment>
+                  ))}
+                  <th className="px-2 py-1.5 border-b border-gray-200 text-gray-400 font-medium bg-white/80 text-[11px]"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50">
-                {rows.length === 0 ? (
-                  <tr><td colSpan={5} className="px-4 py-10 text-center text-gray-300">لا توجد بنود — أضف بنداً</td></tr>
-                ) : rows.map((r, i) => (
-                  <tr key={i} className={`transition-colors ${isViewing ? '' : 'hover:bg-blue-50/20'}`}>
-                    <td className="px-3 py-1.5 text-gray-400 text-xs text-center">{i + 1}</td>
-                    <td className="px-3 py-1.5">
-                      <input value={r.desc} onChange={(e) => updRow(i, 'desc', e.target.value)}
-                        disabled={isViewing}
-                        placeholder="وصف المصروف..."
-                        className={`w-full border-0 border-b border-dashed px-1 py-1.5 text-sm ${inputClass()}`} />
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <select value={r.cat_id} onChange={(e) => updRow(i, 'cat_id', e.target.value)}
-                        disabled={isViewing}
-                        className={`w-full rounded-lg px-2 py-1.5 text-sm border ${inputClass()}`}>
-                        {catList.map((c: any) => (<option key={c.id} value={c.id}>{c.name}</option>))}
-                      </select>
-                    </td>
-                    <td className="px-3 py-1.5">
-                      <input type="number" value={r.amount} onChange={(e) => updRow(i, 'amount', e.target.value)}
-                        disabled={isViewing}
-                        placeholder="0"
-                        className={`w-full rounded-lg px-2 py-1.5 text-sm text-left border ${inputClass()}`} />
-                    </td>
-                    <td className="px-3 py-1.5 text-center">
-                      {!isViewing && (
-                        <button onClick={() => delRow(i)} className="text-red-300 hover:text-red-500 text-sm">✕</button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+              <tbody>
+                {rows.map((r, i) => {
+                  const rowTotal = cats.reduce((s, c) => s + (parseFloat(r.amounts[c.id]) || 0), 0);
+                  return (
+                    <tr key={i} className="hover:bg-blue-50/20 transition-colors border-b border-gray-50">
+                      <td className="sticky right-0 z-10 bg-white px-2 py-1 border-l border-gray-50 text-center text-gray-400 text-xs font-medium">
+                        {i + 1}
+                        <button onClick={() => delRow(i)} className="mr-1 text-red-200 hover:text-red-400">✕</button>
+                      </td>
+                      {cats.map((c) => (
+                        <React.Fragment key={c.id}>
+                          <td className="px-1 py-0.5 border-l border-gray-50">
+                            <input type="number" value={r.amounts[c.id] ?? ''}
+                              onChange={(e) => setCell(i, c.id, 'amounts', e.target.value)}
+                              className={inpAmt} placeholder="0" />
+                          </td>
+                          <td className="px-1 py-0.5 border-l border-gray-50">
+                            <input value={r.descriptions[c.id] ?? ''}
+                              onChange={(e) => setCell(i, c.id, 'descriptions', e.target.value)}
+                              className={inpDesc} placeholder="..." />
+                          </td>
+                        </React.Fragment>
+                      ))}
+                      <td className="px-2 py-1 text-left font-medium text-red-600 bg-red-50/20">
+                        {rowTotal > 0 ? rowTotal.toFixed(2) : ''}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
+              {/* Totals Row */}
+              <tfoot>
+                <tr className="sticky bottom-0 z-20 bg-gradient-to-t from-gray-200 to-gray-100 border-t-2 border-gray-300 font-bold shadow-sm">
+                  <td className="sticky right-0 z-30 bg-gray-200 px-2 py-2 border-t border-l border-gray-300 text-center text-sm">SUM</td>
+                  {cats.map((c) => (
+                    <React.Fragment key={c.id}>
+                      <td className="px-2 py-2 border-t border-l border-gray-300 text-left text-gray-800 text-sm font-bold">
+                        {catTotals[c.id] > 0 ? catTotals[c.id].toFixed(2) : ''}
+                      </td>
+                      <td className="px-2 py-2 border-t border-l border-gray-300"></td>
+                    </React.Fragment>
+                  ))}
+                  <td className="px-2 py-2 border-t border-gray-300 text-left text-red-700 text-sm font-bold">
+                    {totalExpenses > 0 ? totalExpenses.toFixed(2) : ''}
+                  </td>
+                </tr>
+              </tfoot>
             </table>
           </div>
 
-          <div className="px-5 py-2 border-t border-gray-100 bg-gray-50/50 flex items-center justify-between">
-            {!isViewing && (
-              <button onClick={addRow} className="text-blue-600 text-sm hover:text-blue-800 font-medium">+ إضافة بند</button>
-            )}
-            {isViewing && <div />}
-            <input value={notes} onChange={(e) => { if (!isViewing) setNotes(e.target.value); }}
-              disabled={isViewing}
-              placeholder="ملاحظات..."
-              className={`border-0 border-b border-dashed px-1 py-1 text-sm w-64 text-left ${inputClass()}`} />
+          {/* Add Row Button */}
+          <div className="px-5 py-3 border-t border-gray-100 bg-gray-50/70 flex items-center gap-3">
+            <button onClick={addRow} className="px-4 py-2 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-sm hover:bg-blue-100 hover:border-blue-300 font-medium transition-all shadow-sm flex items-center gap-1">
+              <span className="text-lg leading-none">+</span> إضافة صف
+            </button>
+            <span className="text-xs text-gray-400">({rows.length} صفوف)</span>
           </div>
 
-          {/* Save Footer */}
-          <div className="px-5 py-3 border-t border-gray-100 bg-gray-50 flex items-center justify-between">
-            <div className="text-sm text-gray-500">
-              إجمالي المصروفات: <strong className="text-red-700">{totalExpenses.toFixed(2)}</strong>
-              <span className="mx-3">|</span>
-              صافي اليوم: <strong className={netDaily >= 0 ? 'text-green-700' : 'text-red-700'}>{netDaily.toFixed(2)}</strong>
+          {/* Bottom: Sales + Notes + Save */}
+          <div className="px-5 py-3 border-t border-gray-100 bg-gray-50 flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-gray-700">إجمالي المبيعات:</span>
+              <input type="number" value={sales} onChange={(e) => setSales(e.target.value)}
+                className="w-32 border border-green-300 rounded-lg px-3 py-1.5 text-base font-bold text-green-700 text-left outline-none focus:ring-2 focus:ring-green-500 bg-white"
+                placeholder="0" />
+              <span className="text-xs text-gray-400">جنيه</span>
             </div>
-            <div className="flex gap-2">
-              {isEditing && (
-                <button onClick={cancelEdit}
-                  className="px-4 py-2 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-100 font-medium">
-                  إلغاء
-                </button>
-              )}
-              {!isViewing && (
-                <button onClick={handleSave} disabled={saveMutation.isPending}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 font-medium shadow-sm">
-                  {saveMutation.isPending ? '...جاري' : (editingId ? 'تحديث' : 'حفظ اليومية')}
-                </button>
-              )}
+            <div className="flex items-center gap-4 text-sm">
+              <span>إجمالي المصروفات: <strong className="text-red-700">{totalExpenses.toFixed(2)}</strong></span>
+              <span>صافي اليوم: <strong className={netDaily >= 0 ? 'text-green-700' : 'text-red-700'}>{netDaily.toFixed(2)}</strong></span>
+            </div>
+            <input value={notes} onChange={(e) => setNotes(e.target.value)}
+              placeholder="ملاحظات..."
+              className="border-0 border-b border-dashed border-gray-300 px-1 py-1 text-sm outline-none focus:border-blue-400 bg-transparent w-48 text-left" />
+            <div className="mr-auto flex gap-2">
+              <button onClick={handleSave} disabled={saveMutation.isPending}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 font-medium shadow-sm">
+                {saveMutation.isPending ? '...جاري' : (editingId ? 'تحديث' : 'حفظ اليومية')}
+              </button>
             </div>
           </div>
         </div>
@@ -420,9 +446,7 @@ export default function FinancialDailyPage() {
                           <td className="px-4 py-2 text-red-600">{e.total_expenses}</td>
                           <td className={`px-4 py-2 ${e.net_daily >= 0 ? 'text-green-600' : 'text-red-600'}`}>{e.net_daily}</td>
                           <td className="px-4 py-2 text-gray-400">{e.notes || '—'}</td>
-                          <td className="px-4 py-2">
-                            <span className="text-blue-500 text-xs">عرض</span>
-                          </td>
+                          <td className="px-4 py-2"><span className="text-blue-500 text-xs">عرض</span></td>
                         </tr>
                       );
                     })}
@@ -434,7 +458,6 @@ export default function FinancialDailyPage() {
         </div>
       </div>
 
-      {/* Categories Modal */}
       <CatModal open={showCatModal} onClose={() => setShowCatModal(false)} />
     </div>
   );

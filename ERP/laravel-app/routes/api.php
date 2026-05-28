@@ -221,6 +221,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/categories/{id}', [\App\Http\Controllers\Financial\DailyEntryController::class, 'destroyCategory']);
         Route::get('/daily-entries', [\App\Http\Controllers\Financial\DailyEntryController::class, 'index']);
         Route::post('/daily-entries', [\App\Http\Controllers\Financial\DailyEntryController::class, 'store']);
+        Route::get('/daily-entries/export/excel', [\App\Http\Controllers\Financial\DailyEntryController::class, 'exportExcel']);
         Route::get('/daily-entries/{id}', [\App\Http\Controllers\Financial\DailyEntryController::class, 'show']);
         Route::put('/daily-entries/{id}', [\App\Http\Controllers\Financial\DailyEntryController::class, 'update']);
         Route::delete('/daily-entries/{id}', [\App\Http\Controllers\Financial\DailyEntryController::class, 'destroy']);
