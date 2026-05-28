@@ -94,24 +94,26 @@ class ReportController extends Controller
 
                 $row['locations'][$loc->id] = $data;
 
-                // أول المدة للمخازن فقط (كما طلب المستخدم للسايكل)
+                // أول المدة للمخازن فقط
                 if ($loc->type === 'main' || $loc->type === 'sub') {
                     $row['totals']['opening_qty'] += $data['opening'];
                 }
                 
-                // المشتريات (تكون عادة في المخازن)
-                $row['totals']['purchases_qty'] += $data['purchases'];
+                // المشتريات للمخازن فقط
+                if ($loc->type === 'main' || $loc->type === 'sub') {
+                    $row['totals']['purchases_qty'] += $data['purchases'];
+                }
                 
                 // إجمالي المنصرف للفروع (من المخازن)
                 $row['totals']['dispatch_qty'] += $data['internal_out'];
                 
-                // الاستهلاك (للمخازن فقط — الفروع استهلاكها محسوب ضمن المنصرف)
+                // الاستهلاك للمخازن فقط
                 if ($loc->type === 'main' || $loc->type === 'sub') {
                     $row['totals']['consumption_qty'] += $data['consumption'];
                 }
             }
 
-            // المعادلة: أول المخازن + المشتريات - منصرف الفروع - استهلاك المخازن
+            // المعادلة: أول المدد + مشتريات المخازن - منصرف الفروع - استهلاك المخازن
             $row['totals']['theoretical'] = round($row['totals']['opening_qty'] + $row['totals']['purchases_qty'] - $row['totals']['dispatch_qty'] - $row['totals']['consumption_qty'], 3);
             
             // الجرد الفعلي الإجمالي (يتم تخزينه في أول سجل متاح للصنف)

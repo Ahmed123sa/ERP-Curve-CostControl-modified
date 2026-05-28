@@ -26,31 +26,34 @@ class PermissionSeeder extends Seeder
             'mappings',
             'users',
             'settings',
+            'financial.daily', 'financial.monthly', 'financial.closing', 'financial.advances',
         ];
 
         foreach ($modules as $module) {
-            Permission::create(['name' => $module, 'guard_name' => 'web']);
+            Permission::findOrCreate($module, 'web');
         }
 
         // Super Admin — all permissions
-        $superAdmin = Role::create(['name' => 'super-admin', 'guard_name' => 'web']);
+        $superAdmin = Role::findOrCreate('super-admin', 'web');
         $superAdmin->givePermissionTo(Permission::all());
 
         // Cost Controller — core operational modules
-        $controller = Role::create(['name' => 'cost-controller', 'guard_name' => 'web']);
+        $controller = Role::findOrCreate('cost-controller', 'web');
         $controller->givePermissionTo([
             'dashboard', 'vouchers.purchase', 'vouchers.dispatch', 'vouchers.upload', 'vouchers.history',
             'closing', 'stock.current', 'stock.movement', 'stock.opening', 'stock.closing',
             'production', 'menu-engineering',
             'reports.financial', 'reports.grand-summary', 'reports.diffs', 'reports.food-cost',
             'items', 'warehouses', 'mappings',
+            'financial.daily', 'financial.monthly', 'financial.closing', 'financial.advances',
         ]);
 
         // Viewer — read-only
-        $viewer = Role::create(['name' => 'viewer', 'guard_name' => 'web']);
+        $viewer = Role::findOrCreate('viewer', 'web');
         $viewer->givePermissionTo([
             'dashboard', 'stock.current', 'production', 'menu-engineering',
             'reports.financial', 'reports.grand-summary', 'reports.diffs', 'reports.food-cost',
+            'financial.daily', 'financial.monthly', 'financial.closing',
         ]);
     }
 }

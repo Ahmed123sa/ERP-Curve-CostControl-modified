@@ -49,12 +49,14 @@ class ReportExportService
                 $in = $c ? (float)$c->in_qty : 0;
                 $row[] = $op;
                 $row[] = $in;
-                if ($loc->type === 'main' || $loc->type === 'sub') $totalOpening += $op;
-                $totalIn += $in;
-                if ($loc->type === 'main' || $loc->type === 'sub') $totalDispatch += $c ? (float)$c->internal_out_qty : 0;
+                if ($loc->type === 'main' || $loc->type === 'sub') {
+                    $totalOpening += $op;
+                    $totalIn += $in;
+                    $totalDispatch += $c ? (float)$c->internal_out_qty : 0;
+                }
                 if ($c && $c->closing_qty_actual !== null) $totalActual = ($totalActual ?? 0) + (float)$c->closing_qty_actual;
             }
-            $theoretical = $totalOpening + $totalIn - $totalDispatch;
+            $theoretical = round($totalOpening + $totalIn - $totalDispatch, 3);
             $diff = $totalActual !== null ? $theoretical - $totalActual : null;
             $row[] = $totalDispatch;
             $row[] = $theoretical;

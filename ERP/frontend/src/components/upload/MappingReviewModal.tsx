@@ -12,6 +12,7 @@ interface Props {
 
 export function MappingReviewModal({ voucher, onResolve, onClose }: Props) {
   const [resolutions, setResolutions] = useState<Record<number, string>>({});
+  const [itemSearch, setItemSearch] = useState<Record<string, string>>({});
   const [warehouseId, setWarehouseId] = useState<string>(voucher.location?.id || '');
 
   const { data: items = [] } = useQuery({
@@ -125,20 +126,33 @@ export function MappingReviewModal({ voucher, onResolve, onClose }: Props) {
               <tbody className="divide-y divide-gray-50">
                 {voucher.lines.map((line: any, idx: number) => {
                   if (!line.needs_review) return null;
+                  const searchKey = String(idx);
+                  const searchVal = itemSearch[searchKey] || '';
+                  const filteredItems = items.filter((i: any) =>
+                    !searchVal || i.name.toLowerCase().includes(searchVal.toLowerCase())
+                  );
                   return (
                     <tr key={idx} className="hover:bg-gray-50/50">
                       <td className="px-4 py-3">
                         <div className="font-medium text-gray-700">{line.source_name}</div>
                         <div className="text-[10px] text-gray-400">{line.unit} — كمية: {line.qty}</div>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 space-y-1.5">
+                        <input
+                          type="text"
+                          value={searchVal}
+                          onChange={(e) => setItemSearch(prev => ({ ...prev, [searchKey]: e.target.value }))}
+                          placeholder="ابحث عن الصنف..."
+                          className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                          dir="rtl"
+                        />
                         <select
                           value={resolutions[idx] || ''}
                           onChange={(e) => setResolutions(prev => ({ ...prev, [idx]: e.target.value }))}
                           className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
                         >
                           <option value="">اختر الصنف المطابق...</option>
-                          {items.map((item: any) => (
+                          {filteredItems.map((item: any) => (
                             <option key={item.id} value={item.id}>{item.name} ({item.unit})</option>
                           ))}
                         </select>

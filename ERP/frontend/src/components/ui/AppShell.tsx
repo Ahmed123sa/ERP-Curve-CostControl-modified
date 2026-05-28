@@ -30,6 +30,10 @@ const PERMISSION_MAP: Record<string, string> = {
   '/mappings': 'mappings',
   '/users': 'users',
   '/settings': 'settings',
+  '/financial/daily': 'financial.daily',
+  '/financial/monthly': 'financial.monthly',
+  '/financial/closing': 'financial.closing',
+  '/financial/advances': 'financial.advances',
 };
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -78,6 +82,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       section: 'هندسة القائمة',
       items: [
         { href: '/menu-engineering', icon: '📝',  label: 'Menu Engineering' },
+      ].filter((i) => hasPerm(i.href)),
+    },
+    {
+      section: 'المالية',
+      items: [
+        { href: '/financial/daily',    icon: '📋',  label: 'اليومية' },
+        { href: '/financial/monthly',  icon: '📊',  label: 'التجميع الشهري' },
+        { href: '/financial/closing',  icon: '📑',  label: 'التقفيل' },
+        { href: '/financial/advances', icon: '💰',  label: 'السلف' },
       ].filter((i) => hasPerm(i.href)),
     },
     {

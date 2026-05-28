@@ -106,6 +106,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/mappings/item', [MappingController::class, 'updateItem']);
         Route::post('/mappings/location', [MappingController::class, 'updateLocation']);
         Route::delete('/mappings/item/{id}', [MappingController::class, 'deleteItem']);
+        Route::delete('/mappings/location/{id}', [MappingController::class, 'deleteLocation']);
+        Route::post('/mappings/remap-item', [MappingController::class, 'remapItem']);
     });
 
     // ── Users (المستخدمين والصلاحيات) ───────────────────
@@ -209,5 +211,41 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/cost-contribution', [\App\Http\Controllers\MenuEngineering\SmartAnalyticsController::class, 'costContribution']);
             Route::get('/stock-value', [\App\Http\Controllers\MenuEngineering\SmartAnalyticsController::class, 'stockValue']);
         });
+    });
+
+    // ── Financial Module ──────────────────────────────────
+    Route::prefix('financial')->middleware('permission:financial.daily')->group(function () {
+        Route::get('/categories', [\App\Http\Controllers\Financial\DailyEntryController::class, 'categories']);
+        Route::post('/categories', [\App\Http\Controllers\Financial\DailyEntryController::class, 'storeCategory']);
+        Route::put('/categories/{id}', [\App\Http\Controllers\Financial\DailyEntryController::class, 'updateCategory']);
+        Route::delete('/categories/{id}', [\App\Http\Controllers\Financial\DailyEntryController::class, 'destroyCategory']);
+        Route::get('/daily-entries', [\App\Http\Controllers\Financial\DailyEntryController::class, 'index']);
+        Route::post('/daily-entries', [\App\Http\Controllers\Financial\DailyEntryController::class, 'store']);
+        Route::get('/daily-entries/{id}', [\App\Http\Controllers\Financial\DailyEntryController::class, 'show']);
+        Route::put('/daily-entries/{id}', [\App\Http\Controllers\Financial\DailyEntryController::class, 'update']);
+        Route::delete('/daily-entries/{id}', [\App\Http\Controllers\Financial\DailyEntryController::class, 'destroy']);
+    });
+
+    Route::prefix('financial')->middleware('permission:financial.monthly')->group(function () {
+        Route::get('/monthly-summaries', [\App\Http\Controllers\Financial\MonthlySummaryController::class, 'index']);
+        Route::post('/monthly-summaries/generate', [\App\Http\Controllers\Financial\MonthlySummaryController::class, 'generate']);
+        Route::post('/monthly-summaries/{id}/finalize', [\App\Http\Controllers\Financial\MonthlySummaryController::class, 'finalize']);
+    });
+
+    Route::prefix('financial')->middleware('permission:financial.closing')->group(function () {
+        Route::get('/closing-reports', [\App\Http\Controllers\Financial\ClosingReportController::class, 'index']);
+        Route::post('/closing-reports/generate', [\App\Http\Controllers\Financial\ClosingReportController::class, 'generate']);
+        Route::get('/closing-reports/{id}', [\App\Http\Controllers\Financial\ClosingReportController::class, 'show']);
+        Route::get('/closing-reports/{id}/export-excel', [\App\Http\Controllers\Financial\ClosingReportController::class, 'exportExcel']);
+        Route::get('/closing-reports/{id}/export-pdf', [\App\Http\Controllers\Financial\ClosingReportController::class, 'exportPdf']);
+    });
+
+    Route::prefix('financial')->middleware('permission:financial.advances')->group(function () {
+        Route::get('/employees', [\App\Http\Controllers\Financial\AdvanceController::class, 'employees']);
+        Route::post('/employees', [\App\Http\Controllers\Financial\AdvanceController::class, 'storeEmployee']);
+        Route::put('/employees/{id}', [\App\Http\Controllers\Financial\AdvanceController::class, 'updateEmployee']);
+        Route::get('/advances', [\App\Http\Controllers\Financial\AdvanceController::class, 'index']);
+        Route::post('/advances', [\App\Http\Controllers\Financial\AdvanceController::class, 'store']);
+        Route::delete('/advances/{id}', [\App\Http\Controllers\Financial\AdvanceController::class, 'destroy']);
     });
 });
