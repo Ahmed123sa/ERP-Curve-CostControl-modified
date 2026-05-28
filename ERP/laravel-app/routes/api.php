@@ -254,4 +254,25 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/advances', [\App\Http\Controllers\Financial\AdvanceController::class, 'store']);
         Route::delete('/advances/{id}', [\App\Http\Controllers\Financial\AdvanceController::class, 'destroy']);
     });
+
+    // ── Payroll Module ──────────────────────────────────
+    Route::prefix('payroll')->middleware('permission:payroll.manage')->group(function () {
+        // Employees
+        Route::get('/employees', [\App\Http\Controllers\Payroll\PayrollEmployeeController::class, 'index']);
+        Route::post('/employees', [\App\Http\Controllers\Payroll\PayrollEmployeeController::class, 'store']);
+        Route::put('/employees/{id}', [\App\Http\Controllers\Payroll\PayrollEmployeeController::class, 'update']);
+        Route::delete('/employees/{id}', [\App\Http\Controllers\Payroll\PayrollEmployeeController::class, 'destroy']);
+        // Attendance
+        Route::get('/attendance', [\App\Http\Controllers\Payroll\AttendanceController::class, 'index']);
+        Route::post('/attendance', [\App\Http\Controllers\Payroll\AttendanceController::class, 'store']);
+        Route::delete('/attendance/{id}', [\App\Http\Controllers\Payroll\AttendanceController::class, 'destroy']);
+        // Monthly payroll
+        Route::get('/monthly', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'index']);
+        Route::get('/monthly/{id}', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'show']);
+        Route::post('/monthly/calculate', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'calculate']);
+        Route::post('/monthly/{id}/approve', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'approve']);
+        Route::post('/monthly/bonus/{detailId}', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'updateBonus']);
+        Route::get('/monthly/{id}/export-excel', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'exportExcel']);
+        Route::get('/monthly/{id}/payslip/{employeeId}', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'exportPayslipPdf']);
+    });
 });

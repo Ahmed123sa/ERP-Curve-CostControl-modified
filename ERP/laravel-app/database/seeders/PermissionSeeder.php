@@ -27,6 +27,7 @@ class PermissionSeeder extends Seeder
             'users',
             'settings',
             'financial.daily', 'financial.monthly', 'financial.closing', 'financial.advances',
+            'payroll.manage',
         ];
 
         foreach ($modules as $module) {
@@ -46,6 +47,7 @@ class PermissionSeeder extends Seeder
             'reports.financial', 'reports.grand-summary', 'reports.diffs', 'reports.food-cost',
             'items', 'warehouses', 'mappings',
             'financial.daily', 'financial.monthly', 'financial.closing', 'financial.advances',
+            'payroll.manage',
         ]);
 
         // Viewer — read-only

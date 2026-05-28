@@ -34,6 +34,9 @@ const PERMISSION_MAP: Record<string, string> = {
   '/financial/monthly': 'financial.monthly',
   '/financial/closing': 'financial.closing',
   '/financial/advances': 'financial.advances',
+  '/payroll/employees': 'payroll.manage',
+  '/payroll/attendance': 'payroll.manage',
+  '/payroll/monthly': 'payroll.manage',
 };
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -91,6 +94,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         { href: '/financial/monthly',  icon: '📊',  label: 'التجميع الشهري' },
         { href: '/financial/closing',  icon: '📑',  label: 'التقفيل' },
         { href: '/financial/advances', icon: '💰',  label: 'السلف' },
+      ].filter((i) => hasPerm(i.href)),
+    },
+    {
+      section: 'الرواتب',
+      items: [
+        { href: '/payroll/employees', icon: '👤',  label: 'الموظفين' },
+        { href: '/payroll/attendance', icon: '⏰',  label: 'الحضور والانصراف' },
+        { href: '/payroll/monthly',  icon: '🧾',  label: 'المرتبات الشهرية' },
       ].filter((i) => hasPerm(i.href)),
     },
     {
