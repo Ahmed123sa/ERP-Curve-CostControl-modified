@@ -51,8 +51,24 @@ class VoucherParserService
             $headerFound = false;
             foreach ($row as $cell) {
                 $cellStr = trim((string) ($cell ?? ''));
+                $headerDate = null;
+                $headerLoc = '';
+
+                // Try exact pattern first (date-first with pipe/dash separator)
                 if (preg_match(self::HEADER_PATTERN, $cellStr, $matches)) {
-                    $locName = trim($matches[2]);
+                    $headerDate = $matches[1] ?? null;
+                    $headerLoc = trim($matches[2] ?? '');
+                }
+
+                // Fallback: find date (DD/MM or DD-MM) anywhere in cell
+                if (!$headerDate && preg_match('/(\d{1,2}[\/\-]\d{1,2})/u', $cellStr, $dateMatches)) {
+                    $headerDate = $dateMatches[1];
+                    $headerLoc = trim(str_replace($headerDate, '', $cellStr));
+                    $headerLoc = preg_replace('/^[\s\|\-\/\\\]+|[\s\|\-\/\\\]+$/u', '', $headerLoc);
+                }
+
+                if ($headerDate) {
+                    $locName = $headerLoc;
                     
                     // لو الاسم فاضي أو عام جداً، جرب نستخدم اسم الشيت (مثلاً اسم التاب هو "المعمل")
                     if (empty($locName) || in_array(mb_strtolower($locName), ['اذن صرف', 'وارد', 'صرف', 'اذن', 'اذن صرف فرع'])) {
@@ -60,9 +76,9 @@ class VoucherParserService
                     }
 
                     $currentHeader = [
-                        'date_str'    => $matches[1],
+                        'date_str'    => $headerDate,
                         'location'    => $locName,
-                        'date'        => $this->parseDate($matches[1], $year),
+                        'date'        => $this->parseDate($headerDate, $year),
                         'items'       => [],
                     ];
                     $vouchers[] = &$currentHeader;
