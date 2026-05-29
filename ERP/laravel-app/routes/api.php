@@ -271,7 +271,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/monthly/{id}', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'show']);
         Route::post('/monthly/calculate', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'calculate']);
         Route::post('/monthly/{id}/approve', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'approve']);
+        Route::delete('/monthly/{id}', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'destroy']);
         Route::post('/monthly/bonus/{detailId}', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'updateBonus']);
+        Route::post('/monthly/detail/{detailId}/update-cell', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'updateCell']);
         Route::get('/monthly/{id}/export-excel', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'exportExcel']);
         Route::get('/monthly/{id}/payslip/{employeeId}', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'exportPayslipPdf']);
     });

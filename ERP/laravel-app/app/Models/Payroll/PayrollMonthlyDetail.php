@@ -22,6 +22,7 @@ class PayrollMonthlyDetail extends Model
         'work_days', 'absence_days', 'absence_amount',
         'overtime_hours', 'overtime_amount',
         'rest_day_ot_days', 'rest_day_ot_amount',
+        'rest_days_taken', 'double_shift_days', 'double_shift_amount',
         'advance_amount', 'bonus_total', 'total_deductions', 'net_salary',
     ];
 
@@ -36,6 +37,9 @@ class PayrollMonthlyDetail extends Model
         'overtime_amount' => 'float',
         'rest_day_ot_days' => 'integer',
         'rest_day_ot_amount' => 'float',
+        'rest_days_taken' => 'integer',
+        'double_shift_days' => 'integer',
+        'double_shift_amount' => 'float',
         'advance_amount' => 'float',
         'bonus_total' => 'float',
         'total_deductions' => 'float',

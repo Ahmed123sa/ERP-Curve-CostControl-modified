@@ -39,4 +39,10 @@ export const payrollApi = {
 
   updateBonus: (detailId: string, bonusItems: any[]) =>
     api.post(`/payroll/monthly/bonus/${detailId}`, { bonus_items: bonusItems }).then((r) => r.data),
+
+  updateCell: (detailId: string, field: string, value: number) =>
+    api.post(`/payroll/monthly/detail/${detailId}/update-cell`, { field, value }).then((r) => r.data),
+
+  deletePayroll: (id: string) =>
+    api.delete(`/payroll/monthly/${id}`).then((r) => r.data),
 };

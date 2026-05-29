@@ -7,6 +7,7 @@ use App\Services\Payroll\PayrollCalcService;
 use App\Services\Payroll\PayslipExportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use App\Models\Payroll\PayrollMonthly;
 
 class PayrollMonthlyController extends Controller
 {
@@ -47,6 +48,30 @@ class PayrollMonthlyController extends Controller
         $clientId = $request->user()->current_client_id;
         $payroll = $this->calcService->approve($clientId, $id);
         return response()->json(['payroll' => $payroll, 'message' => 'تم اعتماد الرواتب']);
+    }
+
+    public function destroy(Request $request, string $id): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+        $payroll = PayrollMonthly::where('client_id', $clientId)->where('id', $id)->firstOrFail();
+        if ($payroll->status !== 'draft') {
+            return response()->json(['message' => 'لا يمكن حذف رواتب معتمدة'], 422);
+        }
+        $payroll->delete();
+        return response()->json(['message' => 'تم حذف المسودة']);
+    }
+
+    public function updateCell(Request $request, string $detailId): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+
+        $data = $request->validate([
+            'field' => 'required|string',
+            'value' => 'required|numeric|min:0',
+        ]);
+
+        $detail = $this->calcService->updateCell($clientId, $detailId, $data['field'], $data['value']);
+        return response()->json(['detail' => $detail, 'message' => 'تم تحديث الخلية']);
     }
 
     public function updateBonus(Request $request, string $detailId): JsonResponse

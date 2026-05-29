@@ -50,6 +50,12 @@ th { background: #e8e8e8; font-weight: bold; }
         <td>{{ number_format($detail->overtime_amount, 2) }}</td>
     </tr>
     <tr>
+        <th>تطبيق (أيام)</th>
+        <td>{{ $detail->double_shift_days }}</td>
+        <th>قيمة التطبيق</th>
+        <td>{{ number_format($detail->double_shift_amount, 2) }}</td>
+    </tr>
+    <tr>
         <th>المكافآت</th>
         <td>{{ number_format($detail->bonus_total, 2) }}</td>
         <th>السلفة</th>

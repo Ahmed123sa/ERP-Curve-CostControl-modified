@@ -35,7 +35,7 @@ class PayslipExportService
 
         // Headers row 2
         $headers = ['م', 'الاسم', 'الوظيفة', 'المرتب الأساسي', 'أيام العمل', 'أجر اليوم',
-            'خصم غياب', 'إضافي راحات', 'أوفر تايم', 'المكافآت', 'السلفة',
+            'خصم غياب', 'إضافي راحات', 'تطبيق', 'أوفر تايم', 'المكافآت', 'السلفة',
             'إجمالي الخصم', 'صافي المرتب'];
 
         foreach ($headers as $i => $h) {
@@ -48,7 +48,7 @@ class PayslipExportService
         $sheet->getStyle($headerRange)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FFE8E8E8');
         $sheet->getStyle($headerRange)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-        $colWidths = [5, 20, 15, 12, 10, 10, 12, 12, 10, 12, 10, 12, 12];
+        $colWidths = [5, 20, 15, 12, 10, 10, 12, 12, 12, 10, 12, 10, 12, 12];
         foreach ($colWidths as $i => $w) {
             $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($i + 1))->setWidth($w);
         }
@@ -65,6 +65,7 @@ class PayslipExportService
             $sheet->setCellValue(Coordinate::stringFromColumnIndex($col++) . $row, $d->daily_wage_snapshot);
             $sheet->setCellValue(Coordinate::stringFromColumnIndex($col++) . $row, $d->absence_amount);
             $sheet->setCellValue(Coordinate::stringFromColumnIndex($col++) . $row, $d->rest_day_ot_amount);
+            $sheet->setCellValue(Coordinate::stringFromColumnIndex($col++) . $row, $d->double_shift_amount);
             $sheet->setCellValue(Coordinate::stringFromColumnIndex($col++) . $row, $d->overtime_amount);
             $sheet->setCellValue(Coordinate::stringFromColumnIndex($col++) . $row, $d->bonus_total);
             $sheet->setCellValue(Coordinate::stringFromColumnIndex($col++) . $row, $d->advance_amount);
@@ -75,11 +76,12 @@ class PayslipExportService
             $totals[4] += $d->work_days;
             $totals[6] += $d->absence_amount;
             $totals[7] += $d->rest_day_ot_amount;
-            $totals[8] += $d->overtime_amount;
-            $totals[9] += $d->bonus_total;
-            $totals[10] += $d->advance_amount;
-            $totals[11] += $d->total_deductions;
-            $totals[12] += $d->net_salary;
+            $totals[8] += $d->double_shift_amount;
+            $totals[9] += $d->overtime_amount;
+            $totals[10] += $d->bonus_total;
+            $totals[11] += $d->advance_amount;
+            $totals[12] += $d->total_deductions;
+            $totals[13] += $d->net_salary;
 
             $row++;
         }
@@ -91,7 +93,7 @@ class PayslipExportService
             $sheet->setCellValue('A' . $row, 'الإجمالي');
             $sheet->getStyle('A' . $row)->getFont()->setBold(true);
 
-            for ($c = 4; $c <= 13; $c++) {
+            for ($c = 4; $c <= 14; $c++) {
                 if ($totals[$c - 1] > 0) {
                     $cell = Coordinate::stringFromColumnIndex($c) . $row;
                     $sheet->setCellValue($cell, $totals[$c - 1]);
