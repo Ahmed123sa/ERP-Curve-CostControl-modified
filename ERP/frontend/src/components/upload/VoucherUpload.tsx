@@ -201,7 +201,7 @@ export function VoucherUpload() {
                           <div className="font-medium text-gray-800">{line.source_name}</div>
                         </td>
                         <td className="px-4 py-2">
-                          {line.resolved_item_id && line.item_name ? (
+                          {(line.resolved_item_id || line.item_id) && line.item_name ? (
                             <span className="text-green-700 font-medium">{line.item_name}</span>
                           ) : (
                             <span className="text-amber-500 text-xs">—</span>
@@ -212,7 +212,7 @@ export function VoucherUpload() {
                           {line.cost > 0 ? line.cost.toLocaleString('ar-EG') + ' ج' : '—'}
                         </td>
                         <td className="px-4 py-2">
-                          {line.resolved_item_id ? (
+                          {line.resolved_item_id || line.item_id ? (
                             <span className="text-green-600 text-xs">✓ مرتبط</span>
                           ) : (
                             <span className="text-amber-500 text-xs">⚠ يحتاج ربط</span>

@@ -32,7 +32,6 @@ class MappingService
         // 1. بحث في ذاكرة الربط المحفوظة
         $mapping = ItemMapping::where('client_id', $clientId)
             ->where('source_name', $sourceName)
-            ->where(fn($q) => $q->where('context', $context)->orWhereNull('context'))
             ->orderByDesc('confidence')
             ->first();
 
