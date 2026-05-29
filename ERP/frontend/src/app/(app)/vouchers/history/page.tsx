@@ -196,6 +196,7 @@ export default function VoucherHistoryPage() {
                 </th>
                 <th className="px-4 py-3 font-semibold">التاريخ</th>
                 <th className="px-4 py-3 font-semibold">النوع</th>
+                <th className="px-4 py-3 font-semibold">المصدر</th>
                 <th className="px-4 py-3 font-semibold">الموقع</th>
                 <th className="px-4 py-3 font-semibold">عدد الأصناف</th>
                 <th className="px-4 py-3 font-semibold">بواسطة</th>
@@ -233,6 +234,13 @@ export default function VoucherHistoryPage() {
                     <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${TYPE_COLORS[v.type] ?? 'bg-gray-50 text-gray-600'}`}>
                       {TYPE_LABELS[v.type] ?? v.type}
                     </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {v.source === 'upload' ? (
+                      <span className="text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full text-[10px] font-medium">📤 رفع</span>
+                    ) : (
+                      <span className="text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full text-[10px] font-medium">📝 يدوي</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-gray-600 text-sm">
                     {v.type === 'dispatch'

@@ -186,6 +186,7 @@ class VoucherController extends Controller
                     'branch_id'    => $branchId ?: null,
                     'created_by'   => $userId,
                     'status'       => 'confirmed',
+                    'source'       => 'upload',
                     'source_file'  => $voucherData['source_file'] ?? null,
                 ]);
 
@@ -434,6 +435,7 @@ class VoucherController extends Controller
                 'branch_id'    => $branchId,
                 'created_by'   => $userId,
                 'status'       => 'confirmed',
+                'source'       => 'manual',
             ]);
 
             foreach ($request->lines as $line) {
@@ -726,9 +728,12 @@ class VoucherController extends Controller
         $orders = DispatchOrder::where('client_id', $clientId)
             ->withCount('lines')
             ->with(['branch:id,name', 'warehouse:id,name', 'creator:id,name'])
+            ->when($request->include_lines, fn($q) => $q->with(['lines.item:id,name,unit', 'lines.warehouse:id,name']))
             ->when($request->date_from, fn($q) => $q->where('date', '>=', $request->date_from))
             ->when($request->date_to,   fn($q) => $q->where('date', '<=', $request->date_to))
-            ->when($request->type,      fn($q) => $q->where('type', $request->type))
+            ->when($request->type,         fn($q) => $q->where('type', $request->type))
+            ->when($request->branch_id,    fn($q) => $q->where('branch_id', $request->branch_id))
+            ->when($request->warehouse_id, fn($q) => $q->where('warehouse_id', $request->warehouse_id))
             ->orderByDesc('date')
             ->paginate((int) ($request->per_page ?? 100));
 
