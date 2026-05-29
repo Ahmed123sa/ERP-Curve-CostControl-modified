@@ -7,6 +7,7 @@ import { usePathname } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/lib/store';
 import clsx from 'clsx';
+import toast from 'react-hot-toast';
 
 const PERMISSION_MAP: Record<string, string> = {
   '/dashboard': 'dashboard',
@@ -178,9 +179,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="absolute right-3 left-3 top-full mt-1 bg-white border border-gray-200
                             rounded-lg shadow-lg z-50 overflow-hidden">
               {user?.clients.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => { switchClient(c.id); setClientMenuOpen(false); }}
+                  <button
+                    key={c.id}
+                    onClick={async () => { await switchClient(c.id); setClientMenuOpen(false); toast.success(`تم التبديل إلى ${c.name}`); }}
                   className={clsx(
                     'w-full text-right px-3 py-2.5 text-sm hover:bg-gray-50',
                     c.id === currentClient?.id && 'bg-blue-50 text-blue-700 font-medium',

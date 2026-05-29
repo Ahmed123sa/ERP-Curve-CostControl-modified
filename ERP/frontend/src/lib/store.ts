@@ -57,7 +57,10 @@ export const useAuthStore = create<AuthStore>()(
       switchClient: async (clientId) => {
         await api.post(`/auth/switch-client/${clientId}`);
         const client = get().user?.clients.find((c) => c.id === clientId);
-        if (client) set({ currentClient: client });
+        if (client) {
+          const user = get().user;
+          if (user) set({ user: { ...user, current_client_id: clientId }, currentClient: client });
+        }
       },
 
       setUser: (user) => set({ user }),
