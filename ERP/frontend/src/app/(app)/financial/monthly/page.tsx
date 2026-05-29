@@ -110,7 +110,7 @@ export default function FinancialMonthlyPage() {
         </div>
 
         {/* Matrix Table */}
-        <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-x-auto">
+        <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-auto">
           <table className="w-full text-xs text-right">
             <thead>
               <tr>
