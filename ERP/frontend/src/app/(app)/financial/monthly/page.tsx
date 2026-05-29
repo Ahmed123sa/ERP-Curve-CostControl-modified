@@ -58,7 +58,7 @@ export default function FinancialMonthlyPage() {
     });
 
     // Totals row
-    const totals: Record<string, number> = { sales: 0, expenses: 0, net: 0 };
+    const totals: Record<string, number> = { sales: 0, expenses: 0, net: 0, purchases: 0 };
     for (const r of rows) {
       totals.sales += r.sales;
       totals.expenses += r.totalExpenses;
@@ -71,6 +71,10 @@ export default function FinancialMonthlyPage() {
         catTotals[cid] = (catTotals[cid] || 0) + amt;
       }
     }
+
+    // إجمالي مشتريات = مجموع الكاتيجوريز اللي is_purchase = true
+    const purchaseCatIds = cats.filter((c: any) => c.is_purchase).map((c: any) => c.id);
+    totals.purchases = purchaseCatIds.reduce((sum, cid) => sum + (catTotals[cid] || 0), 0);
 
     return { rows, totals, catTotals };
   }, [entries, catList, daysInMonth, month]);
@@ -165,18 +169,22 @@ export default function FinancialMonthlyPage() {
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-3 gap-4 mt-4">
-          <div className="bg-gradient-to-br from-green-50 to-white border border-green-200 rounded-xl p-4 shadow-sm">
-            <div className="text-sm text-green-600 font-medium">إجمالي المبيعات</div>
-            <div className="text-2xl font-bold text-green-700 mt-1">{summary.totals.sales.toFixed(2)}</div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+          <div className="bg-white border-r-4 border-green-500 rounded-xl p-4 shadow-sm">
+            <div className="text-xs text-gray-500 font-medium tracking-wide uppercase">إجمالي المبيعات</div>
+            <div className="text-xl font-bold text-green-700 mt-1">{summary.totals.sales.toFixed(2)}</div>
           </div>
-          <div className="bg-gradient-to-br from-red-50 to-white border border-red-200 rounded-xl p-4 shadow-sm">
-            <div className="text-sm text-red-600 font-medium">إجمالي المصروفات</div>
-            <div className="text-2xl font-bold text-red-700 mt-1">{summary.totals.expenses.toFixed(2)}</div>
+          <div className="bg-white border-r-4 border-sky-500 rounded-xl p-4 shadow-sm">
+            <div className="text-xs text-gray-500 font-medium tracking-wide uppercase">إجمالي المشتريات</div>
+            <div className="text-xl font-bold text-sky-700 mt-1">{summary.totals.purchases.toFixed(2)}</div>
           </div>
-          <div className={`bg-gradient-to-br to-white border rounded-xl p-4 shadow-sm ${summary.totals.net >= 0 ? 'from-blue-50 border-blue-200' : 'from-orange-50 border-orange-200'}`}>
-            <div className={`text-sm font-medium ${summary.totals.net >= 0 ? 'text-blue-600' : 'text-orange-600'}`}>صافي الشهر</div>
-            <div className={`text-2xl font-bold mt-1 ${summary.totals.net >= 0 ? 'text-blue-700' : 'text-orange-700'}`}>{summary.totals.net.toFixed(2)}</div>
+          <div className="bg-white border-r-4 border-red-400 rounded-xl p-4 shadow-sm">
+            <div className="text-xs text-gray-500 font-medium tracking-wide uppercase">إجمالي المصروفات</div>
+            <div className="text-xl font-bold text-red-600 mt-1">{summary.totals.expenses.toFixed(2)}</div>
+          </div>
+          <div className={`bg-white border-r-4 rounded-xl p-4 shadow-sm ${summary.totals.net >= 0 ? 'border-blue-500' : 'border-orange-500'}`}>
+            <div className={`text-xs font-medium tracking-wide uppercase ${summary.totals.net >= 0 ? 'text-blue-600' : 'text-orange-600'}`}>صافي الشهر</div>
+            <div className={`text-xl font-bold mt-1 ${summary.totals.net >= 0 ? 'text-blue-700' : 'text-orange-700'}`}>{summary.totals.net.toFixed(2)}</div>
           </div>
         </div>
       </div>

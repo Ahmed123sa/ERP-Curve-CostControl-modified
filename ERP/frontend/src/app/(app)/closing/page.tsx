@@ -342,7 +342,7 @@ export default function ClosingPage() {
               return (
                 <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-auto">
                   <table className="w-full text-xs whitespace-nowrap border-collapse" dir="rtl">
-                    <thead>
+                    <thead className="sticky top-0 z-10">
                       <tr className="bg-gray-100 text-gray-600">
                         <th className="px-1.5 py-1.5 text-start font-semibold sticky right-0 bg-gray-100 z-10 border border-gray-300">الصنف</th>
                         <th className="px-1.5 py-1.5 text-center font-semibold border border-gray-300">الوحدة</th>
@@ -509,32 +509,35 @@ export default function ClosingPage() {
                   </table>
                   {/* Summary section */}
                   {(() => {
-                    const totOpening = mergedRows.reduce((s: number, r: any) => s + Number(r.opening_qty || 0), 0);
-                    const totInQty = mergedRows.reduce((s: number, r: any) => s + Number(r.in_qty || 0), 0);
-                    const totClosingActual = mergedRows.reduce((s: number, r: any) => s + Number(r.closing_qty_actual || 0), 0);
-                    const totBranchDispatch = mergedRows.reduce((s: number, r: any) => s + (Object.values(r.branch_dispatches || {}) as any[]).reduce((ss: number, d: any) => ss + Number(d.qty || 0), 0), 0);
-                    const totReceivedQty = mergedRows.reduce((s: number, r: any) => {
-                      const v = Number(r.opening_qty || 0) + Number(r.in_qty || 0) - (r.closing_qty_actual ?? 0);
-                      return s + (v > 0 ? v : 0);
+                    // قيمة أول المدة
+                    const totOpeningVal = mergedRows.reduce((s: number, r: any) => s + Number(r.opening_value || 0), 0);
+                    // قيمة المشتريات
+                    const totPurchasesVal = mergedRows.reduce((s: number, r: any) => s + Number(r.in_value || 0), 0);
+                    // قيمة آخر المدة = Actual qty × avg cost
+                    const totClosingVal = mergedRows.reduce((s: number, r: any) => {
+                      const closingQty = Number(r.closing_qty_actual || 0);
+                      const avgCost = Number(r.avg_cost || 0);
+                      return s + closingQty * avgCost;
                     }, 0);
+                    // قيمة المستلم الفعلي = (أول المدة + وارد - آخر المدة) × avg cost (إذا موجب)
                     const totReceivedVal = mergedRows.reduce((s: number, r: any) => {
                       const v = Number(r.opening_qty || 0) + Number(r.in_qty || 0) - (r.closing_qty_actual ?? 0);
                       return s + (v > 0 ? v * Number(r.avg_cost || 0) : 0);
                     }, 0);
                     const summaryItems = [
-                      ['إجمالي أول المدة', totOpening],
-                      ['إجمالي المشتريات', totInQty],
-                      ['إجمالي آخر المدة', totClosingActual],
-                      ...(!isBranch ? [['إجمالي منصرف فروع', totBranchDispatch]] : []),
-                      ['المستلم الفعلي (كمية)', totReceivedQty.toFixed(3)],
-                      ['المستلم الفعلي (قيمة)', totReceivedVal.toLocaleString('en-US', { minimumFractionDigits: 2 })],
+                      { label: 'قيمة أول المدة', value: totOpeningVal, color: 'border-r-amber-500 text-amber-700' },
+                      { label: 'قيمة المشتريات', value: totPurchasesVal, color: 'border-r-sky-500 text-sky-700' },
+                      { label: 'قيمة آخر المدة', value: totClosingVal, color: 'border-r-violet-500 text-violet-700' },
+                      { label: 'قيمة المستلم الفعلي', value: totReceivedVal, color: 'border-r-emerald-500 text-emerald-700' },
                     ];
                     return (
-                      <div className="mt-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                        {summaryItems.map(([label, val]: [string, any]) => (
-                          <div key={label} className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
-                            <div className="text-xs text-blue-600 font-medium">{label}</div>
-                            <div className="text-lg font-bold text-blue-900 mt-0.5">{val}</div>
+                      <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {summaryItems.map((item) => (
+                          <div key={item.label} className={`bg-white border-r-4 ${item.color.split(' ')[0]} rounded-xl p-4 shadow-sm`}>
+                            <div className="text-xs text-gray-500 font-medium tracking-wide uppercase">{item.label}</div>
+                            <div className={`text-lg font-bold mt-1 ${item.color.split(' ').slice(1).join(' ')}`}>
+                              {item.value.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            </div>
                           </div>
                         ))}
                       </div>
