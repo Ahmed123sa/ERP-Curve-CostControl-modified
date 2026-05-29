@@ -324,8 +324,8 @@ export default function FinancialDailyPage() {
   const inpCls = 'w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-left outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 bg-white';
   const inpRoCls = isReadOnly ? ' bg-gray-50 text-gray-700 cursor-default' : '';
   const inpAmt = `${inpCls} font-medium no-spinner${inpRoCls}`;
-  const inpQty = `${inpCls} text-gray-500 w-20 text-center no-spinner${inpRoCls}`;
-  const inpDesc = `${inpCls} text-gray-500${isReadOnly ? ' cursor-default' : ' cursor-pointer'}${inpRoCls}`;
+  const inpQty = `${inpCls} text-gray-700 w-20 text-center no-spinner${inpRoCls}`;
+  const inpDesc = `${inpCls} text-gray-700${isReadOnly ? ' cursor-default' : ' cursor-pointer'}${inpRoCls}`;
 
   function computeCalc(expr: string): string | null {
     if (!expr.trim()) return null;
