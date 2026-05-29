@@ -35,14 +35,14 @@ export function MappingReviewModal({ voucher, onResolve, onClose }: Props) {
 
   const allLinesResolved = useMemo(() => {
     return voucher.lines.every((line: any, idx: number) => {
-      if (!line.needs_review) return true;
-      return !!resolutions[idx];
+      const chosen = resolutions[idx] || line.resolved_item_id || line.item_id;
+      return !!chosen;
     });
   }, [voucher.lines, resolutions]);
 
   const handleFinish = () => {
     const resolvedLines = voucher.lines.map((line: any, idx: number) => {
-      const itemId = line.needs_review ? resolutions[idx] : line.item_id;
+      const itemId = resolutions[idx] || line.resolved_item_id || line.item_id;
       const itemObj = items.find((i: any) => i.id === itemId);
       
       return {
@@ -113,56 +113,60 @@ export function MappingReviewModal({ voucher, onResolve, onClose }: Props) {
             </div>
           </div>
 
-          {/* 2. ربط الأصناف */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-gray-800">أصناف تحتاج لربط يدوي</h3>
-            <table className="w-full text-sm">
-              <thead className="text-right text-xs text-gray-400 border-b border-gray-100">
-                <tr>
-                  <th className="px-4 py-2 font-normal">الصنف في الملف</th>
-                  <th className="px-4 py-2 font-normal">اختيار الصنف المطابق</th>
+      {/* 2. ربط الأصناف */}
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold text-gray-800">مراجعة وربط الأصناف</h3>
+        <table className="w-full text-sm">
+          <thead className="text-right text-xs text-gray-400 border-b border-gray-100">
+            <tr>
+              <th className="px-4 py-2 font-normal">الصنف في الملف</th>
+              <th className="px-4 py-2 font-normal">اختيار الصنف المطابق</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {voucher.lines.map((line: any, idx: number) => {
+              const searchKey = String(idx);
+              const searchVal = itemSearch[searchKey] || '';
+              const filteredItems = items.filter((i: any) =>
+                !searchVal || i.name.toLowerCase().includes(searchVal.toLowerCase())
+              );
+              // For already resolved lines, pre-select current item_id
+              const currentResolvedId = resolutions[idx] || line.resolved_item_id || line.item_id || '';
+              return (
+                <tr key={idx} className={`hover:bg-gray-50/50 ${!line.needs_review && line.resolved_item_id ? 'bg-green-50/30' : ''}`}>
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-gray-700">{line.source_name}</div>
+                    <div className="text-[10px] text-gray-400">{line.unit} — كمية: {line.qty}</div>
+                    {!line.needs_review && line.resolved_item_id && (
+                      <div className="text-[10px] text-green-600 mt-0.5">✓ مربوط بــ {line.item_name}</div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 space-y-1.5">
+                    <input
+                      type="text"
+                      value={searchVal}
+                      onChange={(e) => setItemSearch(prev => ({ ...prev, [searchKey]: e.target.value }))}
+                      placeholder="ابحث عن الصنف..."
+                      className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                      dir="rtl"
+                    />
+                    <select
+                      value={currentResolvedId}
+                      onChange={(e) => setResolutions(prev => ({ ...prev, [idx]: e.target.value }))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+                    >
+                      <option value="">{line.resolved_item_id ? '— بدون تغيير —' : 'اختر الصنف المطابق...'}</option>
+                      {filteredItems.map((item: any) => (
+                        <option key={item.id} value={item.id}>{item.name} ({item.unit})</option>
+                      ))}
+                    </select>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {voucher.lines.map((line: any, idx: number) => {
-                  if (!line.needs_review) return null;
-                  const searchKey = String(idx);
-                  const searchVal = itemSearch[searchKey] || '';
-                  const filteredItems = items.filter((i: any) =>
-                    !searchVal || i.name.toLowerCase().includes(searchVal.toLowerCase())
-                  );
-                  return (
-                    <tr key={idx} className="hover:bg-gray-50/50">
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-gray-700">{line.source_name}</div>
-                        <div className="text-[10px] text-gray-400">{line.unit} — كمية: {line.qty}</div>
-                      </td>
-                      <td className="px-4 py-3 space-y-1.5">
-                        <input
-                          type="text"
-                          value={searchVal}
-                          onChange={(e) => setItemSearch(prev => ({ ...prev, [searchKey]: e.target.value }))}
-                          placeholder="ابحث عن الصنف..."
-                          className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                          dir="rtl"
-                        />
-                        <select
-                          value={resolutions[idx] || ''}
-                          onChange={(e) => setResolutions(prev => ({ ...prev, [idx]: e.target.value }))}
-                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
-                        >
-                          <option value="">اختر الصنف المطابق...</option>
-                          {filteredItems.map((item: any) => (
-                            <option key={item.id} value={item.id}>{item.name} ({item.unit})</option>
-                          ))}
-                        </select>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
         </div>
 
         {/* Footer */}

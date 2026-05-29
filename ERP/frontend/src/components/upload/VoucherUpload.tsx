@@ -174,54 +174,55 @@ export function VoucherUpload() {
               <span className="text-sm font-medium">{voucher.location_raw}</span>
               <span className="text-sm text-gray-500">{voucher.date}</span>
             </div>
-            {voucher.has_issues && (
-              <button
-                onClick={() => setReviewVoucherIdx(vi)}
-                className="text-sm text-amber-600 hover:text-amber-700 font-medium"
-              >
-                ⚠ مراجعة الأصناف غير المعروفة
-              </button>
-            )}
+            <button
+              onClick={() => setReviewVoucherIdx(vi)}
+              className={`text-sm font-medium ${voucher.has_issues ? 'text-amber-600 hover:text-amber-700' : 'text-blue-600 hover:text-blue-700'}`}
+            >
+              {voucher.has_issues ? '⚠ مراجعة الأصناف غير المعروفة' : 'تعديل الربط'}
+            </button>
           </div>
 
-          {/* سطور الإذن */}
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-right text-gray-400 text-xs border-b border-gray-50">
-                <th className="px-4 py-2 font-normal">الصنف</th>
-                <th className="px-4 py-2 font-normal">الكمية</th>
-                <th className="px-4 py-2 font-normal">Cost إجمالي</th>
-                <th className="px-4 py-2 font-normal">حالة الربط</th>
-              </tr>
-            </thead>
-            <tbody>
-              {voucher.lines.map((line, li) => {
-                return (
-                  <tr key={li} className="border-b border-gray-50 last:border-0">
-                    <td className="px-4 py-2">
-                      <div className="font-medium text-gray-800">
-                        {line.resolved_item_id ? line.item_name : line.source_name}
-                      </div>
-                      {line.needs_review && !line.resolved_item_id && (
-                        <div className="text-xs text-amber-500">مش متربط — يحتاج مراجعة</div>
-                      )}
-                    </td>
-                    <td className="px-4 py-2 text-gray-700">{line.qty}</td>
-                    <td className="px-4 py-2 text-gray-700">
-                      {line.cost > 0 ? line.cost.toLocaleString('ar-EG') + ' ج' : '—'}
-                    </td>
-                    <td className="px-4 py-2">
-                      {!line.needs_review || line.resolved_item_id ? (
-                        <span className="text-green-600 text-xs">✓ {line.confidence}%</span>
-                      ) : (
-                        <span className="text-amber-500 text-xs">⚠ يحتاج ربط</span>
-                      )}
-                    </td>
+              {/* سطور الإذن */}
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-right text-gray-400 text-xs border-b border-gray-50">
+                    <th className="px-4 py-2 font-normal">الصنف في الملف</th>
+                    <th className="px-4 py-2 font-normal">الصنف في النظام</th>
+                    <th className="px-4 py-2 font-normal">الكمية</th>
+                    <th className="px-4 py-2 font-normal">Cost إجمالي</th>
+                    <th className="px-4 py-2 font-normal">حالة الربط</th>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {voucher.lines.map((line, li) => {
+                    return (
+                      <tr key={li} className="border-b border-gray-50 last:border-0">
+                        <td className="px-4 py-2">
+                          <div className="font-medium text-gray-800">{line.source_name}</div>
+                        </td>
+                        <td className="px-4 py-2">
+                          {line.resolved_item_id && line.item_name ? (
+                            <span className="text-green-700 font-medium">{line.item_name}</span>
+                          ) : (
+                            <span className="text-amber-500 text-xs">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-gray-700">{line.qty}</td>
+                        <td className="px-4 py-2 text-gray-700">
+                          {line.cost > 0 ? line.cost.toLocaleString('ar-EG') + ' ج' : '—'}
+                        </td>
+                        <td className="px-4 py-2">
+                          {line.resolved_item_id ? (
+                            <span className="text-green-600 text-xs">✓ مرتبط</span>
+                          ) : (
+                            <span className="text-amber-500 text-xs">⚠ يحتاج ربط</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
         </div>
       ))}
 
