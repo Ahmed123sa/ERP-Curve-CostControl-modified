@@ -171,19 +171,19 @@ export default function FinancialMonthlyPage() {
         {/* Summary Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
           <div className="bg-white border-r-4 border-green-500 rounded-xl p-4 shadow-sm">
-            <div className="text-xs text-gray-500 font-medium tracking-wide uppercase">إجمالي المبيعات</div>
+            <div className="text-xs text-gray-600 font-medium">إجمالي المبيعات</div>
             <div className="text-xl font-bold text-green-700 mt-1">{summary.totals.sales.toFixed(2)}</div>
           </div>
           <div className="bg-white border-r-4 border-sky-500 rounded-xl p-4 shadow-sm">
-            <div className="text-xs text-gray-500 font-medium tracking-wide uppercase">إجمالي المشتريات</div>
+            <div className="text-xs text-gray-600 font-medium">إجمالي المشتريات</div>
             <div className="text-xl font-bold text-sky-700 mt-1">{summary.totals.purchases.toFixed(2)}</div>
           </div>
           <div className="bg-white border-r-4 border-red-400 rounded-xl p-4 shadow-sm">
-            <div className="text-xs text-gray-500 font-medium tracking-wide uppercase">إجمالي المصروفات</div>
+            <div className="text-xs text-gray-600 font-medium">إجمالي المصروفات</div>
             <div className="text-xl font-bold text-red-600 mt-1">{summary.totals.expenses.toFixed(2)}</div>
           </div>
           <div className={`bg-white border-r-4 rounded-xl p-4 shadow-sm ${summary.totals.net >= 0 ? 'border-blue-500' : 'border-orange-500'}`}>
-            <div className={`text-xs font-medium tracking-wide uppercase ${summary.totals.net >= 0 ? 'text-blue-600' : 'text-orange-600'}`}>صافي الشهر</div>
+            <div className={`text-xs font-medium ${summary.totals.net >= 0 ? 'text-blue-600' : 'text-orange-600'}`}>صافي الشهر</div>
             <div className={`text-xl font-bold mt-1 ${summary.totals.net >= 0 ? 'text-blue-700' : 'text-orange-700'}`}>{summary.totals.net.toFixed(2)}</div>
           </div>
         </div>

@@ -534,7 +534,7 @@ export default function ClosingPage() {
                       <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
                         {summaryItems.map((item) => (
                           <div key={item.label} className={`bg-white border-r-4 ${item.color.split(' ')[0]} rounded-xl p-4 shadow-sm`}>
-                            <div className="text-xs text-gray-500 font-medium tracking-wide uppercase">{item.label}</div>
+                            <div className="text-xs text-gray-600 font-medium">{item.label}</div>
                             <div className={`text-lg font-bold mt-1 ${item.color.split(' ').slice(1).join(' ')}`}>
                               {item.value.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                             </div>
