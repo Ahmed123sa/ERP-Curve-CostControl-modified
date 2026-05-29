@@ -30,7 +30,12 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email, password);
-      router.push('/dashboard');
+      const { user } = useAuthStore.getState();
+      if (user && user.clients && user.clients.length > 1) {
+        router.push('/select-client');
+      } else {
+        router.push('/dashboard');
+      }
     } catch {
       toast.error('بيانات الدخول غلط');
     } finally {
