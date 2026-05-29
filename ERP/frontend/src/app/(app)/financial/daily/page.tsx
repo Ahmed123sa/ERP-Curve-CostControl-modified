@@ -322,7 +322,7 @@ export default function FinancialDailyPage() {
 
   const isReadOnly = editingId !== null && !isEditing;
   const inpCls = 'w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-left outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 bg-white';
-  const inpRoCls = isReadOnly ? ' bg-gray-100 text-gray-500 cursor-default' : '';
+  const inpRoCls = isReadOnly ? ' bg-gray-50 text-gray-700 cursor-default' : '';
   const inpAmt = `${inpCls} font-medium no-spinner${inpRoCls}`;
   const inpQty = `${inpCls} text-gray-500 w-20 text-center no-spinner${inpRoCls}`;
   const inpDesc = `${inpCls} text-gray-500${isReadOnly ? ' cursor-default' : ' cursor-pointer'}${inpRoCls}`;
@@ -518,7 +518,7 @@ export default function FinancialDailyPage() {
                     <tr key={i} className="hover:bg-blue-50/20 transition-colors border-b border-gray-50">
                       <td className="sticky right-0 z-10 bg-white px-2 py-1 border-l border-gray-50 text-center">
                         <div className="flex items-center justify-center gap-1">
-                          <span className="text-gray-400 text-xs font-medium">{i + 1}</span>
+                          <span className="text-gray-500 text-xs font-medium">{i + 1}</span>
                           {!isReadOnly && <button onClick={() => delRow(i)} className="text-red-200 hover:text-red-400 text-[10px]">✕</button>}
                         </div>
                       </td>
@@ -648,7 +648,7 @@ export default function FinancialDailyPage() {
                           <td className="px-4 py-2">{e.total_sales}</td>
                           <td className="px-4 py-2 text-red-600">{e.total_expenses}</td>
                           <td className={`px-4 py-2 ${e.net_daily >= 0 ? 'text-green-600' : 'text-red-600'}`}>{e.net_daily}</td>
-                          <td className="px-4 py-2 text-gray-400">{e.notes || '—'}</td>
+                          <td className="px-4 py-2 text-gray-600">{e.notes || '—'}</td>
                           <td className="px-4 py-2"><span className="text-blue-500 text-xs">عرض</span></td>
                         </tr>
                       );

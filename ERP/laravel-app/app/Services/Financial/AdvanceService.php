@@ -4,7 +4,6 @@ namespace App\Services\Financial;
 
 use App\Models\Financial\FinancialEmployee;
 use App\Models\Financial\EmployeeAdvance;
-use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PhpOffice\PhpSpreadsheet\Style\Border;
@@ -41,7 +40,6 @@ class AdvanceService
         [$year, $monthNum] = explode('-', $month);
 
         $employees = FinancialEmployee::where('client_id', $clientId)
-            ->where('is_active', true)
             ->orderBy('name')
             ->get();
 
@@ -78,27 +76,20 @@ class AdvanceService
         ];
     }
 
-    public function store(string $clientId, array $data): EmployeeAdvance
+    public function store(string $clientId, array $data): ?EmployeeAdvance
     {
-        return DB::transaction(function () use ($clientId, $data) {
-            // Delete existing advance for same employee+date
+        if (($data['amount'] ?? 0) <= 0) {
             EmployeeAdvance::where('client_id', $clientId)
                 ->where('employee_id', $data['employee_id'])
                 ->where('date', $data['date'])
                 ->delete();
-
-            if (($data['amount'] ?? 0) > 0) {
-                return EmployeeAdvance::create([
-                    'client_id' => $clientId,
-                    'employee_id' => $data['employee_id'],
-                    'date' => $data['date'],
-                    'amount' => $data['amount'],
-                    'notes' => $data['notes'] ?? null,
-                ]);
-            }
-
             return null;
-        });
+        }
+
+        return EmployeeAdvance::updateOrCreate(
+            ['client_id' => $clientId, 'employee_id' => $data['employee_id'], 'date' => $data['date']],
+            ['amount' => $data['amount'], 'notes' => $data['notes'] ?? null]
+        );
     }
 
     public function destroy(string $clientId, string $id): bool
