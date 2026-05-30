@@ -50,6 +50,15 @@ export const financialApi = {
   showClosingReport: (id: string) =>
     api.get(`/financial/closing-reports/${id}`).then((r) => r.data),
 
+  updateClosingDetail: (detailId: string, data: any) =>
+    api.put(`/financial/closing-reports/details/${detailId}`, data).then((r) => r.data),
+
+  addClosingDetailItem: (detailId: string, data: any) =>
+    api.post(`/financial/closing-reports/details/${detailId}/items`, data).then((r) => r.data),
+
+  deleteClosingDetailItem: (itemId: string) =>
+    api.delete(`/financial/closing-reports/details/items/${itemId}`).then((r) => r.data),
+
   // Advances
   employees: () =>
     api.get('/financial/employees').then((r) => r.data),

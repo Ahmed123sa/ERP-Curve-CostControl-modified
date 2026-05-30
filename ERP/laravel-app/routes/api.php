@@ -245,6 +245,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/closing-reports/{id}', [\App\Http\Controllers\Financial\ClosingReportController::class, 'show']);
         Route::get('/closing-reports/{id}/export-excel', [\App\Http\Controllers\Financial\ClosingReportController::class, 'exportExcel']);
         Route::get('/closing-reports/{id}/export-pdf', [\App\Http\Controllers\Financial\ClosingReportController::class, 'exportPdf']);
+        Route::put('/closing-reports/details/{detailId}', [\App\Http\Controllers\Financial\ClosingReportController::class, 'updateDetail']);
+        Route::post('/closing-reports/details/{detailId}/items', [\App\Http\Controllers\Financial\ClosingReportController::class, 'addDetailItem']);
+        Route::delete('/closing-reports/details/items/{itemId}', [\App\Http\Controllers\Financial\ClosingReportController::class, 'deleteDetailItem']);
     });
 
     Route::prefix('financial')->middleware('permission:financial.advances')->group(function () {
