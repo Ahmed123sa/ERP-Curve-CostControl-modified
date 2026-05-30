@@ -28,7 +28,7 @@ export default function DispatchPage() {
   const [branchId, setBranchId] = useState('');
 
   const { data: branches = [] } = useQuery({
-    queryKey: ['branches'],
+    queryKey: ['branches', currentClient?.id],
     queryFn: () => api.get('/branches').then((r) => r.data),
   });
 
