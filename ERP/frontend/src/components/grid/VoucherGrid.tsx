@@ -63,7 +63,7 @@ export function VoucherGrid({ type, date, warehouseId, branchId, orderId, initia
   const [itemSearch, setItemSearch] = useState('');
   const inputRefs = useRef<Record<string, HTMLElement | null>>({});
 
-  const showWarehouse = !warehouseId;
+  const showWarehouse = type !== 'dispatch' && !warehouseId;
 
   useEffect(() => {
     if (initialData && initialData.length > 0) {
