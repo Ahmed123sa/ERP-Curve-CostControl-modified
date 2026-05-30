@@ -3,6 +3,7 @@
 import { useState, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/store';
 import { PageHeader } from '@/components/ui/AppShell';
 import toast from 'react-hot-toast';
 
@@ -17,6 +18,7 @@ export default function ClosingPage() {
   const [pendingEdits, setPendingEdits] = useState<any[]>([]);
   const [popoverTarget, setPopoverTarget] = useState<any>(null);
   const [cellOrdersCache, setCellOrdersCache] = useState<Record<string, any[]>>({});
+  const { currentClient } = useAuthStore();
 
   // 1. بيانات الـ Matrix
   const { data: matrixData, isLoading: matrixLoading } = useQuery({
@@ -26,7 +28,7 @@ export default function ClosingPage() {
   });
 
   const { data: warehouses = [] } = useQuery({
-    queryKey: ['warehouses'],
+    queryKey: ['warehouses', currentClient?.id],
     queryFn: () => api.get('/warehouses').then((r) => r.data),
   });
 

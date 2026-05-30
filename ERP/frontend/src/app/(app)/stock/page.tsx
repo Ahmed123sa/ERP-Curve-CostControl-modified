@@ -2,13 +2,15 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/store';
 import { PageHeader } from '@/components/ui/AppShell';
 
 export default function StockPage() {
   const [warehouseId, setWarehouseId] = useState('');
+  const { currentClient } = useAuthStore();
 
   const { data: warehouses = [] } = useQuery({
-    queryKey: ['warehouses'],
+    queryKey: ['warehouses', currentClient?.id],
     queryFn: () => api.get('/warehouses').then((r) => r.data),
   });
 

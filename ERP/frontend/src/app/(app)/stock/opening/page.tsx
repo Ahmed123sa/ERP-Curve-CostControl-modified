@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/store';
 import { PageHeader } from '@/components/ui/AppShell';
 import { InventoryUploadModal } from '@/components/stock/InventoryUploadModal';
 import toast from 'react-hot-toast';
@@ -11,6 +12,7 @@ export default function OpeningBalancePage() {
   const [warehouseId, setWarehouseId] = useState('');
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [lines, setLines] = useState<{ item_id: string; item_name: string; unit: string; qty: number; cost: number }[]>([]);
+  const { currentClient } = useAuthStore();
 
   const { data: warehouses = [] } = useQuery({
     queryKey: ['warehouses'],
@@ -18,7 +20,7 @@ export default function OpeningBalancePage() {
   });
 
   const { data: items = [] } = useQuery({
-    queryKey: ['items'],
+    queryKey: ['items', currentClient?.id],
     queryFn: () => api.get('/items').then((r) => r.data),
   });
 

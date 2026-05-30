@@ -3,14 +3,16 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/store';
 import toast from 'react-hot-toast';
 
 export default function MenuReportPage() {
   const [branchId, setBranchId] = useState<string>('');
   const [menuId, setMenuId] = useState<string>('');
+  const { currentClient } = useAuthStore();
 
   const { data: warehouses = [] } = useQuery({
-    queryKey: ['warehouses'],
+    queryKey: ['warehouses', currentClient?.id],
     queryFn: () => api.get('/warehouses').then((r) => r.data),
   });
   const branches = warehouses.filter((w: any) => w.type === 'branch');

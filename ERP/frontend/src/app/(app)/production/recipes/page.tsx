@@ -2,6 +2,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/store';
 import toast from 'react-hot-toast';
 
 interface IngredientRow {
@@ -54,6 +55,7 @@ export default function RecipesPage() {
   const [renameValue, setRenameValue] = useState('');
   const [newSizeItem, setNewSizeItem] = useState('');
   const [newSizeGrams, setNewSizeGrams] = useState('');
+  const { currentClient } = useAuthStore();
 
   const { data: recipes, isLoading } = useQuery({
     queryKey: ['production-recipes'],
@@ -61,12 +63,12 @@ export default function RecipesPage() {
   });
 
   const { data: items = [] } = useQuery({
-    queryKey: ['items'],
+    queryKey: ['items', currentClient?.id],
     queryFn: () => api.get('/items').then(r => r.data),
   });
 
   const { data: warehouses = [] } = useQuery({
-    queryKey: ['warehouses'],
+    queryKey: ['warehouses', currentClient?.id],
     queryFn: () => api.get('/warehouses').then(r => r.data),
   });
 

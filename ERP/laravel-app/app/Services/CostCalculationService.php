@@ -6,6 +6,7 @@ use App\Models\StockLedger;
 use App\Models\MonthlyClosing;
 use App\Models\Item;
 use App\Models\Warehouse;
+use App\Models\Branch;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Carbon;
 
@@ -183,21 +184,28 @@ class CostCalculationService
         $closingValue          = round($closingQtyTheoretical * $avgCost, 2);
 
         // 5. المنصرف موزعاً على المواقع المستلمة (فروع أو مخازن)
+        // يحل branch_id لـ warehouse_id عبر:
+        //   أ) مباشرة لو branch_id = warehouse.id
+        //   ب) اسم الفرع → warehouse بنفس الاسم و type='branch'
         $branchDispatches = DB::table('stock_ledger')
             ->join('dispatch_orders', 'stock_ledger.ref_id', '=', 'dispatch_orders.id')
-            ->join('warehouses as dest', function($join) {
-                $join->on('dispatch_orders.branch_id', '=', 'dest.id')
-                     ->orOn('dispatch_orders.warehouse_id', '=', 'dest.id');
+            ->leftJoin('warehouses as dest', 'dispatch_orders.branch_id', '=', 'dest.id')
+            ->leftJoin('branches', 'dispatch_orders.branch_id', '=', 'branches.id')
+            ->leftJoin('warehouses as dest2', function($join) {
+                $join->on('branches.name', '=', 'dest2.name')
+                     ->where('dest2.type', 'branch');
             })
             ->where('stock_ledger.client_id', $clientId)
             ->where('stock_ledger.warehouse_id', $warehouseId)
             ->where('stock_ledger.item_id', $itemId)
             ->where('stock_ledger.ref_type', 'dispatch_order')
-            ->whereIn('stock_ledger.movement_type', ['out', 'transfer_out', 'dispatch'])
-            ->where('dest.id', '!=', $warehouseId) // الوجهة لازم تكون مختلفة
+            ->whereIn('stock_ledger.movement_type', ['out', 'transfer_out'])
             ->whereBetween('stock_ledger.date', [$startOfMonth->toDateString(), $endOfMonth->toDateString()])
-            ->selectRaw('dest.id as branch_id, dest.name as branch_name, SUM(ABS(stock_ledger.qty)) as qty')
-            ->groupBy('dest.id', 'dest.name')
+            ->selectRaw('COALESCE(dest.id, dest2.id, dispatch_orders.branch_id) as branch_id')
+            ->selectRaw('COALESCE(dest.name, dest2.name, branches.name, dispatch_orders.branch_id) as branch_name')
+            ->selectRaw('SUM(ABS(stock_ledger.qty)) as qty')
+            ->groupBy('branch_id', 'branch_name')
+            ->having('branch_id', '!=', $warehouseId)
             ->get()
             ->keyBy('branch_id')
             ->toArray();

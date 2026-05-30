@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/store';
 
 interface Props {
   voucher: any;
@@ -14,14 +15,15 @@ export function MappingReviewModal({ voucher, onResolve, onClose }: Props) {
   const [resolutions, setResolutions] = useState<Record<number, string>>({});
   const [itemSearch, setItemSearch] = useState<Record<string, string>>({});
   const [warehouseId, setWarehouseId] = useState<string>(voucher.location?.id || '');
+  const { currentClient } = useAuthStore();
 
   const { data: items = [] } = useQuery({
-    queryKey: ['items'],
+    queryKey: ['items', currentClient?.id],
     queryFn: () => api.get('/items').then((r) => r.data),
   });
 
   const { data: warehouses = [] } = useQuery({
-    queryKey: ['warehouses'],
+    queryKey: ['warehouses', currentClient?.id],
     queryFn: () => api.get('/warehouses').then((r) => r.data),
   });
 

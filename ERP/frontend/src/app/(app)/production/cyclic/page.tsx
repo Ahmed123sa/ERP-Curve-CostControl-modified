@@ -2,6 +2,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/store';
 import toast from 'react-hot-toast';
 
 interface InputRow {
@@ -40,9 +41,10 @@ export default function CyclicProductionPage() {
   const [showOutputDialog, setShowOutputDialog] = useState(false);
   const [outputQtyAuto, setOutputQtyAuto] = useState(true);
   const [outputDayQty, setOutputDayQty] = useState<Record<number, string>>({});
+  const { currentClient } = useAuthStore();
 
   const { data: items = [] } = useQuery({
-    queryKey: ['items'],
+    queryKey: ['items', currentClient?.id],
     queryFn: () => api.get('/items').then(r => r.data),
   });
 

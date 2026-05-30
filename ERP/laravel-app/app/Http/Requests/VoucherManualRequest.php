@@ -15,12 +15,12 @@ class VoucherManualRequest extends FormRequest
     {
         return [
             'type'         => 'required|in:purchase,dispatch,transfer,withdrawal,production,opening,adjustment',
-            'date'         => 'required|date|before_or_equal:today',
+            'date'         => 'required|date',
             'warehouse_id' => 'nullable|uuid',
             'branch_id'    => 'nullable|uuid',
             'lines'        => 'required|array|min:1',
             'lines.*.item_id'      => 'required|uuid',
-            'lines.*.warehouse_id' => 'required|uuid',
+            'lines.*.warehouse_id' => 'nullable|uuid',
             'lines.*.qty'          => 'required|numeric|min:0',
             'lines.*.cost'         => 'nullable|numeric|min:0',
         ];

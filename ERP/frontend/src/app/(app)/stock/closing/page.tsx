@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/store';
 import { PageHeader } from '@/components/ui/AppShell';
 import { InventoryUploadModal } from '@/components/stock/InventoryUploadModal';
 import toast from 'react-hot-toast';
@@ -11,6 +12,7 @@ export default function FinalBalancePage() {
   const [warehouseId, setWarehouseId] = useState('');
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [lines, setLines] = useState<any[]>([]);
+  const { currentClient } = useAuthStore();
 
   // 1. جلب المخازن والأصناف
   const { data: warehouses = [] } = useQuery({
@@ -19,7 +21,7 @@ export default function FinalBalancePage() {
   });
 
   const { data: items = [] } = useQuery({
-    queryKey: ['items'],
+    queryKey: ['items', currentClient?.id],
     queryFn: () => api.get('/items').then((r) => r.data),
   });
 

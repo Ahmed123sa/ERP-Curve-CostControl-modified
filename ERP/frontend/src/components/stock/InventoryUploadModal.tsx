@@ -2,6 +2,7 @@
 import { useState, Fragment, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/store';
 import toast from 'react-hot-toast';
 
 interface Props {
@@ -19,10 +20,11 @@ export function InventoryUploadModal({ warehouseId, month, type, onSuccess }: Pr
   const [parsedData, setParsedData] = useState<any>(null);
   const [mappingItems, setMappingItems] = useState<any[]>([]);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const { currentClient } = useAuthStore();
 
   // جلب الأصناف للربط اليدوي
   const { data: items = [] } = useQuery({
-    queryKey: ['items'],
+    queryKey: ['items', currentClient?.id],
     queryFn: () => api.get('/items').then((r) => r.data),
     enabled: step === 'mapping' || step === 'preview'
   });

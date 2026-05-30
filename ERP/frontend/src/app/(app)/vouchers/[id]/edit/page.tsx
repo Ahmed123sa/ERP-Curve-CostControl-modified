@@ -87,6 +87,17 @@ export default function EditVoucherPage() {
 
   return (
     <>
+      <div className="px-6 pt-4">
+        <button
+          onClick={() => router.back()}
+          className="flex items-center gap-1 text-sm text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          رجوع للسجل
+        </button>
+      </div>
       <PageHeader
         title={`تعديل ${TYPE_LABELS[voucher.type] ?? 'إذن'}`}
         subtitle={`#${voucher.id} — ${displayDate}`}

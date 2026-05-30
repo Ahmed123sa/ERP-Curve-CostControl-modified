@@ -456,7 +456,7 @@ class VoucherController extends Controller
                     
                     // 1. حذف من الـ Ledger
                     \App\Models\StockLedger::where('client_id', $clientId)
-                        ->where('warehouse_id', $line['warehouse_id'])
+                        ->where('warehouse_id', $line['warehouse_id'] ?? null)
                         ->where('item_id', $line['item_id'])
                         ->where('voucher_type', 'opening')
                         ->where('date', 'like', $monthPrefix . '%')
@@ -465,7 +465,7 @@ class VoucherController extends Controller
                     // 2. حذف الـ Lines القديمة من الـ DispatchOrders اللي من نوع opening
                     // (ده تنظيف إضافي عشان التقارير تكون دقيقة)
                     $oldOrderIds = DispatchOrder::where('client_id', $clientId)
-                        ->where('warehouse_id', $line['warehouse_id'])
+                        ->where('warehouse_id', $line['warehouse_id'] ?? null)
                         ->where('type', 'opening')
                         ->where('date', 'like', $monthPrefix . '%')
                         ->pluck('id');
@@ -475,7 +475,7 @@ class VoucherController extends Controller
                         ->delete();
                 }
 
-                $lineWhId = $line['warehouse_id'] ?: $warehouseId;
+                $lineWhId = ($line['warehouse_id'] ?? null) ?: $warehouseId;
 
                 DispatchLine::create([
                     'order_id'     => $order->id,
@@ -518,6 +518,29 @@ class VoucherController extends Controller
                         refId:        $order->id,
                         voucherType:  $request->type
                     );
+                }
+
+                // تحديث default_cost للصنف بعد ترحيل المشتريات
+                if ($request->type === 'purchase' && $unitCost > 0) {
+                    $item = Item::where('id', $line['item_id'])
+                        ->where('client_id', $clientId)
+                        ->first();
+                    if ($item) {
+                        $oldCost = $item->default_cost;
+                        $avgCost = $lineWhId ? $this->calc->weightedAverageCost($clientId, $lineWhId, $item->id) : 0;
+                        $newCost = $avgCost > 0 ? $avgCost : $unitCost;
+                        $item->default_cost = $newCost;
+                        $item->save();
+                        if ((float) $oldCost !== $newCost) {
+                            ActivityLogger::log(
+                                action:     'price_updated',
+                                entityType: 'Item',
+                                entityId:   $item->id,
+                                oldValues:  ['default_cost' => $oldCost],
+                                newValues:  ['default_cost' => $newCost, 'avg_cost' => $avgCost, 'unit_cost' => $unitCost, 'source' => 'purchase_voucher', 'voucher_id' => $order->id],
+                            );
+                        }
+                    }
                 }
             }
 
@@ -591,7 +614,7 @@ class VoucherController extends Controller
                 DispatchLine::create([
                     'order_id'     => $order->id,
                     'item_id'      => $line['item_id'],
-                    'warehouse_id' => $line['warehouse_id'],
+                    'warehouse_id' => $line['warehouse_id'] ?? $request->warehouse_id,
                     'qty'          => $qty,
                     'total_cost'   => $cost,
                     'unit_cost'    => $unitCost,
@@ -602,7 +625,7 @@ class VoucherController extends Controller
 
                 $this->ledger->post(
                     clientId:     $clientId,
-                    whId:         $line['warehouse_id'],
+                    whId:         $line['warehouse_id'] ?? $request->warehouse_id,
                     itemId:       $line['item_id'],
                     date:         $request->date,
                     movementType: $movementType,
@@ -636,11 +659,7 @@ class VoucherController extends Controller
                     if ($item) {
                         $oldCost = $item->default_cost;
                         $calc = app(\App\Services\CostCalculationService::class);
-                        $whId = $line['warehouse_id'];
-                        if (!$whId) {
-                            $wh = Warehouse::where('client_id', $clientId)->where('type', 'main')->first();
-                            $whId = $wh ? $wh->id : null;
-                        }
+                        $whId = $line['warehouse_id'] ?? $request->warehouse_id;
                         $avgCost = $whId ? $calc->weightedAverageCost($clientId, $whId, $item->id) : 0;
                         $newCost = $avgCost > 0 ? $avgCost : $unitCost;
                         $item->default_cost = $newCost;
@@ -761,8 +780,9 @@ class VoucherController extends Controller
         return response()->json($order);
     }
 
-    public function destroy(DispatchOrder $order): JsonResponse
+    public function destroy(Request $request, string $id): JsonResponse
     {
+        $order = DispatchOrder::withoutGlobalScope('client')->findOrFail($id);
         $clientId = $order->client_id;
         $month    = substr($order->date, 0, 7);
 

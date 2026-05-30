@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect, KeyboardEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/store';
 import toast from 'react-hot-toast';
 
 interface GridRow {
@@ -55,6 +56,7 @@ function prevCol(currentCol: ColKey, type: string): ColKey | null {
 
 export function VoucherGrid({ type, date, warehouseId, branchId, orderId, initialData, onSaved }: Props) {
   const qc = useQueryClient();
+  const { currentClient } = useAuthStore();
   const [rows, setRows] = useState<GridRow[]>(() => {
     if (initialData && initialData.length > 0) return [...initialData, emptyRow()];
     return Array.from({ length: 5 }, () => emptyRow());
@@ -72,12 +74,12 @@ export function VoucherGrid({ type, date, warehouseId, branchId, orderId, initia
   }, [initialData]);
 
   const { data: items = [], isLoading: itemsLoading } = useQuery({
-    queryKey: ['items'],
+    queryKey: ['items', currentClient?.id],
     queryFn: () => api.get('/items').then((r) => r.data),
   });
 
   const { data: warehouses = [] } = useQuery({
-    queryKey: ['warehouses'],
+    queryKey: ['warehouses', currentClient?.id],
     queryFn: () => api.get('/warehouses').then((r) => r.data),
   });
 

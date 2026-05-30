@@ -2,6 +2,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/store';
 import toast from 'react-hot-toast';
 
 interface ItemRow {
@@ -38,9 +39,10 @@ export default function TransfersPage() {
   const [toBranchId, setToBranchId] = useState('');
   const [toWarehouseId, setToWarehouseId] = useState('');
   const [rows, setRows] = useState<ItemRow[]>([emptyRow()]);
+  const { currentClient } = useAuthStore();
 
   const { data: items = [] } = useQuery({
-    queryKey: ['items'],
+    queryKey: ['items', currentClient?.id],
     queryFn: () => api.get('/items').then(r => r.data),
   });
 

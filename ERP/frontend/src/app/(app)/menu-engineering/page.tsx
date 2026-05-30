@@ -31,7 +31,7 @@ export default function MenuEngineeringPage() {
 
   // ── Data ──
   const { data: warehouses = [] } = useQuery({
-    queryKey: ['warehouses'],
+    queryKey: ['warehouses', currentClient?.id],
     queryFn: () => api.get('/warehouses').then((r) => r.data),
   });
   const branches = (warehouses as any[]).filter((w: any) => w.type === 'branch');

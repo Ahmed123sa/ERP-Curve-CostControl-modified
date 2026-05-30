@@ -3,6 +3,7 @@
 import { Fragment, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/store';
 
 export default function ReconciliationPage() {
   const [branchId, setBranchId] = useState('');
@@ -14,10 +15,11 @@ export default function ReconciliationPage() {
   const [salesMap, setSalesMap] = useState<Record<string, string>>({});
   const [inv, setInv] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const { currentClient } = useAuthStore();
 
   // ── Branches ──
   const { data: warehouses = [] } = useQuery({
-    queryKey: ['warehouses'],
+    queryKey: ['warehouses', currentClient?.id],
     queryFn: () => api.get('/warehouses').then((r) => r.data),
   });
   const branches = warehouses

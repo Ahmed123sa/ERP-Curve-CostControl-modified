@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/store';
 import toast from 'react-hot-toast';
 
 interface SlaughterItem {
@@ -33,6 +34,7 @@ export default function SlaughterPage() {
     date: today, animal_name: '', live_weight: '', price_per_kg: '',
     transport_slaughter_cost: '', notes: '', items: [],
   });
+  const { currentClient } = useAuthStore();
 
   const { data: slaughters = [], isLoading } = useQuery({
     queryKey: ['slaughters'],
@@ -45,7 +47,7 @@ export default function SlaughterPage() {
   });
 
   const { data: warehouses = [] } = useQuery({
-    queryKey: ['warehouses'],
+    queryKey: ['warehouses', currentClient?.id],
     queryFn: () => api.get('/warehouses').then(r => r.data),
   });
 
