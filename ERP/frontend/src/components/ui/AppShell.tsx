@@ -202,7 +202,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 {group.section}
               </div>
               {group.items.map((item) => {
-                const active = pathname === item.href || pathname.startsWith(item.href + '/');
+                const active = pathname === item.href;
                 return (
                   <Link
                     key={item.href}

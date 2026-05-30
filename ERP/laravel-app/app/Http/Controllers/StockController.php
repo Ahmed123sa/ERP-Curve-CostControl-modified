@@ -27,7 +27,7 @@ class StockController extends Controller
             return response()->json([]);
         }
 
-        $items = Item::where('client_id', $clientId)->where('is_active', true)->get();
+        $items = Item::where('client_id', $clientId)->where('is_active', true)->orderBy('sort_order')->get();
         $stock = [];
 
         foreach ($items as $item) {
