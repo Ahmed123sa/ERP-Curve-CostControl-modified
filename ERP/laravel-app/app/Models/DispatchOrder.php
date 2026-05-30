@@ -13,7 +13,7 @@ class DispatchOrder extends Model
     protected $fillable = [
         'id','client_id','type','date',
         'warehouse_id','branch_id','created_by',
-        'status','source_file','notes',
+        'status','source','source_file','notes',
     ];
     protected $casts = ['date' => 'date:Y-m-d'];
 

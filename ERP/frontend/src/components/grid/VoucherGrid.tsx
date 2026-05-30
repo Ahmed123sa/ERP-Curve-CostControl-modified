@@ -8,6 +8,7 @@ interface GridRow {
   id: string;
   item_id: string;
   item_name: string;
+  default_cost: number;
   warehouse_id: string;
   warehouse_name: string;
   qty: string;
@@ -29,6 +30,7 @@ const emptyRow = (): GridRow => ({
   id:             Math.random().toString(36).slice(2),
   item_id:        '',
   item_name:      '',
+  default_cost:   0,
   warehouse_id:   '',
   warehouse_name: '',
   qty:            '',
@@ -41,37 +43,26 @@ type ColKey = (typeof COL_ORDER)[number];
 
 function nextCol(currentCol: ColKey, type: string): ColKey | null {
   const cols = COL_ORDER.filter(c => c !== 'warehouse' || true);
-  const showCost = ['purchase', 'opening', 'adjustment', 'return'].includes(type);
-  const filtered = cols.filter(c => {
-    if (c === 'cost') return showCost;
-    return true;
-  });
-  const idx = filtered.indexOf(currentCol);
-  return idx < filtered.length - 1 ? filtered[idx + 1] : null;
+  const idx = cols.indexOf(currentCol);
+  return idx < cols.length - 1 ? cols[idx + 1] : null;
 }
 
 function prevCol(currentCol: ColKey, type: string): ColKey | null {
   const cols = COL_ORDER.filter(c => c !== 'warehouse' || true);
-  const showCost = ['purchase', 'opening', 'adjustment', 'return'].includes(type);
-  const filtered = cols.filter(c => {
-    if (c === 'cost') return showCost;
-    return true;
-  });
-  const idx = filtered.indexOf(currentCol);
-  return idx > 0 ? filtered[idx - 1] : null;
+  const idx = cols.indexOf(currentCol);
+  return idx > 0 ? cols[idx - 1] : null;
 }
 
 export function VoucherGrid({ type, date, warehouseId, branchId, orderId, initialData, onSaved }: Props) {
   const qc = useQueryClient();
   const [rows, setRows] = useState<GridRow[]>(() => {
     if (initialData && initialData.length > 0) return [...initialData, emptyRow()];
-    return [emptyRow()];
+    return Array.from({ length: 5 }, () => emptyRow());
   });
   const [activeCell, setActiveCell] = useState<{ row: number; col: string } | null>(null);
   const [itemSearch, setItemSearch] = useState('');
   const inputRefs = useRef<Record<string, HTMLElement | null>>({});
 
-  const showCost = ['purchase', 'opening', 'adjustment', 'return'].includes(type);
   const showWarehouse = !warehouseId;
 
   useEffect(() => {
@@ -80,7 +71,7 @@ export function VoucherGrid({ type, date, warehouseId, branchId, orderId, initia
     }
   }, [initialData]);
 
-  const { data: items = [] } = useQuery({
+  const { data: items = [], isLoading: itemsLoading } = useQuery({
     queryKey: ['items'],
     queryFn: () => api.get('/items').then((r) => r.data),
   });
@@ -119,8 +110,12 @@ export function VoucherGrid({ type, date, warehouseId, branchId, orderId, initia
       qc.invalidateQueries({ queryKey: ['vouchers'] });
       qc.invalidateQueries({ queryKey: ['stock'] });
       qc.invalidateQueries({ queryKey: ['closing'] });
-      setRows([emptyRow()]);
+      setRows(Array.from({ length: 5 }, () => emptyRow()));
       onSaved?.();
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.message || err?.message || 'حدث خطأ غير متوقع';
+      toast.error(msg);
     },
   });
 
@@ -128,9 +123,17 @@ export function VoucherGrid({ type, date, warehouseId, branchId, orderId, initia
     setRows((prev) => {
       const next = [...prev];
       next[idx] = { ...next[idx], [field]: value };
-      if (field === 'qty' || field === 'cost') {
-        const qty  = parseFloat(field === 'qty' ? value : next[idx].qty) || 0;
-        const cost = parseFloat(field === 'cost' ? value : next[idx].cost) || 0;
+      if (field === 'qty') {
+        const qty = parseFloat(value) || 0;
+        if (type === 'dispatch' && next[idx].default_cost > 0) {
+          next[idx].cost = String(qty * next[idx].default_cost);
+        }
+        const cost = parseFloat(next[idx].cost) || 0;
+        next[idx].unit_cost = qty > 0 && cost > 0 ? Math.round((cost / qty) * 10000) / 10000 : 0;
+      }
+      if (field === 'cost' && type !== 'dispatch') {
+        const qty  = parseFloat(next[idx].qty) || 0;
+        const cost = parseFloat(value) || 0;
         next[idx].unit_cost = qty > 0 && cost > 0 ? Math.round((cost / qty) * 10000) / 10000 : 0;
       }
       if (idx === next.length - 1 && next[idx].item_id) {
@@ -143,7 +146,15 @@ export function VoucherGrid({ type, date, warehouseId, branchId, orderId, initia
   const selectItem = (idx: number, item: any) => {
     setRows((prev) => {
       const next = [...prev];
-      next[idx] = { ...next[idx], item_id: item.id, item_name: item.name };
+      next[idx] = {
+        ...next[idx],
+        item_id: item.id,
+        item_name: item.name,
+        default_cost: item.default_cost || 0,
+        cost: type === 'dispatch' && item.default_cost > 0
+          ? String((parseFloat(next[idx].qty) || 0) * item.default_cost)
+          : next[idx].cost,
+      };
       return next;
     });
     setActiveCell(null);
@@ -170,9 +181,8 @@ export function VoucherGrid({ type, date, warehouseId, branchId, orderId, initia
       const next = e.shiftKey ? prevCol(col, type) : nextCol(col, type);
       if (next === null) {
         if (e.shiftKey) {
-          // prev row last col
-          moveTo(idx - 1, 'cost');
-        } else {
+          if (idx > 0) moveTo(idx - 1, 'cost');
+        } else if (idx < rows.length - 1) {
           moveTo(idx + 1, 'item');
         }
       } else {
@@ -181,7 +191,7 @@ export function VoucherGrid({ type, date, warehouseId, branchId, orderId, initia
     }
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      moveTo(idx + 1, col);
+      if (idx < rows.length - 1) moveTo(idx + 1, col);
     }
     if (e.key === 'ArrowUp') {
       e.preventDefault();
@@ -207,12 +217,8 @@ export function VoucherGrid({ type, date, warehouseId, branchId, orderId, initia
               <th className="px-4 py-3">الصنف</th>
               {showWarehouse && <th className="px-4 py-3 min-w-[130px]">المخزن</th>}
               <th className="px-4 py-3 min-w-[100px]">الكمية</th>
-              {showCost && (
-                <>
-                  <th className="px-4 py-3 min-w-[120px]">التكلفة</th>
-                  <th className="px-4 py-3 min-w-[90px] text-gray-400">سعر الوحدة</th>
-                </>
-              )}
+              <th className="px-4 py-3 min-w-[120px]">التكلفة</th>
+              <th className="px-4 py-3 min-w-[90px] text-gray-400">سعر الوحدة</th>
               <th className="px-4 py-3 w-10"></th>
             </tr>
           </thead>
@@ -253,20 +259,39 @@ export function VoucherGrid({ type, date, warehouseId, branchId, orderId, initia
                         autoComplete="off"
                       />
                     )}
-                    {activeCell?.row === idx && activeCell?.col === 'item' && filteredItems.length > 0 && (
-                      <div className="absolute z-50 right-0 top-full mt-1 w-72 bg-white border border-gray-200 rounded-lg shadow-xl overflow-hidden max-h-60 overflow-y-auto">
-                        {filteredItems.map((item: any) => (
-                          <button
-                            key={item.id}
-                            className="w-full text-right px-4 py-2.5 text-sm hover:bg-blue-50 flex justify-between items-center border-b border-gray-50 last:border-0"
-                            onMouseDown={(e) => { e.preventDefault(); selectItem(idx, item); }}
-                          >
-                            <span className="font-medium">{item.name}</span>
-                            <span className="text-xs text-gray-400">{item.unit}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                    {activeCell?.row === idx && activeCell?.col === 'item' && (() => {
+                      if (itemsLoading) {
+                        return (
+                          <div className="absolute z-50 right-0 top-full mt-1 w-72 bg-white border border-gray-200 rounded-lg shadow-xl">
+                            <div className="px-4 py-3 text-sm text-gray-400 text-center">جاري التحميل...</div>
+                          </div>
+                        );
+                      }
+                      if (filteredItems.length === 0 && itemSearch) {
+                        return (
+                          <div className="absolute z-50 right-0 top-full mt-1 w-72 bg-white border border-gray-200 rounded-lg shadow-xl">
+                            <div className="px-4 py-3 text-sm text-gray-400 text-center">لا توجد نتائج</div>
+                          </div>
+                        );
+                      }
+                      if (filteredItems.length > 0) {
+                        return (
+                          <div className="absolute z-50 right-0 top-full mt-1 w-72 bg-white border border-gray-200 rounded-lg shadow-xl overflow-hidden max-h-60 overflow-y-auto">
+                            {filteredItems.map((item: any) => (
+                              <button
+                                key={item.id}
+                                className="w-full text-right px-4 py-2.5 text-sm hover:bg-blue-50 flex justify-between items-center border-b border-gray-50 last:border-0"
+                                onMouseDown={(e) => { e.preventDefault(); selectItem(idx, item); }}
+                              >
+                                <span className="font-medium">{item.name}</span>
+                                <span className="text-xs text-gray-400">{item.unit}</span>
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
                   </td>
 
                   {/* المخزن */}
@@ -303,25 +328,22 @@ export function VoucherGrid({ type, date, warehouseId, branchId, orderId, initia
                   </td>
 
                   {/* التكلفة */}
-                  {showCost && (
-                    <>
-                      <td className="px-2 py-1.5">
-                        <input
-                          ref={el => { if (el) inputRefs.current[`${idx}-cost`] = el; }}
-                          type="number"
-                          value={row.cost}
-                          onChange={(e) => updateRow(idx, 'cost', e.target.value)}
-                          onFocus={() => setActiveCell({ row: idx, col: 'cost' })}
-                          onKeyDown={(e) => handleKeyDown(e, idx, 'cost')}
-                          placeholder="0"
-                          className="w-full px-3 py-2 text-sm text-left border border-gray-200 rounded-lg outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-100"
-                        />
-                      </td>
-                      <td className="px-4 py-2 text-gray-400 text-xs tabular-nums">
-                        {row.unit_cost > 0 ? row.unit_cost.toFixed(2) : '—'}
-                      </td>
-                    </>
-                  )}
+                  <td className="px-2 py-1.5">
+                    <input
+                      ref={el => { if (el) inputRefs.current[`${idx}-cost`] = el; }}
+                      type="number"
+                      value={row.cost}
+                      onChange={(e) => updateRow(idx, 'cost', e.target.value)}
+                      onFocus={() => setActiveCell({ row: idx, col: 'cost' })}
+                      onKeyDown={(e) => handleKeyDown(e, idx, 'cost')}
+                      readOnly={type === 'dispatch'}
+                      placeholder="0"
+                      className={`w-full px-3 py-2 text-sm text-left border border-gray-200 rounded-lg outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-100 ${type === 'dispatch' ? 'bg-gray-50 text-gray-500 cursor-default' : ''}`}
+                    />
+                  </td>
+                  <td className="px-4 py-2 text-gray-400 text-xs tabular-nums">
+                    {row.unit_cost > 0 ? row.unit_cost.toFixed(2) : '—'}
+                  </td>
 
                   {/* حذف */}
                   <td className="px-2 py-1.5 text-center">
@@ -343,12 +365,8 @@ export function VoucherGrid({ type, date, warehouseId, branchId, orderId, initia
                 <td></td>
                 {showWarehouse && <td></td>}
                 <td className="px-4 py-3 tabular-nums">{totalQty.toLocaleString('ar-EG')}</td>
-                {showCost && (
-                  <>
-                    <td className="px-4 py-3 tabular-nums">{totalCost.toLocaleString('ar-EG', { minimumFractionDigits: 0 })} ج</td>
-                    <td></td>
-                  </>
-                )}
+                <td className="px-4 py-3 tabular-nums">{totalCost.toLocaleString('ar-EG', { minimumFractionDigits: 0 })} ج</td>
+                <td></td>
                 <td></td>
               </tr>
             </tfoot>
@@ -356,7 +374,14 @@ export function VoucherGrid({ type, date, warehouseId, branchId, orderId, initia
         </table>
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex justify-between items-center">
+        <button
+          type="button"
+          onClick={() => setRows((prev) => [...prev, emptyRow()])}
+          className="px-4 py-2 bg-gray-100 text-gray-600 text-sm font-medium rounded-xl hover:bg-gray-200 transition-colors"
+        >
+          + إضافة صف
+        </button>
         <button
           onClick={() => saveMutation.mutate()}
           disabled={validRows === 0 || saveMutation.isPending}

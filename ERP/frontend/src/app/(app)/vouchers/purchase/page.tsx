@@ -63,13 +63,15 @@ export default function PurchasePage() {
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
         {/* Filters */}
         <div className="bg-white border border-gray-100 rounded-xl p-4 flex gap-4 items-center shadow-sm">
-          <label className="text-sm font-medium text-gray-600">تاريخ المشتريات:</label>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-          />
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-gray-400">التاريخ</label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+          </div>
         </div>
 
         {/* Saved Orders */}

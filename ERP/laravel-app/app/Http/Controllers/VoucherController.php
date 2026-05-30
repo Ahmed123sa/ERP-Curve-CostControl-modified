@@ -550,11 +550,14 @@ class VoucherController extends Controller
         $newItems = collect($request->lines)->pluck('item_id')->unique()->toArray();
         $allItemIds = array_unique(array_merge($oldItems, $newItems));
 
-        $oldWarehouseIds = [$order->warehouse_id];
+        $oldLineWhIds = $order->lines()->pluck('warehouse_id')->unique()->toArray();
+        $newLineWhIds = collect($request->lines)->pluck('warehouse_id')->unique()->toArray();
+
+        $oldWarehouseIds = array_merge([$order->warehouse_id], $oldLineWhIds);
         if ($order->type === 'dispatch' && $order->branch_id) {
             $oldWarehouseIds[] = $this->resolveBranchTargetWhId($clientId, $order->branch_id);
         }
-        $newWarehouseIds = [$request->warehouse_id];
+        $newWarehouseIds = array_merge([$request->warehouse_id], $newLineWhIds);
         if ($request->type === 'dispatch' && !empty($request->branch_id)) {
             $newWarehouseIds[] = $this->resolveBranchTargetWhId($clientId, $request->branch_id);
         }
