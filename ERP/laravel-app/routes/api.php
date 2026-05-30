@@ -55,10 +55,12 @@ Route::middleware('auth:sanctum')->group(function () {
     // ── Warehouses ────────────────────────────────────────
     Route::middleware('permission:warehouses')->group(function () {
         Route::apiResource('warehouses', WarehouseController::class);
-        Route::apiResource('branches', BranchController::class);
-        Route::post('/branches/{branch}/sources', [BranchController::class, 'updateSources']);
-        Route::get('/branches/{branch}/sources', [BranchController::class, 'sources']);
     });
+
+    // ── Branches (بدون صلاحية مخازن عشان تستخدم في الأذون) ──
+    Route::apiResource('branches', BranchController::class);
+    Route::post('/branches/{branch}/sources', [BranchController::class, 'updateSources']);
+    Route::get('/branches/{branch}/sources', [BranchController::class, 'sources']);
 
     // ── Vouchers (الأذون) ─────────────────────────────────
     Route::prefix('vouchers')->middleware('permission:vouchers.purchase')->group(function () {
