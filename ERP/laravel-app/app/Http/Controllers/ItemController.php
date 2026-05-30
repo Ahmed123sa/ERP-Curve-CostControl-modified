@@ -157,6 +157,9 @@ class ItemController extends Controller
 
         $imported = 0;
         $whLookup = Warehouse::where('client_id', $clientId)->pluck('id', 'name');
+        $fileSeen = [];
+        $createdItems = [];
+        $dupNames = [];
         foreach ($rows as $index => $row) {
             if ($index === 0) continue;
 
@@ -170,6 +173,19 @@ class ItemController extends Controller
             $whName   = isset($col['warehouse']) ? trim($row[$col['warehouse']] ?? '') : '';
             $category = isset($col['category']) ? trim($row[$col['category']] ?? '') : '';
 
+            $fileKey = $name . '|||' . $category;
+            if (isset($fileSeen[$fileKey])) {
+                $counter = 1;
+                $suffixed = $name . ' مكرر';
+                while (Item::where('client_id', $clientId)->where('name', $suffixed)->where('category', $category ?: null)->exists()) {
+                    $counter++;
+                    $suffixed = $name . ' مكرر ' . $counter;
+                }
+                $name = $suffixed;
+                $dupNames[] = $name;
+            }
+            $fileSeen[$fileKey] = true;
+
             $data = [
                 'unit' => $unit ?: 'قطعة',
                 'default_cost' => $cost,
@@ -181,14 +197,19 @@ class ItemController extends Controller
             if ($whName && isset($whLookup[$whName])) {
                 $data['default_warehouse_id'] = $whLookup[$whName];
             }
-            Item::updateOrCreate(
-                ['client_id' => $clientId, 'name' => $name],
+            $item = Item::updateOrCreate(
+                ['client_id' => $clientId, 'name' => $name, 'category' => $category ?: null],
                 $data
             );
+            $createdItems[] = $item;
             $imported++;
         }
 
-        return response()->json(['message' => "تم استيراد {$imported} صنف بنجاح"]);
+        return response()->json([
+            'message' => "تم استيراد {$imported} صنف بنجاح",
+            'items' => $createdItems,
+            'duplicates' => $dupNames,
+        ]);
     }
 
     public function importStockLevels(Request $request): JsonResponse

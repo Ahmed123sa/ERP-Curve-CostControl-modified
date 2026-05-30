@@ -30,6 +30,10 @@ export default function ItemsPage() {
   const [editData, setEditData] = useState<any>({});
   const insertRef = useRef<HTMLInputElement>(null);
 
+  const [importItems, setImportItems] = useState<any[]>([]);
+  const [importDuplicateNames, setImportDuplicateNames] = useState<string[]>([]);
+  const [importEdit, setImportEdit] = useState<Record<string, any>>({});
+
   const { data: items, isLoading } = useQuery({
     queryKey: ['items', currentClient?.id],
     queryFn: () => api.get('/items').then((r) => r.data),
@@ -183,7 +187,25 @@ export default function ItemsPage() {
                 if (file) {
                   const form = new FormData(); form.append('file', file);
                   api.post('/items/import', form, { headers: { 'Content-Type': 'multipart/form-data' } })
-                    .then(() => { toast.success('تم الاستيراد بنجاح'); queryClient.invalidateQueries({ queryKey: ['items', currentClient?.id] }); })
+                    .then((r) => {
+                      const { items, duplicates } = r.data;
+                      setImportItems(items || []);
+                      setImportDuplicateNames(duplicates || []);
+                      const editMap: Record<string, any> = {};
+                      (items || []).forEach((it: any) => {
+                        editMap[it.id] = {
+                          name: it.name,
+                          default_cost: it.default_cost || 0,
+                          unit: it.unit,
+                          category: it.category || '',
+                          default_warehouse_id: it.default_warehouse_id || '',
+                          min_stock_level: it.min_stock_level ?? '',
+                        };
+                      });
+                      setImportEdit(editMap);
+                      toast.success(`تم استيراد ${items?.length || 0} صنف`);
+                      queryClient.invalidateQueries({ queryKey: ['items', currentClient?.id] });
+                    })
                     .catch(() => toast.error('خطأ في الاستيراد'));
                 }
               }} />
@@ -412,6 +434,85 @@ export default function ItemsPage() {
           </div>
         </div>
       </div>
+
+      {importItems.length > 0 && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-[90vw] max-w-4xl max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h2 className="text-lg font-semibold">نتائج الاستيراد</h2>
+              <button onClick={() => setImportItems([])} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6">
+              <table className="w-full text-sm" dir="rtl">
+                <thead>
+                  <tr className="bg-gray-50 text-xs text-gray-500 border-b border-gray-100">
+                    <th className="px-3 py-2 font-medium">#</th>
+                    <th className="px-3 py-2 font-medium text-right">الاسم</th>
+                    <th className="px-3 py-2 font-medium text-right">الوحدة</th>
+                    <th className="px-3 py-2 font-medium text-right">السعر</th>
+                    <th className="px-3 py-2 font-medium text-right">التصنيف</th>
+                    <th className="px-3 py-2 font-medium text-right">المخزن</th>
+                    <th className="px-3 py-2 font-medium text-right">الحد الأدنى</th>
+                    <th className="px-3 py-2 font-medium text-center"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {importItems.map((item, i) => {
+                    const isDup = importDuplicateNames.includes(item.name);
+                    const ed = importEdit[item.id];
+                    return (
+                      <tr key={item.id} className={isDup ? 'bg-yellow-50' : ''}>
+                        <td className="px-3 py-2.5 text-center text-gray-400 text-xs">{i + 1}</td>
+                        <td className="px-3 py-2.5">
+                          <input type="text" value={ed?.name || ''} onChange={(e) => setImportEdit(p => ({ ...p, [item.id]: { ...p[item.id], name: e.target.value } }))}
+                            className="border border-gray-200 rounded px-2 py-1 w-full text-sm outline-none focus:border-blue-400" />
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <input type="text" value={ed?.unit || ''} onChange={(e) => setImportEdit(p => ({ ...p, [item.id]: { ...p[item.id], unit: e.target.value } }))}
+                            className="border border-gray-200 rounded px-2 py-1 w-16 text-sm outline-none focus:border-blue-400" />
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <input type="number" value={ed?.default_cost || 0} onChange={(e) => setImportEdit(p => ({ ...p, [item.id]: { ...p[item.id], default_cost: parseFloat(e.target.value) || 0 } }))}
+                            className="border border-gray-200 rounded px-2 py-1 w-20 text-sm outline-none focus:border-blue-400 text-left" dir="ltr" />
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <input type="text" value={ed?.category || ''} onChange={(e) => setImportEdit(p => ({ ...p, [item.id]: { ...p[item.id], category: e.target.value } }))}
+                            className="border border-gray-200 rounded px-2 py-1 w-28 text-sm outline-none focus:border-blue-400" />
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <select value={ed?.default_warehouse_id || ''} onChange={(e) => setImportEdit(p => ({ ...p, [item.id]: { ...p[item.id], default_warehouse_id: e.target.value } }))}
+                            className="border border-gray-200 rounded px-2 py-1 w-28 text-xs outline-none focus:border-blue-400">
+                            <option value="">-- اختر --</option>
+                            {warehouses?.map((w: any) => (<option key={w.id} value={w.id}>{w.name}</option>))}
+                          </select>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <input type="number" value={ed?.min_stock_level ?? ''} onChange={(e) => setImportEdit(p => ({ ...p, [item.id]: { ...p[item.id], min_stock_level: e.target.value } }))}
+                            className="border border-gray-200 rounded px-2 py-1 w-16 text-sm outline-none focus:border-blue-400" />
+                        </td>
+                        <td className="px-3 py-2.5 text-center">
+                          <button onClick={() => {
+                            updateMutation.mutate({ id: item.id, data: importEdit[item.id] });
+                          }} disabled={updateMutation.isPending}
+                            className="px-2.5 py-1 text-green-700 bg-green-50 rounded text-xs font-medium hover:bg-green-100 disabled:opacity-50">حفظ</button>
+                          {isDup && <span className="block text-[10px] text-amber-600 mt-1">مكرر</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex justify-between items-center px-6 py-4 border-t border-gray-100">
+              <span className="text-xs text-gray-400">{importItems.length} صنف{importDuplicateNames.length > 0 ? ` — ${importDuplicateNames.length} مكرر` : ''}</span>
+              <div className="flex gap-2">
+                <button onClick={() => setImportItems([])}
+                  className="px-4 py-2 text-gray-500 bg-gray-50 rounded-lg text-sm font-medium hover:bg-gray-100">إغلاق</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
