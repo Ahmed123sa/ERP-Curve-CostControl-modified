@@ -17,6 +17,7 @@ use App\Models\Warehouse;
 use App\Models\BranchWarehouseSource;
 use App\Models\Item;
 use App\Models\MonthlyClosing;
+use App\Models\StockLedger;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -427,6 +428,26 @@ class VoucherController extends Controller
         }
 
         $order = DB::transaction(function () use ($request, $clientId, $userId, $warehouseId, $branchId) {
+            // للأرصدة الافتتاحية — حذف القديم بالكامل (أمر + خطوط + كشف حساب) قبل إنشاء الجديد
+            if ($request->type === 'opening') {
+                $monthPrefix = substr($request->date, 0, 7);
+                $oldOrderIds = DispatchOrder::where('client_id', $clientId)
+                    ->where('warehouse_id', $warehouseId)
+                    ->where('type', 'opening')
+                    ->where('date', 'like', $monthPrefix . '%')
+                    ->pluck('id');
+
+                if ($oldOrderIds->isNotEmpty()) {
+                    StockLedger::where('ref_type', 'dispatch_order')
+                        ->whereIn('ref_id', $oldOrderIds)
+                        ->delete();
+                    DispatchLine::whereIn('order_id', $oldOrderIds)
+                        ->delete();
+                    DispatchOrder::whereIn('id', $oldOrderIds)
+                        ->delete();
+                }
+            }
+
             $order = DispatchOrder::create([
                 'client_id'    => $clientId,
                 'type'         => $request->type,
@@ -449,31 +470,6 @@ class VoucherController extends Controller
                     }
                 }
                 $unitCost = $qty > 0 && $cost > 0 ? round($cost / $qty, 4) : 0;
-
-                // لو "أول المدة" — بنمسح القديم لنفس الصنف والمخزن في نفس الشهر عشان ما يتراكمش (Replacement)
-                if ($request->type === 'opening') {
-                    $monthPrefix = substr($request->date, 0, 7); // 2024-05
-                    
-                    // 1. حذف من الـ Ledger
-                    \App\Models\StockLedger::where('client_id', $clientId)
-                        ->where('warehouse_id', $line['warehouse_id'] ?? null)
-                        ->where('item_id', $line['item_id'])
-                        ->where('voucher_type', 'opening')
-                        ->where('date', 'like', $monthPrefix . '%')
-                        ->delete();
-                    
-                    // 2. حذف الـ Lines القديمة من الـ DispatchOrders اللي من نوع opening
-                    // (ده تنظيف إضافي عشان التقارير تكون دقيقة)
-                    $oldOrderIds = DispatchOrder::where('client_id', $clientId)
-                        ->where('warehouse_id', $line['warehouse_id'] ?? null)
-                        ->where('type', 'opening')
-                        ->where('date', 'like', $monthPrefix . '%')
-                        ->pluck('id');
-                    
-                    DispatchLine::whereIn('order_id', $oldOrderIds)
-                        ->where('item_id', $line['item_id'])
-                        ->delete();
-                }
 
                 $lineWhId = ($line['warehouse_id'] ?? null) ?: $warehouseId;
 

@@ -11,6 +11,7 @@ use App\Models\MonthlyClosing;
 use App\Models\DispatchOrder;
 use App\Models\StockLedger;
 use App\Models\Item;
+use App\Models\DispatchLine;
 use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use Carbon\Carbon;
@@ -114,6 +115,7 @@ class InventoryUploadController extends Controller
 
                 foreach ($oldVouchers as $v) {
                     StockLedger::where('ref_type', 'dispatch_order')->where('ref_id', $v->id)->delete();
+                    DispatchLine::where('order_id', $v->id)->delete();
                     $v->delete();
                 }
 
