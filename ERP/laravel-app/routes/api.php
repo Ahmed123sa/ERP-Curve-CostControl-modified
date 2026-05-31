@@ -245,9 +245,16 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/closing-reports/{id}', [\App\Http\Controllers\Financial\ClosingReportController::class, 'show']);
         Route::get('/closing-reports/{id}/export-excel', [\App\Http\Controllers\Financial\ClosingReportController::class, 'exportExcel']);
         Route::get('/closing-reports/{id}/export-pdf', [\App\Http\Controllers\Financial\ClosingReportController::class, 'exportPdf']);
+        Route::post('/closing-reports/{id}/approve', [\App\Http\Controllers\Financial\ClosingReportController::class, 'approve']);
+        Route::post('/closing-reports/{id}/close', [\App\Http\Controllers\Financial\ClosingReportController::class, 'close']);
+        Route::post('/closing-reports/{id}/reopen', [\App\Http\Controllers\Financial\ClosingReportController::class, 'reopen']);
+        Route::post('/closing-reports/{id}/details', [\App\Http\Controllers\Financial\ClosingReportController::class, 'addDetail']);
+        Route::delete('/closing-reports/details/{detailId}', [\App\Http\Controllers\Financial\ClosingReportController::class, 'deleteDetail']);
+        Route::put('/closing-reports/details/{detailId}/formula', [\App\Http\Controllers\Financial\ClosingReportController::class, 'updateFormula']);
         Route::put('/closing-reports/details/{detailId}', [\App\Http\Controllers\Financial\ClosingReportController::class, 'updateDetail']);
         Route::post('/closing-reports/details/{detailId}/items', [\App\Http\Controllers\Financial\ClosingReportController::class, 'addDetailItem']);
         Route::delete('/closing-reports/details/items/{itemId}', [\App\Http\Controllers\Financial\ClosingReportController::class, 'deleteDetailItem']);
+        Route::get('/closing-reports/details/{detailId}/entries', [\App\Http\Controllers\Financial\ClosingReportController::class, 'getDetailEntries']);
     });
 
     Route::prefix('financial')->middleware('permission:financial.advances')->group(function () {

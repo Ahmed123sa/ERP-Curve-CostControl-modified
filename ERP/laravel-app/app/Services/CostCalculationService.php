@@ -204,7 +204,7 @@ class CostCalculationService
             ->selectRaw('COALESCE(dest.id, dest2.id, dispatch_orders.branch_id) as branch_id')
             ->selectRaw('COALESCE(dest.name, dest2.name, branches.name, dispatch_orders.branch_id) as branch_name')
             ->selectRaw('SUM(ABS(stock_ledger.qty)) as qty')
-            ->groupBy('branch_id', 'branch_name')
+            ->groupBy(DB::raw('COALESCE(dest.id, dest2.id, dispatch_orders.branch_id)'), DB::raw('COALESCE(dest.name, dest2.name, branches.name, dispatch_orders.branch_id)'))
             ->having('branch_id', '!=', $warehouseId)
             ->get()
             ->keyBy('branch_id')

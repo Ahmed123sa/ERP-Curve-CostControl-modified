@@ -19,6 +19,7 @@ class FinancialClosingReportDetail extends Model
         'id', 'client_id', 'closing_report_id',
         'line_type', 'row_type', 'name', 'amount', 'percentage',
         'formula_config', 'parent_id', 'category_id', 'sort_order',
+        'row_key',
     ];
 
     protected $casts = [

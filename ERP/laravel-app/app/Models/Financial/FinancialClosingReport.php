@@ -17,6 +17,7 @@ class FinancialClosingReport extends Model
         'id', 'client_id', 'month', 'year',
         'total_sales', 'total_purchases', 'total_expenses',
         'net_cash_profit', 'net_profit', 'percentages_json', 'status',
+        'approved_by', 'approved_at', 'closed_by', 'closed_at',
     ];
 
     protected $casts = [
@@ -28,10 +29,22 @@ class FinancialClosingReport extends Model
         'net_cash_profit' => 'float',
         'net_profit' => 'float',
         'percentages_json' => 'json',
+        'approved_at' => 'datetime',
+        'closed_at' => 'datetime',
     ];
 
     public function details(): HasMany
     {
         return $this->hasMany(FinancialClosingReportDetail::class, 'closing_report_id');
+    }
+
+    public function approvedByUser()
+    {
+        return $this->belongsTo(\App\Models\User::class, 'approved_by');
+    }
+
+    public function closedByUser()
+    {
+        return $this->belongsTo(\App\Models\User::class, 'closed_by');
     }
 }

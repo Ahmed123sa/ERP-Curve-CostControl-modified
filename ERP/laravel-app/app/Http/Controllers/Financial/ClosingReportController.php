@@ -46,7 +46,17 @@ class ClosingReportController extends Controller
 
         $report = \App\Models\Financial\FinancialClosingReport::where('client_id', $clientId)
             ->with(['details' => fn($q) => $q->orderBy('sort_order'), 'details.items'])
+            ->with('approvedByUser:id,name', 'closedByUser:id,name')
             ->findOrFail($id);
+
+        // Attach formula_text to each detail
+        $details = $report->details;
+        $allDetails = $details->toArray();
+        foreach ($report->details as $detail) {
+            if ($detail->formula_config) {
+                $detail->formula_text = $this->service->getFormulaText((array) $detail->formula_config, $allDetails);
+            }
+        }
 
         return response()->json(['report' => $report]);
     }
@@ -104,7 +114,83 @@ class ClosingReportController extends Controller
             ->with('details')
             ->findOrFail($id);
 
-        // TODO: implement PDF export
         return response()->json(['message' => 'جاري التصدير...']);
+    }
+
+    public function addDetail(Request $request, string $reportId): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+
+        $data = $request->validate([
+            'name'      => 'required|string|max:255',
+            'amount'    => 'nullable|numeric|min:0',
+            'line_type' => 'nullable|in:expense,purchase,revenue',
+        ]);
+
+        $detail = $this->service->addCustomDetail($clientId, $reportId, $data);
+
+        return response()->json(['detail' => $detail, 'message' => 'تمت الإضافة'], 201);
+    }
+
+    public function deleteDetail(Request $request, string $detailId): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+
+        $this->service->deleteCustomDetail($clientId, $detailId);
+
+        return response()->json(['message' => 'تم الحذف']);
+    }
+
+    public function updateFormula(Request $request, string $detailId): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+
+        $data = $request->validate([
+            'formula' => 'required|array',
+        ]);
+
+        $detail = $this->service->updateDetailFormula($clientId, $detailId, $data['formula']);
+
+        return response()->json(['detail' => $detail, 'message' => 'تم تحديث المعادلة']);
+    }
+
+    // ====== Daily Entries for Detail Breakdown ======
+
+    public function getDetailEntries(Request $request, string $detailId): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+
+        $entries = $this->service->getDetailEntries($clientId, $detailId);
+
+        return response()->json(['entries' => $entries]);
+    }
+
+    // ====== Approval Workflow ======
+
+    public function approve(Request $request, string $id): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+
+        $report = $this->service->approve($clientId, $id);
+
+        return response()->json(['report' => $report, 'message' => 'تم اعتماد التقرير']);
+    }
+
+    public function close(Request $request, string $id): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+
+        $report = $this->service->close($clientId, $id);
+
+        return response()->json(['report' => $report, 'message' => 'تم إغلاق التقرير']);
+    }
+
+    public function reopen(Request $request, string $id): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+
+        $report = $this->service->reopen($clientId, $id);
+
+        return response()->json(['report' => $report, 'message' => 'تم إعادة فتح التقرير']);
     }
 }

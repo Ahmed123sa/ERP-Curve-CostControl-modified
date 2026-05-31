@@ -14,7 +14,7 @@ export default function FinancialMonthlyPage() {
 
   const { data: summaries, isLoading } = useQuery({
     queryKey: ['financial-summaries', month],
-    queryFn: () => financialApi.monthlySummaries(month),
+    queryFn: () => financialApi.monthlySummaries(month ? Number(month.split('-')[1]) : undefined, month ? Number(month.split('-')[0]) : undefined),
   });
 
   const { data: catList = [] } = useQuery({

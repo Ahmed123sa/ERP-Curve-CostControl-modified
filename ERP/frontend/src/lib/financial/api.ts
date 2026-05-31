@@ -59,6 +59,30 @@ export const financialApi = {
   deleteClosingDetailItem: (itemId: string) =>
     api.delete(`/financial/closing-reports/details/items/${itemId}`).then((r) => r.data),
 
+  addClosingDetail: (reportId: string, data: any) =>
+    api.post(`/financial/closing-reports/${reportId}/details`, data).then((r) => r.data),
+
+  deleteClosingDetail: (detailId: string) =>
+    api.delete(`/financial/closing-reports/details/${detailId}`).then((r) => r.data),
+
+  updateClosingDetailFormula: (detailId: string, formula: any) =>
+    api.put(`/financial/closing-reports/details/${detailId}/formula`, { formula }).then((r) => r.data),
+
+  exportClosingExcel: (reportId: string) =>
+    api.get(`/financial/closing-reports/${reportId}/export-excel`, { responseType: 'blob' }).then((r) => r.data),
+
+  approveClosingReport: (id: string) =>
+    api.post(`/financial/closing-reports/${id}/approve`).then((r) => r.data),
+
+  closeClosingReport: (id: string) =>
+    api.post(`/financial/closing-reports/${id}/close`).then((r) => r.data),
+
+  reopenClosingReport: (id: string) =>
+    api.post(`/financial/closing-reports/${id}/reopen`).then((r) => r.data),
+
+  getDetailEntries: (detailId: string) =>
+    api.get(`/financial/closing-reports/details/${detailId}/entries`).then((r) => r.data),
+
   // Advances
   employees: () =>
     api.get('/financial/employees').then((r) => r.data),

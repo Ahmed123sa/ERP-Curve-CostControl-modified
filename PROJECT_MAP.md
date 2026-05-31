@@ -451,3 +451,12 @@ Older copy. Do NOT modify. Changes go into `ERP/laravel-app/`.
   - "حفظ التعديلات" button → batch saves all pending edits via `Promise.allSettled`
   - Auto refreshes closing + daily + grand-summary queries after save
 - **Impact**: Users can edit daily quantities and purchase values directly in the closing table. Changes propagate backwards to the source vouchers in history. Monthly closing regenerates automatically.
+
+## Surgical Fix Applied (2026-05-30) — Stock Closing 500 on Generate
+
+### 24. `CostCalculationService::itemMonthSummary()` — MySQL only_full_group_by violation
+- **File**: `ERP/laravel-app/app/Services/CostCalculationService.php:207`
+- **Root cause**: The `branchDispatches` query used `groupBy('branch_id', 'branch_name')` where `branch_id`/`branch_name` are SELECT aliases for `COALESCE(...)` expressions. MySQL with `sql_mode=only_full_group_by` (default since 5.7) rejects GROUP BY on aliases of expressions — only direct column references are allowed. The `having('branch_id', ...)` remained on the alias and was never broken — MySQL permits SELECT aliases in HAVING.
+- **Fix**: Changed ONLY `groupBy('branch_id', 'branch_name')` → `groupBy(DB::raw('COALESCE(...)'), DB::raw('COALESCE(...)'))`. HAVING left unchanged as `->having('branch_id', '!=', $warehouseId)`.
+- **Why not both**: Using `DB::raw('COALESCE(dest.id, ...)')` in HAVING causes `Unknown column 'dest.id' in 'having clause'` under `only_full_group_by`, because HAVING can only reference GROUP BY columns or aggregates — raw column references from JOINs are rejected there.
+- **Impact**: Stock closing generation works regardless of MySQL `only_full_group_by` setting. No logic change — same COALESCE resolution, same output data. No other files touched. Zero risk to other modules.
