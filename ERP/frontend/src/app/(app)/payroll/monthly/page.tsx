@@ -6,7 +6,7 @@ import { PageHeader } from '@/components/ui/AppShell';
 import toast from 'react-hot-toast';
 
 const EDITABLE_FIELDS = [
-  'work_days', 'rest_days_taken', 'absence_days', 'rest_day_ot_days',
+  'work_days', 'absence_days', 'rest_day_ot_days',
   'double_shift_days', 'overtime_hours', 'advance_amount',
   'absence_amount', 'rest_day_ot_amount', 'double_shift_amount', 'overtime_amount',
 ];
@@ -33,10 +33,21 @@ export default function PayrollMonthlyPage() {
     enabled: !!selectedPayroll,
   });
 
+  const [salaryBaseDays, setSalaryBaseDays] = useState(30);
+
   const calcMut = useMutation({
-    mutationFn: () => payrollApi.calculatePayroll(month, year),
+    mutationFn: () => payrollApi.calculatePayroll(month, year, salaryBaseDays),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['payroll-monthly'] });
+      toast.success(res.message);
+    },
+  });
+
+  const updateBaseDaysMut = useMutation({
+    mutationFn: ({ id, days }: { id: string; days: number }) => payrollApi.updateBaseDays(id, days),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['payroll-monthly'] });
+      qc.invalidateQueries({ queryKey: ['payroll-monthly-detail'] });
       toast.success(res.message);
     },
   });
@@ -185,6 +196,12 @@ export default function PayrollMonthlyPage() {
           <select className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" value={year} onChange={(e) => setYear(parseInt(e.target.value))}>
             {[2024, 2025, 2026, 2027].map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
+          <select className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm" value={salaryBaseDays} onChange={(e) => setSalaryBaseDays(parseInt(e.target.value))}>
+            <option value={28}>28 يوم</option>
+            <option value={29}>29 يوم</option>
+            <option value={30}>30 يوم</option>
+            <option value={31}>31 يوم</option>
+          </select>
           <button onClick={() => calcMut.mutate()} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">احسب</button>
         </div>
       } />
@@ -244,6 +261,14 @@ export default function PayrollMonthlyPage() {
                     {currentPayroll.status === 'approved' ? 'معتمد' : 'مسودة'}
                   </span>
                 </span>
+                <span className="text-sm text-gray-500">|</span>
+                <span className="text-sm text-gray-500">أساس الشهر:</span>
+                <select className="border border-gray-300 rounded-lg px-2 py-1 text-xs" value={currentPayroll.salary_base_days ?? 30} onChange={(e) => updateBaseDaysMut.mutate({ id: currentPayroll.id, days: parseInt(e.target.value) })} disabled={currentPayroll.status === 'approved'}>
+                  <option value={28}>28</option>
+                  <option value={29}>29</option>
+                  <option value={30}>30</option>
+                  <option value={31}>31</option>
+                </select>
                 {currentPayroll.status === 'draft' && (
                   <button onClick={() => approveMut.mutate(currentPayroll.id)} className="px-3 py-1 bg-green-600 text-white text-xs rounded-lg hover:bg-green-700">اعتماد</button>
                 )}
@@ -258,8 +283,9 @@ export default function PayrollMonthlyPage() {
                     <th className="px-2 py-2 text-center font-medium text-gray-600 text-xs">م</th>
                     <th className="px-2 py-2 text-center font-medium text-gray-600 text-xs sticky right-0 bg-gray-50 min-w-[100px]">الاسم</th>
                     <th className="px-2 py-2 text-center font-medium text-gray-600 text-xs">المرتب</th>
+                    <th className="px-2 py-2 text-center font-medium text-gray-600 text-xs">أجر اليوم</th>
+                    <th className="px-2 py-2 text-center font-medium text-gray-600 text-xs">أجر الساعة</th>
                     <th className="px-2 py-2 text-center font-medium text-gray-600 text-xs">أيام عمل</th>
-                    <th className="px-2 py-2 text-center font-medium text-gray-600 text-xs">راحات مأخوذة</th>
                     <th className="px-2 py-2 text-center font-medium text-gray-600 text-xs" title="إضافي راحات (أيام)">إضافي راحات (ي)</th>
                     <th className="px-2 py-2 text-center font-medium text-gray-600 text-xs">تطبيق (ي)</th>
                     <th className="px-2 py-2 text-center font-medium text-gray-600 text-xs">غياب (ي)</th>
@@ -282,8 +308,9 @@ export default function PayrollMonthlyPage() {
                         <td className="px-2 py-1.5 text-xs text-center text-gray-500">{i + 1}</td>
                         <td className="px-2 py-1.5 text-xs font-medium text-center sticky right-0 bg-white border-l border-gray-100">{d.employee?.name ?? '—'}</td>
                         <td className="px-2 py-1.5 text-xs text-center font-semibold">{d.base_salary_snapshot.toFixed(0)}</td>
+                        <td className="px-2 py-1.5 text-xs text-center font-semibold">{d.daily_wage_snapshot.toFixed(2)}</td>
+                        <td className="px-2 py-1.5 text-xs text-center font-semibold">{d.hourly_wage_snapshot.toFixed(2)}</td>
                         {renderCell(d, 'work_days', 'أيام عمل', fmt0)}
-                        {renderCell(d, 'rest_days_taken', 'راحات مأخوذة', fmt0)}
                         {renderCell(d, 'rest_day_ot_days', 'إضافي راحات', fmt0)}
                         {renderCell(d, 'double_shift_days', 'تطبيق', fmt0)}
                         {renderCell(d, 'absence_days', 'غياب', fmt0)}

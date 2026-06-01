@@ -10,9 +10,9 @@ use Illuminate\Support\Facades\DB;
 
 class PayrollCalcService
 {
-    public function calculate(string $clientId, int $month, int $year): PayrollMonthly
+    public function calculate(string $clientId, int $month, int $year, ?int $salaryBaseDays = null): PayrollMonthly
     {
-        return DB::transaction(function () use ($clientId, $month, $year) {
+        return DB::transaction(function () use ($clientId, $month, $year, $salaryBaseDays) {
             $daysInMonth = (int) date('t', strtotime("{$year}-{$month}-01"));
 
             $employees = PayrollEmployee::where('client_id', $clientId)
@@ -21,8 +21,13 @@ class PayrollCalcService
 
             $payroll = PayrollMonthly::updateOrCreate(
                 ['client_id' => $clientId, 'month' => $month, 'year' => $year],
-                ['status' => 'draft']
+                [
+                    'status' => 'draft',
+                    'salary_base_days' => $salaryBaseDays ?? 30,
+                ]
             );
+
+            $baseDays = $payroll->salary_base_days ?? 30;
 
             foreach ($employees as $employee) {
                 $records = \App\Models\Payroll\AttendanceRecord::where('client_id', $clientId)
@@ -35,17 +40,14 @@ class PayrollCalcService
                     ->where('employee_id', $employee->id)
                     ->first();
 
-                // Keep existing work_days & rest_days_taken if recalculating; otherwise use defaults
                 $workDays = $existingDetail?->work_days ?? $records->where('total_hours', '>', 0)->count();
-                $restDaysTaken = $existingDetail?->rest_days_taken ?? 0;
+                $absenceDays = $daysInMonth - $workDays;
 
                 $overtimeHours = $records->sum('overtime_minutes') / 60;
                 $doubleShiftDays = $records->where('is_double_shift', true)->count();
 
-                // New logic: rest_day_ot = max(4 - rest_days_taken, 0)
-                $restDayOTDays = max(4 - $restDaysTaken, 0);
-                // absence = month_days - work_days - min(rest_days_taken, 4)
-                $absenceDays = max($daysInMonth - $workDays - min($restDaysTaken, 4), 0);
+                $restDayOTDays = max(4 - $absenceDays, 0);
+                $effectiveAbsence = max($absenceDays - 4, 0);
 
                 $advanceAmount = 0;
                 if ($employee->financial_employee_id) {
@@ -56,10 +58,10 @@ class PayrollCalcService
                         ->sum('amount');
                 }
 
-                $dailyWage = $employee->daily_wage > 0 ? $employee->daily_wage : round($employee->base_salary / 30, 2);
-                $hourlyWage = $employee->hourly_wage > 0 ? $employee->hourly_wage : round($dailyWage / $employee->shift_hours, 2);
+                $dailyWage = round($employee->base_salary / $baseDays, 2);
+                $hourlyWage = round($dailyWage / $employee->shift_hours, 2);
 
-                $absenceAmount = $absenceDays * $dailyWage;
+                $absenceAmount = $effectiveAbsence * $dailyWage;
                 $overtimeAmount = $overtimeHours * $hourlyWage;
                 $restDayOTAmount = $restDayOTDays * $dailyWage;
                 $doubleShiftAmount = $doubleShiftDays * $dailyWage;
@@ -75,7 +77,6 @@ class PayrollCalcService
                         'daily_wage_snapshot' => $dailyWage,
                         'hourly_wage_snapshot' => $hourlyWage,
                         'work_days' => $workDays,
-                        'rest_days_taken' => $restDaysTaken,
                         'rest_day_ot_days' => $restDayOTDays,
                         'rest_day_ot_amount' => round($restDayOTAmount, 2),
                         'absence_days' => $absenceDays,
@@ -168,7 +169,7 @@ class PayrollCalcService
         $detail = PayrollMonthlyDetail::where('client_id', $clientId)->findOrFail($detailId);
 
         $allowedFields = [
-            'work_days', 'rest_days_taken', 'absence_days', 'absence_amount',
+            'work_days', 'absence_days', 'absence_amount',
             'overtime_hours', 'overtime_amount', 'rest_day_ot_days', 'rest_day_ot_amount',
             'double_shift_days', 'double_shift_amount', 'advance_amount', 'bonus_total',
         ];
@@ -178,20 +179,22 @@ class PayrollCalcService
         return DB::transaction(function () use ($detail, $field, $value) {
             $updates = [$field => $value];
 
-            // Auto-compute derived fields when rest_days_taken or work_days changes
-            if ($field === 'rest_days_taken') {
+            // Auto-compute derived fields when work_days or absence_days changes
+            if ($field === 'work_days') {
                 $monthDays = (int) date('t', strtotime("{$detail->payroll->year}-{$detail->payroll->month}-01"));
-                $restDayOtDays = max(4 - (int) $value, 0);
-                $absenceDays = max($monthDays - $detail->work_days - min((int) $value, 4), 0);
-                $updates['rest_day_ot_days'] = $restDayOtDays;
-                $updates['rest_day_ot_amount'] = round($restDayOtDays * $detail->daily_wage_snapshot, 2);
+                $absenceDays = $monthDays - (int) $value;
+                $restDayOTDays = max(4 - $absenceDays, 0);
+                $effectiveAbsence = max($absenceDays - 4, 0);
                 $updates['absence_days'] = $absenceDays;
-                $updates['absence_amount'] = round($absenceDays * $detail->daily_wage_snapshot, 2);
-            } elseif ($field === 'work_days') {
-                $monthDays = (int) date('t', strtotime("{$detail->payroll->year}-{$detail->payroll->month}-01"));
-                $absenceDays = max($monthDays - (int) $value - min($detail->rest_days_taken, 4), 0);
-                $updates['absence_days'] = $absenceDays;
-                $updates['absence_amount'] = round($absenceDays * $detail->daily_wage_snapshot, 2);
+                $updates['rest_day_ot_days'] = $restDayOTDays;
+                $updates['rest_day_ot_amount'] = round($restDayOTDays * $detail->daily_wage_snapshot, 2);
+                $updates['absence_amount'] = round($effectiveAbsence * $detail->daily_wage_snapshot, 2);
+            } elseif ($field === 'absence_days') {
+                $restDayOTDays = max(4 - (int) $value, 0);
+                $effectiveAbsence = max((int) $value - 4, 0);
+                $updates['rest_day_ot_days'] = $restDayOTDays;
+                $updates['rest_day_ot_amount'] = round($restDayOTDays * $detail->daily_wage_snapshot, 2);
+                $updates['absence_amount'] = round($effectiveAbsence * $detail->daily_wage_snapshot, 2);
             }
 
             $detail->update($updates);

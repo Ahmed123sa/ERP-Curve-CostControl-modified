@@ -37,9 +37,15 @@ class PayrollMonthlyController extends Controller
         $data = $request->validate([
             'month' => 'required|integer|between:1,12',
             'year' => 'required|integer|min:2020',
+            'salary_base_days' => 'nullable|integer|in:28,29,30,31',
         ]);
 
-        $payroll = $this->calcService->calculate($clientId, (int) $data['month'], (int) $data['year']);
+        $payroll = $this->calcService->calculate(
+            $clientId,
+            (int) $data['month'],
+            (int) $data['year'],
+            $data['salary_base_days'] ?? null,
+        );
         return response()->json(['payroll' => $payroll, 'message' => 'تم حساب الرواتب']);
     }
 
@@ -59,6 +65,15 @@ class PayrollMonthlyController extends Controller
         }
         $payroll->delete();
         return response()->json(['message' => 'تم حذف المسودة']);
+    }
+
+    public function updateBaseDays(Request $request, string $id): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+        $data = $request->validate(['salary_base_days' => 'required|integer|in:28,29,30,31']);
+        $payroll = PayrollMonthly::where('client_id', $clientId)->findOrFail($id);
+        $payroll->update(['salary_base_days' => $data['salary_base_days']]);
+        return response()->json(['payroll' => $payroll, 'message' => 'تم تحديث أساس الشهر']);
     }
 
     public function updateCell(Request $request, string $detailId): JsonResponse

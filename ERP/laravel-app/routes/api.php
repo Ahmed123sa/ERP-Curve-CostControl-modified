@@ -278,11 +278,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/attendance', [\App\Http\Controllers\Payroll\AttendanceController::class, 'index']);
         Route::post('/attendance', [\App\Http\Controllers\Payroll\AttendanceController::class, 'store']);
         Route::delete('/attendance/{id}', [\App\Http\Controllers\Payroll\AttendanceController::class, 'destroy']);
+        Route::get('/attendance/export', [\App\Http\Controllers\Payroll\AttendanceController::class, 'exportExcel']);
+        Route::get('/employee-advances', [\App\Http\Controllers\Payroll\AttendanceController::class, 'employeeAdvances']);
         // Monthly payroll
         Route::get('/monthly', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'index']);
         Route::get('/monthly/{id}', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'show']);
         Route::post('/monthly/calculate', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'calculate']);
         Route::post('/monthly/{id}/approve', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'approve']);
+        Route::post('/monthly/{id}/update-base-days', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'updateBaseDays']);
         Route::delete('/monthly/{id}', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'destroy']);
         Route::post('/monthly/bonus/{detailId}', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'updateBonus']);
         Route::post('/monthly/detail/{detailId}/update-cell', [\App\Http\Controllers\Payroll\PayrollMonthlyController::class, 'updateCell']);

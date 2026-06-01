@@ -37,11 +37,9 @@ class AttendanceService
         $totalHours = ($end - $start) / 3600;
 
         $shiftHours = (float) $employee->shift_hours;
-        $isDoubleShift = $totalHours >= 2 * $shiftHours;
-        $overtimeMinutes = 0;
-        if (!$isDoubleShift && $totalHours > $shiftHours) {
-            $overtimeMinutes = ($totalHours - $shiftHours) * 60;
-        }
+        $overtimeHours = max($totalHours - $shiftHours, 0);
+        $isDoubleShift = $overtimeHours >= ($shiftHours - 0.5);
+        $overtimeMinutes = $isDoubleShift ? 0 : round($overtimeHours * 60, 2);
 
         return DB::transaction(function () use ($clientId, $data, $totalHours, $overtimeMinutes, $isDoubleShift) {
             AttendanceRecord::where('client_id', $clientId)

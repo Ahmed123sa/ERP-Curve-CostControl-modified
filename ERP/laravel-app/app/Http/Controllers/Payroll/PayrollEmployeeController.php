@@ -89,6 +89,13 @@ class PayrollEmployeeController extends Controller
             'hourly_wage' => $hourlyWage,
         ]);
 
+        // Sync name change to linked FinancialEmployee
+        if ($employee->financial_employee_id) {
+            FinancialEmployee::where('client_id', $clientId)
+                ->where('id', $employee->financial_employee_id)
+                ->update(['name' => $data['name']]);
+        }
+
         return response()->json(['employee' => $employee, 'message' => 'تم تحديث بيانات الموظف']);
     }
 

@@ -4,6 +4,7 @@ namespace App\Services\Financial;
 
 use App\Models\Financial\FinancialEmployee;
 use App\Models\Financial\EmployeeAdvance;
+use App\Models\Payroll\PayrollEmployee;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PhpOffice\PhpSpreadsheet\Style\Border;
@@ -22,16 +23,41 @@ class AdvanceService
 
     public function storeEmployee(string $clientId, string $name): FinancialEmployee
     {
-        return FinancialEmployee::create([
+        $financialEmployee = FinancialEmployee::create([
             'client_id' => $clientId,
             'name' => $name,
         ]);
+
+        // Auto-sync to PayrollEmployee
+        $existingPayroll = PayrollEmployee::where('client_id', $clientId)
+            ->where('name', $name)
+            ->first();
+
+        if (!$existingPayroll) {
+            PayrollEmployee::create([
+                'client_id' => $clientId,
+                'name' => $name,
+                'is_active' => true,
+                'financial_employee_id' => $financialEmployee->id,
+            ]);
+        } else {
+            $existingPayroll->update(['financial_employee_id' => $financialEmployee->id]);
+        }
+
+        return $financialEmployee;
     }
 
     public function updateEmployee(string $clientId, string $id, string $name): FinancialEmployee
     {
         $employee = FinancialEmployee::where('client_id', $clientId)->findOrFail($id);
+        $oldName = $employee->name;
         $employee->update(['name' => $name]);
+
+        // Sync name change to linked PayrollEmployee
+        PayrollEmployee::where('client_id', $clientId)
+            ->where('financial_employee_id', $id)
+            ->update(['name' => $name]);
+
         return $employee;
     }
 

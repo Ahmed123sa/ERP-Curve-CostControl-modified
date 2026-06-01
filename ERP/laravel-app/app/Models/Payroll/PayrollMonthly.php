@@ -16,12 +16,13 @@ class PayrollMonthly extends Model
     public $incrementing = false;
 
     protected $fillable = [
-        'id', 'client_id', 'month', 'year', 'status',
+        'id', 'client_id', 'month', 'year', 'status', 'salary_base_days',
     ];
 
     protected $casts = [
         'month' => 'integer',
         'year' => 'integer',
+        'salary_base_days' => 'integer',
     ];
 
     public function details(): HasMany
