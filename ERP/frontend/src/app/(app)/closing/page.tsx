@@ -264,7 +264,7 @@ export default function ClosingPage() {
                       <th key={loc.id} colSpan={2} className="p-1 border border-gray-700 text-center bg-blue-900/50">{loc.name} (مخزن)</th>
                     ))}
                     {branches.map((loc: any) => (
-                      <th key={loc.id} colSpan={2} className="p-1 border border-gray-700 text-center bg-orange-900/50">{loc.name} (فرع)</th>
+                      <th key={loc.id} colSpan={1} className="p-1 border border-gray-700 text-center bg-orange-900/50">{loc.name} (فرع)</th>
                     ))}
                     <th colSpan={4} className="p-1 border border-gray-700 text-center bg-gray-700 text-amber-400">الإجمالي العام</th>
                   </tr>
@@ -278,7 +278,6 @@ export default function ClosingPage() {
                     {branches.map((loc: any) => (
                       <Fragment key={loc.id}>
                         <th className="p-1 border border-gray-600 text-green-300">مستلم</th>
-                        <th className="p-1 border border-gray-600">استهلاك</th>
                       </Fragment>
                     ))}
                     <th className="p-1 border border-gray-600 text-red-300">إجمالي منصرف فروع</th>
@@ -303,7 +302,6 @@ export default function ClosingPage() {
                         const d = item.locations[loc.id] || {};
                         return <Fragment key={loc.id}>
                           <td className="p-1 border-x border-gray-50 text-center text-blue-600 font-bold">{d.internal_in || '0'}</td>
-                          <td className="p-1 border-x border-gray-50 text-center text-gray-600">{d.consumption || '0'}</td>
                         </Fragment>;
                       })}
                       <td className="p-1 border-x border-gray-100 text-center bg-red-50 text-red-700 font-bold">{item.totals.dispatch_qty || '0'}</td>

@@ -70,7 +70,51 @@ class ReportExportService
     public function exportMatrixExcel($clientId, $month)
     {
         [$rows, $locations] = $this->matrixRows($clientId, $month);
-        return $this->streamExcel($rows, "مصفوفة_خامات_{$month}.xlsx");
+        $colCount = count($rows[0] ?? []);
+        $locCount = count($locations);
+        // Columns: name(1), unit(2), then 2 cols per location: opening, purchases
+        // Last 4: total_dispatch, theoretical, actual, diff
+        // Formula for الفرق (last col): =IF(actual_col>0,theoretical_col-actual_col,"")
+        $formulaCol = $colCount; // diff is the last column
+        $actualCol  = $colCount - 1;
+        $theoreticalCol = $colCount - 2;
+
+        ini_set('memory_limit', '512M');
+        set_time_limit(300);
+        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet()->setRightToLeft(true);
+
+        // Branding
+        $sheet->mergeCells(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(1) . '1:' . \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(max($colCount, 1)) . '1');
+        $sheet->setCellValue('A1', 'Curve Cost Control System - Ahmed Ali');
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14)->getColor()->setARGB('FF1e3a5f');
+        $sheet->getRowDimension(1)->setRowHeight(30);
+        $dataStart = 2;
+
+        foreach ($rows as $ri => $row) {
+            foreach ($row as $ci => $val) {
+                $cellRef = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($ci + 1) . ($ri + $dataStart);
+                if ($ri > 0 && $ci + 1 === $formulaCol) {
+                    // الفرق column = formula
+                    $aRef = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($actualCol) . ($ri + $dataStart);
+                    $tRef = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($theoreticalCol) . ($ri + $dataStart);
+                    $sheet->setCellValue($cellRef, "=IF({$aRef}>0,{$tRef}-{$aRef},\"\")");
+                } else {
+                    $sheet->setCellValue($cellRef, $val);
+                }
+            }
+        }
+
+        // Footer
+        $footerRow = count($rows) + $dataStart;
+        $sheet->mergeCells(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(1) . $footerRow . ':' . \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(max($colCount, 1)) . $footerRow);
+        $sheet->setCellValue('A' . $footerRow, 'تم التصدير بواسطة Curve Cost Control System - Ahmed Ali');
+        $sheet->getStyle('A' . $footerRow)->getFont()->setItalic(true)->setSize(9)->getColor()->setARGB('FF999999');
+
+        $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+        return response()->streamDownload(function () use ($writer) {
+            $writer->save('php://output');
+        }, "مصفوفة_خامات_{$month}.xlsx", ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
     }
 
     public function exportMatrixPdf($clientId, $month)
@@ -207,11 +251,19 @@ class ReportExportService
         $isBranch = $wh->type === 'branch';
 
         ini_set('memory_limit', '512M');
-        set_time_limit(120);
+        set_time_limit(300);
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet()->setRightToLeft(true);
 
         $colCount = count($rows[0]);
+
+        // Column indices for formulas (0-based)
+        $inIdx      = 3 + $daysInMonth;            // إجمالي الوارد
+        $closingIdx = $inIdx + 2;                   // آخر المدة
+        $openingIdx = 2;                            // أول المدة
+        $openingValCol = Coordinate::stringFromColumnIndex($openingIdx + 1);
+        $inColLetter   = Coordinate::stringFromColumnIndex($inIdx + 1);
+        $closingColLetter = Coordinate::stringFromColumnIndex($closingIdx + 1);
 
         // Logo
         $logoPath = storage_path('app/public/logos/03EtHUemFuued8zOYvxSjmjflq3XR1cny1bjAYD6.png');
@@ -313,25 +365,11 @@ class ReportExportService
 
         // ── Summary rows ──────────────────────────────
         $sumRowStart = $lastDataRow + 2;
-        $totOpening = 0; $totPurchQty = 0; $totClosing = 0; $totDispatchQty = 0; $totReceivedQty = 0; $totReceivedVal = 0;
-
-        $inIdx = 3 + $daysInMonth; // إجمالي الوارد
-        $closingIdx = $inIdx + 2;  // آخر المدة
-        $dispatchIdx = $closingIdx + 1; // منصرف فروع
-
-        foreach ($rows as $ri => $row) {
-            if ($ri === 0) continue;
-            $totOpening += (float) ($row[2] ?? 0);
-            $totPurchQty += (float) ($row[$inIdx] ?? 0);
-            $avgC = (float) ($row[$inIdx + 1] ?? 0);
-            $closing = (float) ($row[$closingIdx] ?? 0);
-            $totClosing += $closing;
-            if (!$isBranch) {
-                $totDispatchQty += (float) ($row[$dispatchIdx] ?? 0);
-            }
-            $rQty = (float) ($row[2] ?? 0) + (float) ($row[$inIdx] ?? 0) - $closing;
-            $totReceivedQty += $rQty;
-            $totReceivedVal += $rQty * $avgC;
+        if ($isBranch) {
+            $dispatchIdx = null;
+        } else {
+            $dispatchIdx = $closingIdx + 1; // منصرف فروع
+            $dispatchColLetter = Coordinate::stringFromColumnIndex($dispatchIdx + 1);
         }
 
         $summaryLabelStyle = [
@@ -343,13 +381,27 @@ class ReportExportService
             'fill' => ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID, 'startColor' => ['argb' => 'FFEFF6FF']],
         ];
 
+        $dataFirstRow = $dataStart; // row index in Excel for first data row (header row is $dataStart, data starts at $dataStart+1)
+        $dataFirstDataRow = $dataStart + 1;
+
+        // Compute received qty/val in PHP (can't easily formula these)
+        $totReceivedQty = 0; $totReceivedVal = 0;
+        foreach ($rows as $ri => $row) {
+            if ($ri === 0) continue;
+            $closing = (float) ($row[$closingIdx] ?? 0);
+            $rQty = (float) ($row[2] ?? 0) + (float) ($row[$inIdx] ?? 0) - $closing;
+            $totReceivedQty += $rQty;
+            $totReceivedVal += $rQty * (float) ($row[$inIdx + 1] ?? 0);
+        }
+
+        // Summary: first 3-4 rows use =SUM formulas, last 2 use PHP values
         $summaryData = [
-            ['إجمالي أول المدة', $totOpening],
-            ['إجمالي المشتريات', $totPurchQty],
-            ['إجمالي آخر المدة', $totClosing],
+            ['إجمالي أول المدة', "=SUM({$openingValCol}{$dataFirstDataRow}:{$openingValCol}{$lastDataRow})"],
+            ['إجمالي المشتريات', "=SUM({$inColLetter}{$dataFirstDataRow}:{$inColLetter}{$lastDataRow})"],
+            ['إجمالي آخر المدة', "=SUM({$closingColLetter}{$dataFirstDataRow}:{$closingColLetter}{$lastDataRow})"],
         ];
         if (!$isBranch) {
-            $summaryData[] = ['إجمالي منصرف فروع', $totDispatchQty];
+            $summaryData[] = ['إجمالي منصرف فروع', "=SUM({$dispatchColLetter}{$dataFirstDataRow}:{$dispatchColLetter}{$lastDataRow})"];
         }
         $summaryData[] = ['قيمة المستلم الفعلي (كمية)', round($totReceivedQty, 3)];
         $summaryData[] = ['قيمة المستلم الفعلي (قيمة)', round($totReceivedVal, 2)];

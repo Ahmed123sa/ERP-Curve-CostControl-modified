@@ -260,6 +260,13 @@ class DailyEntryService
             ->orderBy('sort_order')
             ->get();
 
+        // Compute global max details across all days so $sumRow is consistent
+        $globalMaxDetails = 1;
+        foreach ($entries as $e) {
+            $detailsByCat = $e->details->groupBy('expense_category_id');
+            $globalMaxDetails = max($globalMaxDetails, $detailsByCat->map->count()->max() ?? 1);
+        }
+
         $spreadsheet = new Spreadsheet();
         $spreadsheet->removeSheetByIndex(0);
 
@@ -267,114 +274,147 @@ class DailyEntryService
         $grandExpenses = 0;
         $grandCatTotals = [];
 
+        $startRow = 6;
+        $dataEndRow = $startRow + $globalMaxDetails - 1;
+        $sumRow = $dataEndRow + 1;
+
+        // ── Daily sheets ────────────────────────────────
         for ($day = 1; $day <= $daysInMonth; $day++) {
             $sheet = $spreadsheet->createSheet();
             $sheet->setTitle((string) $day);
             $sheet->setRightToLeft(true);
             $entry = $entries->get($day);
 
-            $catCol = 1;
-            $headerRow = 1;
-            $colA = Coordinate::stringFromColumnIndex($catCol);
-            $sheet->setCellValue($colA . $headerRow, 'اليوم');
-            $sheet->mergeCells($colA . $headerRow . ':' . $colA . ($headerRow + 1));
-            $sheet->getStyle($colA . $headerRow)->getFont()->setBold(true)->setSize(11);
-            $sheet->getStyle($colA . $headerRow)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-            $sheet->getStyle($colA . $headerRow)->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
-            $catCol++;
+            $titleFont = ['bold' => true, 'size' => 14, 'color' => ['argb' => 'FF1e3a5f']];
+            $subFont   = ['size' => 11, 'color' => ['argb' => 'FF555555']];
+            $colHeaderFont = ['bold' => true, 'size' => 10, 'color' => ['argb' => 'FFFFFFFF']];
+            $normalFont = ['size' => 10];
 
-            $colB = Coordinate::stringFromColumnIndex($catCol);
-            $sheet->setCellValue($colB . $headerRow, 'التاريخ');
-            $sheet->mergeCells($colB . $headerRow . ':' . $colB . ($headerRow + 1));
-            $sheet->getStyle($colB . $headerRow)->getFont()->setBold(true)->setSize(11);
-            $sheet->getStyle($colB . $headerRow)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-            $catCol++;
+            // Row 1: Title
+            $sheet->mergeCells('A1:' . Coordinate::stringFromColumnIndex(3 + count($categories) * 2 + 2) . '1');
+            $sheet->setCellValue('A1', "اليومية المالية لشهر {$monthNum}");
+            $sheet->getStyle('A1')->getFont()->applyFromArray($titleFont);
+            $sheet->getStyle('A1')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            $sheet->getRowDimension(1)->setRowHeight(30);
 
-            $salesColLetter = Coordinate::stringFromColumnIndex($catCol);
-            $sheet->setCellValue($salesColLetter . $headerRow, 'المبيعات');
-            $sheet->mergeCells($salesColLetter . $headerRow . ':' . $salesColLetter . ($headerRow + 1));
-            $sheet->getStyle($salesColLetter . $headerRow)->getFont()->setBold(true)->setSize(11);
-            $sheet->getStyle($salesColLetter . $headerRow)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-            $salesCol = $catCol;
-            $catCol++;
+            // Row 2: Month/Client
+            $sheet->mergeCells('A2:' . Coordinate::stringFromColumnIndex(3 + count($categories) * 2 + 2) . '2');
+            $sheet->setCellValue('A2', "{$monthNum}/{$year}");
+            $sheet->getStyle('A2')->getFont()->applyFromArray($subFont);
+            $sheet->getStyle('A2')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+
+            // Row 3: Day date banner
+            $sheet->mergeCells('A3:' . Coordinate::stringFromColumnIndex(3 + count($categories) * 2 + 2) . '3');
+            $sheet->setCellValue('A3', "اليوم: {$day} / {$monthNum} / {$year}");
+            $sheet->getStyle('A3')->getFont()->setBold(true)->setSize(12)->getColor()->setARGB('FF1e3a5f');
+            $sheet->getStyle('A3')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+
+            // Header styling
+            $headerFill = ['fillType' => Fill::FILL_SOLID, 'startColor' => ['argb' => 'FF1e3a5f']];
+            $headerBorder = [
+                'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_MEDIUM, 'color' => ['argb' => 'FF2d4a7a']]],
+            ];
+
+            // Columns layout:
+            // A(1)=اليوم, B(2)=التاريخ, C(3)=المبيعات, D-E=cat1, F-G=cat2, ..., last-1=إجمالي المصروفات, last=الصافي
+            $catStarts = []; // column index (1-based) for each category's المبلغ column
+            $col = 1;
+            $sheet->setCellValue(Coordinate::stringFromColumnIndex($col) . '5', 'اليوم');
+            $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($col))->setWidth(8);
+            $col++;
+            $sheet->setCellValue(Coordinate::stringFromColumnIndex($col) . '5', 'التاريخ');
+            $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($col))->setWidth(14);
+            $col++;
+
+            $salesCol = $col;
+            $sheet->setCellValue(Coordinate::stringFromColumnIndex($col) . '5', 'المبيعات');
+            $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($col))->setWidth(16);
+            $salesColLetter = Coordinate::stringFromColumnIndex($col);
+            $col++;
+            $catStarts[] = $col;
 
             foreach ($categories as $cat) {
-                $colLetter = Coordinate::stringFromColumnIndex($catCol);
-                $sheet->setCellValue($colLetter . $headerRow, $cat->name);
-                $sheet->mergeCells($colLetter . $headerRow . ':' . Coordinate::stringFromColumnIndex($catCol + 1) . $headerRow);
-                $sheet->getStyle($colLetter . $headerRow)->getFont()->setBold(true)->setSize(10);
-                $sheet->getStyle($colLetter . $headerRow)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-                $sheet->getStyle($colLetter . $headerRow)->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
+                $catStarts[] = $col;
+                $colLetter = Coordinate::stringFromColumnIndex($col);
+                $sheet->setCellValue($colLetter . '5', $cat->name);
+                $sheet->mergeCells($colLetter . '5:' . Coordinate::stringFromColumnIndex($col + 1) . '5');
+                $sheet->getStyle($colLetter . '5')->getFont()->applyFromArray($colHeaderFont);
+                $sheet->getStyle($colLetter . '5')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
                 $sheet->getColumnDimension($colLetter)->setWidth(14);
-                $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($catCol + 1))->setWidth(18);
-
-                $sheet->setCellValue($colLetter . ($headerRow + 1), 'المبلغ');
-                $sheet->getStyle($colLetter . ($headerRow + 1))->getFont()->setSize(9)->getColor()->setARGB('FF666666');
-                $sheet->getStyle($colLetter . ($headerRow + 1))->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-                $sheet->setCellValue(Coordinate::stringFromColumnIndex($catCol + 1) . ($headerRow + 1), 'البيان');
-                $sheet->getStyle(Coordinate::stringFromColumnIndex($catCol + 1) . ($headerRow + 1))->getFont()->setSize(9)->getColor()->setARGB('FF666666');
-                $sheet->getStyle(Coordinate::stringFromColumnIndex($catCol + 1) . ($headerRow + 1))->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-
-                $catCol += 2;
+                $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($col + 1))->setWidth(18);
+                $sheet->setCellValue($colLetter . '6', 'المبلغ');
+                $sheet->getStyle($colLetter . '6')->getFont()->setSize(9)->getColor()->setARGB('FF666666');
+                $sheet->getStyle($colLetter . '6')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+                $sheet->setCellValue(Coordinate::stringFromColumnIndex($col + 1) . '6', 'البيان');
+                $sheet->getStyle(Coordinate::stringFromColumnIndex($col + 1) . '6')->getFont()->setSize(9)->getColor()->setARGB('FF666666');
+                $sheet->getStyle(Coordinate::stringFromColumnIndex($col + 1) . '6')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+                $col += 2;
             }
 
-            $expColLetter = Coordinate::stringFromColumnIndex($catCol);
-            $sheet->setCellValue($expColLetter . $headerRow, 'إجمالي المصروفات');
-            $sheet->mergeCells($expColLetter . $headerRow . ':' . $expColLetter . ($headerRow + 1));
-            $sheet->getStyle($expColLetter . $headerRow)->getFont()->setBold(true)->setSize(11)->getColor()->setARGB('FFCC0000');
-            $expCol = $catCol;
-            $catCol++;
+            $expCol = $col;
+            $expColLetter = Coordinate::stringFromColumnIndex($col);
+            $sheet->setCellValue($expColLetter . '5', 'إجمالي المصروفات');
+            $sheet->getStyle($expColLetter . '5')->getFont()->setBold(true)->setSize(10)->getColor()->setARGB('FFCC0000');
+            $sheet->getStyle($expColLetter . '5')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            $sheet->getColumnDimension($expColLetter)->setWidth(16);
+            $col++;
 
-            $netColLetter = Coordinate::stringFromColumnIndex($catCol);
-            $sheet->setCellValue($netColLetter . $headerRow, 'الصافي');
-            $sheet->mergeCells($netColLetter . $headerRow . ':' . $netColLetter . ($headerRow + 1));
-            $sheet->getStyle($netColLetter . $headerRow)->getFont()->setBold(true)->setSize(11);
-            $netCol = $catCol;
-            $lastCol = $catCol;
+            $netCol = $col;
+            $netColLetter = Coordinate::stringFromColumnIndex($col);
+            $sheet->setCellValue($netColLetter . '5', 'الصافي');
+            $sheet->getStyle($netColLetter . '5')->getFont()->setBold(true)->setSize(10);
+            $sheet->getStyle($netColLetter . '5')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            $sheet->getColumnDimension($netColLetter)->setWidth(16);
+            $lastCol = $col;
 
-            $startRow = 4;
-            $row = $startRow;
+            // Style headers row 5-6
+            $sheet->getStyle('A5:' . Coordinate::stringFromColumnIndex($lastCol) . '6')
+                ->getFill()->applyFromArray($headerFill);
+            $sheet->getStyle('A5:' . Coordinate::stringFromColumnIndex($lastCol) . '6')
+                ->applyFromArray($headerBorder);
+
+            // Write data rows
             $details = $entry ? $entry->details : collect([]);
             $detailsByCat = $details->groupBy('expense_category_id');
 
-            $maxDetails = max($detailsByCat->map->count()->max() ?? 0, 1);
-
-            for ($i = 0; $i < $maxDetails; $i++) {
-                $sheet->setCellValue(Coordinate::stringFromColumnIndex(1) . $row, $i + 1);
-                $sheet->getStyle(Coordinate::stringFromColumnIndex(1) . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-                $sheet->setCellValue(Coordinate::stringFromColumnIndex(2) . $row, $day . '/' . $monthNum . '/' . $year);
-                $sheet->getStyle(Coordinate::stringFromColumnIndex(2) . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            for ($i = 0; $i < $globalMaxDetails; $i++) {
+                $r = $startRow + $i;
+                $sheet->setCellValue('A' . $r, $i + 1);
+                $sheet->getStyle('A' . $r)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+                $sheet->setCellValue('B' . $r, $day . '/' . $monthNum . '/' . $year);
+                $sheet->getStyle('B' . $r)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
                 if ($i === 0 && $entry) {
-                    $sheet->setCellValue($salesColLetter . $row, $entry->total_sales);
+                    $sheet->setCellValue($salesColLetter . $r, $entry->total_sales);
+                    $sheet->getStyle($salesColLetter . $r)->getNumberFormat()->setFormatCode('#,##0.00');
                 }
-                $row++;
             }
 
-            $dataEndRow = $row - 1;
-            if ($dataEndRow < $startRow) $dataEndRow = $startRow;
-
-            $catIdx = 4;
+            // Category detail data (المبلغ | البيان)
+            $catIdx = 4; // column D (1-based) = first category column
             foreach ($categories as $cat) {
                 $catDetails = $detailsByCat->get($cat->id, collect([]));
-                $r = $startRow;
-                foreach ($catDetails as $det) {
+                for ($i = 0; $i < count($catDetails); $i++) {
+                    $det = $catDetails[$i];
+                    $r = $startRow + $i;
                     $sheet->setCellValue(Coordinate::stringFromColumnIndex($catIdx) . $r, $det->amount);
                     $sheet->getStyle(Coordinate::stringFromColumnIndex($catIdx) . $r)->getNumberFormat()->setFormatCode('#,##0.00');
                     if ($det->description) {
                         $sheet->setCellValue(Coordinate::stringFromColumnIndex($catIdx + 1) . $r, $det->description);
                     }
-                    $r++;
                 }
-                $catIdx += 2;
-
-                $colLetter = Coordinate::stringFromColumnIndex($catIdx - 2);
-                $sumRow = $dataEndRow + 1;
+                $colLetter = Coordinate::stringFromColumnIndex($catIdx);
                 $sheet->setCellValue($colLetter . $sumRow, "=SUM({$colLetter}{$startRow}:{$colLetter}{$dataEndRow})");
                 $sheet->getStyle($colLetter . $sumRow)->getFont()->setBold(true);
                 $sheet->getStyle($colLetter . $sumRow)->getNumberFormat()->setFormatCode('#,##0.00');
+                $catIdx += 2;
             }
 
-            $sumRow = $dataEndRow + 1;
+            // Sales total in sum row
+            $sheet->setCellValue($salesColLetter . $sumRow, "=SUM({$salesColLetter}{$startRow}:{$salesColLetter}{$dataEndRow})");
+            $sheet->getStyle($salesColLetter . $sumRow)->getFont()->setBold(true);
+            $sheet->getStyle($salesColLetter . $sumRow)->getNumberFormat()->setFormatCode('#,##0.00');
+
+            // Total expenses formula
             $expFormula = '';
             $catIdx = 4;
             foreach ($categories as $i => $cat) {
@@ -385,25 +425,21 @@ class DailyEntryService
             }
             $sheet->setCellValue($expColLetter . $sumRow, "={$expFormula}");
             $sheet->getStyle($expColLetter . $sumRow)->getFont()->setBold(true)->getColor()->setARGB('FFCC0000');
+            $sheet->getStyle($expColLetter . $sumRow)->getNumberFormat()->setFormatCode('#,##0.00');
 
-            $sheet->setCellValue($netColLetter . $sumRow, "=IF({$salesColLetter}{$dataEndRow}>0,{$salesColLetter}{$dataEndRow}-{$expColLetter}{$sumRow},0)");
+            // Net formula
+            $sheet->setCellValue($netColLetter . $sumRow, "=IF({$salesColLetter}{$sumRow}>0,{$salesColLetter}{$sumRow}-{$expColLetter}{$sumRow},0)");
             $sheet->getStyle($netColLetter . $sumRow)->getFont()->setBold(true);
+            $sheet->getStyle($netColLetter . $sumRow)->getNumberFormat()->setFormatCode('#,##0.00');
 
+            // Borders for data area (including sum row)
             $styleArray = [
                 'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['argb' => 'FFCCCCCC']]],
             ];
-            $sheet->getStyle(Coordinate::stringFromColumnIndex(1) . $startRow . ':' . Coordinate::stringFromColumnIndex($lastCol) . $sumRow)
+            $sheet->getStyle('A' . $startRow . ':' . Coordinate::stringFromColumnIndex($lastCol) . $sumRow)
                 ->applyFromArray($styleArray);
 
-            $sheet->mergeCells(Coordinate::stringFromColumnIndex(1) . '3:' . Coordinate::stringFromColumnIndex($lastCol) . '3');
-            $sheet->setCellValue(Coordinate::stringFromColumnIndex(1) . '3', "اليوم: {$day} / {$monthNum} / {$year}");
-            $sheet->getStyle(Coordinate::stringFromColumnIndex(1) . '3')->getFont()->setBold(true)->setSize(12);
-            $sheet->getStyle(Coordinate::stringFromColumnIndex(1) . '3')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
-
-            $sheet->getColumnDimension(Coordinate::stringFromColumnIndex(1))->setWidth(6);
-            $sheet->getColumnDimension(Coordinate::stringFromColumnIndex(2))->setWidth(14);
-            $sheet->getColumnDimension($salesColLetter)->setWidth(14);
-
+            // Accumulate grand totals
             if ($entry) {
                 $grandSales += $entry->total_sales;
                 $grandExpenses += $entry->total_expenses;
@@ -413,76 +449,127 @@ class DailyEntryService
             }
         }
 
+        // ── Summary sheet (مجمع) with cross-sheet formulas ──
         $summary = $spreadsheet->createSheet();
         $summary->setTitle('مجمع');
         $summary->setRightToLeft(true);
-        $summary->setCellValue('A1', 'ملخص الشهر');
-        $summary->getStyle('A1')->getFont()->setBold(true)->setSize(14);
-        $summary->mergeCells('A1:' . Coordinate::stringFromColumnIndex(count($categories) + 4) . '1');
+
+        // Title
+        $summary->mergeCells('A1:' . Coordinate::stringFromColumnIndex(3 + count($categories) + 2) . '1');
+        $summary->setCellValue('A1', "ملخص اليوميات المالية لشهر {$monthNum}");
+        $summary->getStyle('A1')->getFont()->setBold(true)->setSize(14)->getColor()->setARGB('FF1e3a5f');
+        $summary->getStyle('A1')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $summary->getRowDimension(1)->setRowHeight(30);
 
         $hRow = 3;
+
+        // Column A (1): اليوم
         $summary->setCellValue('A' . $hRow, 'اليوم');
+        $summary->getColumnDimension('A')->setWidth(8);
+
+        // Column B (2): المبيعات (SUM across daily sheets)
         $summary->setCellValue('B' . $hRow, 'المبيعات');
+        $summary->getColumnDimension('B')->setWidth(16);
+
+        // Columns C onward: one column per category
+        $catSummaryCols = [];
         $col = 3;
         foreach ($categories as $cat) {
-            $summary->setCellValue(Coordinate::stringFromColumnIndex($col) . $hRow, $cat->name);
+            $colLetter = Coordinate::stringFromColumnIndex($col);
+            $summary->setCellValue($colLetter . $hRow, $cat->name);
+            $summary->getColumnDimension($colLetter)->setWidth(16);
+            $catSummaryCols[$cat->id] = $col;
             $col++;
         }
-        $summary->setCellValue(Coordinate::stringFromColumnIndex($col) . $hRow, 'إجمالي المصروفات');
+
+        // Total expenses column
+        $expSummaryCol = $col;
+        $expSummaryLetter = Coordinate::stringFromColumnIndex($col);
+        $summary->setCellValue($expSummaryLetter . $hRow, 'إجمالي المصروفات');
+        $summary->getColumnDimension($expSummaryLetter)->setWidth(18);
         $col++;
-        $summary->setCellValue(Coordinate::stringFromColumnIndex($col) . $hRow, 'الصافي');
 
-        $summary->getStyle('A' . $hRow . ':' . Coordinate::stringFromColumnIndex($col) . $hRow)
-            ->getFont()->setBold(true);
-        $summary->getStyle('A' . $hRow . ':' . Coordinate::stringFromColumnIndex($col) . $hRow)
-            ->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FFE8E8E8');
+        // Net column
+        $netSummaryCol = $col;
+        $netSummaryLetter = Coordinate::stringFromColumnIndex($col);
+        $summary->setCellValue($netSummaryLetter . $hRow, 'الصافي');
+        $summary->getColumnDimension($netSummaryLetter)->setWidth(16);
+        $lastSummaryCol = $col;
 
+        // Header styling
+        $summary->getStyle('A' . $hRow . ':' . Coordinate::stringFromColumnIndex($lastSummaryCol) . $hRow)
+            ->getFont()->setBold(true)->getColor()->setARGB('FFFFFFFF');
+        $summary->getStyle('A' . $hRow . ':' . Coordinate::stringFromColumnIndex($lastSummaryCol) . $hRow)
+            ->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF1e3a5f');
+        $summary->getStyle('A' . $hRow . ':' . Coordinate::stringFromColumnIndex($lastSummaryCol) . $hRow)
+            ->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_MEDIUM);
+
+        // Data rows: cross-sheet formulas for each day
         $r = $hRow + 1;
-        $sumSales = 0;
-        $sumExpenses = 0;
-        $sumNet = 0;
+        $firstDataRow = $r;
+
+        $catIdxArr = [];
+        foreach ($categories as $cat) {
+            $catIdxArr[$cat->id] = 4 + array_search($cat->id, array_keys($catSummaryCols)) * 2;
+        }
+
         for ($day = 1; $day <= $daysInMonth; $day++) {
-            $entry = $entries->get($day);
+            $sheetName = (string) $day;
             $summary->setCellValue('A' . $r, $day);
             $summary->getStyle('A' . $r)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-            if ($entry) {
-                $summary->setCellValue('B' . $r, $entry->total_sales);
-                $col = 3;
-                $rowExpenses = 0;
-                foreach ($categories as $cat) {
-                    $amt = $entry->details->where('expense_category_id', $cat->id)->sum('amount');
-                    if ($amt > 0) {
-                        $summary->setCellValue(Coordinate::stringFromColumnIndex($col) . $r, $amt);
-                    }
-                    $rowExpenses += $amt;
-                    $col++;
-                }
-                $summary->setCellValue(Coordinate::stringFromColumnIndex($col) . $r, $rowExpenses);
+
+            // Sales: ='1'!C{sumRow}
+            $summary->setCellValue('B' . $r, "='{$sheetName}'!{$salesColLetter}{$sumRow}");
+            $summary->getStyle('B' . $r)->getNumberFormat()->setFormatCode('#,##0.00');
+
+            $col = 3;
+            foreach ($categories as $cat) {
+                $catLetter = Coordinate::stringFromColumnIndex($catIdxArr[$cat->id] ?? ($col * 2));
+                $summary->setCellValue(Coordinate::stringFromColumnIndex($col) . $r, "='{$sheetName}'!{$catLetter}{$sumRow}");
+                $summary->getStyle(Coordinate::stringFromColumnIndex($col) . $r)->getNumberFormat()->setFormatCode('#,##0.00');
                 $col++;
-                $net = $entry->total_sales - $rowExpenses;
-                $summary->setCellValue(Coordinate::stringFromColumnIndex($col) . $r, $net);
-                $sumSales += $entry->total_sales;
-                $sumExpenses += $rowExpenses;
-                $sumNet += $net;
             }
+
+            $summary->setCellValue($expSummaryLetter . $r, "='{$sheetName}'!{$expColLetter}{$sumRow}");
+            $summary->getStyle($expSummaryLetter . $r)->getNumberFormat()->setFormatCode('#,##0.00');
+
+            $summary->setCellValue($netSummaryLetter . $r, "='{$sheetName}'!{$netColLetter}{$sumRow}");
+            $summary->getStyle($netSummaryLetter . $r)->getNumberFormat()->setFormatCode('#,##0.00');
+
             $r++;
         }
 
-        $summary->setCellValue('A' . $r, 'الإجمالي');
-        $summary->getStyle('A' . $r)->getFont()->setBold(true);
-        $summary->setCellValue('B' . $r, $sumSales);
+        $lastDataRow = $r - 1;
+        $totalRow = $r;
+
+        // Total row with =SUM formulas
+        $summary->setCellValue('A' . $totalRow, 'الإجمالي');
+        $summary->getStyle('A' . $totalRow)->getFont()->setBold(true);
+        $summary->getStyle('A' . $totalRow)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+
+        $summary->setCellValue('B' . $totalRow, "=SUM(B{$firstDataRow}:B{$lastDataRow})");
+        $summary->getStyle('B' . $totalRow)->getFont()->setBold(true);
+        $summary->getStyle('B' . $totalRow)->getNumberFormat()->setFormatCode('#,##0.00');
+
         $col = 3;
-        $grandExpTotal = 0;
         foreach ($categories as $cat) {
-            $total = $grandCatTotals[$cat->id] ?? 0;
-            $summary->setCellValue(Coordinate::stringFromColumnIndex($col) . $r, $total > 0 ? $total : '');
-            $grandExpTotal += $total;
+            $colLetter = Coordinate::stringFromColumnIndex($col);
+            $summary->setCellValue($colLetter . $totalRow, "=SUM({$colLetter}{$firstDataRow}:{$colLetter}{$lastDataRow})");
+            $summary->getStyle($colLetter . $totalRow)->getFont()->setBold(true);
+            $summary->getStyle($colLetter . $totalRow)->getNumberFormat()->setFormatCode('#,##0.00');
             $col++;
         }
-        $summary->setCellValue(Coordinate::stringFromColumnIndex($col) . $r, $sumExpenses);
-        $col++;
-        $summary->setCellValue(Coordinate::stringFromColumnIndex($col) . $r, $sumNet);
-        $summary->getStyle('A' . $hRow . ':' . Coordinate::stringFromColumnIndex($col) . $r)
+
+        $summary->setCellValue($expSummaryLetter . $totalRow, "=SUM({$expSummaryLetter}{$firstDataRow}:{$expSummaryLetter}{$lastDataRow})");
+        $summary->getStyle($expSummaryLetter . $totalRow)->getFont()->setBold(true);
+        $summary->getStyle($expSummaryLetter . $totalRow)->getNumberFormat()->setFormatCode('#,##0.00');
+
+        $summary->setCellValue($netSummaryLetter . $totalRow, "=SUM({$netSummaryLetter}{$firstDataRow}:{$netSummaryLetter}{$lastDataRow})");
+        $summary->getStyle($netSummaryLetter . $totalRow)->getFont()->setBold(true);
+        $summary->getStyle($netSummaryLetter . $totalRow)->getNumberFormat()->setFormatCode('#,##0.00');
+
+        // Borders for summary
+        $summary->getStyle('A' . $firstDataRow . ':' . Coordinate::stringFromColumnIndex($lastSummaryCol) . $totalRow)
             ->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
 
         $writer = new Xlsx($spreadsheet);
