@@ -460,3 +460,17 @@ Older copy. Do NOT modify. Changes go into `ERP/laravel-app/`.
 - **Fix**: Changed ONLY `groupBy('branch_id', 'branch_name')` → `groupBy(DB::raw('COALESCE(...)'), DB::raw('COALESCE(...)'))`. HAVING left unchanged as `->having('branch_id', '!=', $warehouseId)`.
 - **Why not both**: Using `DB::raw('COALESCE(dest.id, ...)')` in HAVING causes `Unknown column 'dest.id' in 'having clause'` under `only_full_group_by`, because HAVING can only reference GROUP BY columns or aggregates — raw column references from JOINs are rejected there.
 - **Impact**: Stock closing generation works regardless of MySQL `only_full_group_by` setting. No logic change — same COALESCE resolution, same output data. No other files touched. Zero risk to other modules.
+
+## Surgical Fix Applied (2026-05-31) — Dashboard Month Picker + Negative Opening Fix
+
+### 25. Dashboard — Missing month selector
+- **File**: `ERP/frontend/src/app/(app)/dashboard/page.tsx:11`
+- **Root cause**: Month was hardcoded as `const month = new Date().toISOString().slice(0, 7)` — no way to view past months. When calendar month changed, all dashboard data switched to the new month with no fallback.
+- **Fix**: Replaced with `const [month, setMonth] = useState(new Date().toISOString().slice(0, 7))` and added `<input type="month">` in the PageHeader actions section, alongside the export button.
+- **Impact**: User can now select any month. All dashboard queries (kpis, warehouse-summary) reactively update. Zero backend changes.
+
+### 26. `CostCalculationService::currentStock()` — Negative stock protection
+- **File**: `ERP/laravel-app/app/Services/CostCalculationService.php:76`
+- **Root cause**: `currentStock()` returns `SUM(in_qty) - SUM(out_qty)`. When out exceeds in (no opening balance entered, or data entry gap), the result is negative. `itemMonthSummary()` then stores negative `opening_qty` in `monthly_closings`, and the dashboard shows negative `أول المدة` totals.
+- **Fix**: Added `max(0, ...)` wrapper: `return round(max(0, (float) $result), 3)`. This clamps the stock balance to 0 — negative physical stock is a data error, not a valid business state. Also indirectly protects `itemMonthSummary()` fallback path where `opening_qty = currentStock(...)`.
+- **Impact**: Dashboard opening values never show negative. Closings generated after this fix will store non-negative `opening_qty`. Existing negative data in `monthly_closings` needs regeneration (run "تحديث الحسابات" for the affected month). No impact on other modules.

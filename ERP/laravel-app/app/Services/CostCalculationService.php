@@ -73,7 +73,7 @@ class CostCalculationService
             SUM(CASE WHEN movement_type IN ('out','transfer_out') THEN qty ELSE 0 END) AS balance
         ")->value('balance');
 
-        return round((float) $result, 3);
+        return round(max(0, (float) $result), 3);
     }
 
     /**

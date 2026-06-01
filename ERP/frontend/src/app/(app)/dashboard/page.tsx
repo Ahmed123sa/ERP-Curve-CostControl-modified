@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/ui/AppShell';
@@ -8,7 +9,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 
 export default function DashboardPage() {
   const { currentClient } = useAuthStore();
-  const month = new Date().toISOString().slice(0, 7);
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
 
   const { data: kpis, isLoading } = useQuery({
     queryKey: ['kpis', currentClient?.id, month],
@@ -73,12 +74,16 @@ export default function DashboardPage() {
         title="لوحة التحكم"
         subtitle={`${currentClient?.name ?? ''} — ${month}`}
         actions={
-          <button
-            onClick={() => downloadExport(`${api.defaults.baseURL}/dashboard/export?month=${month}`, `مؤشرات_${month}.xlsx`)}
-            className="text-xs text-blue-600 hover:underline bg-transparent border-none cursor-pointer"
-          >
-            تصدير إكسيل
-          </button>
+          <div className="flex items-center gap-2">
+            <input type="month" value={month} onChange={(e) => setMonth(e.target.value)}
+              className="border border-gray-200 rounded-lg px-2 py-1 text-xs outline-none" />
+            <button
+              onClick={() => downloadExport(`${api.defaults.baseURL}/dashboard/export?month=${month}`, `مؤشرات_${month}.xlsx`)}
+              className="text-xs text-blue-600 hover:underline bg-transparent border-none cursor-pointer"
+            >
+              تصدير إكسيل
+            </button>
+          </div>
         }
       />
 
