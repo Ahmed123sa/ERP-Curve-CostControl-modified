@@ -707,10 +707,20 @@ export default function ProcessingPage() {
               className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm" />
             <div className="flex gap-2">
               <button onClick={() => {
-                const a = document.createElement('a');
-                a.href = `/api/production/processing/summary/export?month=${summaryMonth}`;
-                a.download = `معمل_${summaryMonth}.xlsx`;
-                a.click();
+                const token = localStorage.getItem('erp_token');
+                fetch(`${api.defaults.baseURL}/production/processing/summary/export?month=${summaryMonth}`, {
+                  headers: { Authorization: `Bearer ${token}` },
+                })
+                  .then(r => { if (!r.ok) throw new Error(); return r.blob(); })
+                  .then(blob => {
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `معمل_${summaryMonth}.xlsx`;
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                    toast.success('تم التصدير ✓');
+                  })
+                  .catch(() => toast.error('خطأ في التصدير'));
               }} className="px-3 py-1.5 text-xs border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50">
                 تصدير إكسل
               </button>
