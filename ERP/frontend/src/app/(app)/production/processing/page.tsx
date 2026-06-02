@@ -706,20 +706,11 @@ export default function ProcessingPage() {
             <input type="month" value={summaryMonth} onChange={(e) => setSummaryMonth(e.target.value)}
               className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm" />
             <div className="flex gap-2">
-              <button onClick={async () => {
-                try {
-                  const res = await fetch(`/api/production/processing/summary/export?month=${summaryMonth}`);
-                  if (!res.ok) throw new Error('فشل التحميل');
-                  const blob = await res.blob();
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `معمل_${summaryMonth}.xlsx`;
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                  URL.revokeObjectURL(url);
-                } catch { toast.error('فشل تحميل الملف'); }
+              <button onClick={() => {
+                const a = document.createElement('a');
+                a.href = `/api/production/processing/summary/export?month=${summaryMonth}`;
+                a.download = `معمل_${summaryMonth}.xlsx`;
+                a.click();
               }} className="px-3 py-1.5 text-xs border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50">
                 تصدير إكسل
               </button>
