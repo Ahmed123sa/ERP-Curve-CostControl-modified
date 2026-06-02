@@ -236,8 +236,8 @@ class ProcessingBatchController extends Controller
             ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
             ->pluck('id');
 
-        $outputs = ProcessingBatchOutput::whereIn('batch_day_id', $dayIds)
-            ->select('item_id', DB::raw('SUM(qty) as total_qty'), DB::raw('SUM(total_cost) as total_cost'))
+        $inputs = ProcessingBatchInput::whereIn('batch_day_id', $dayIds)
+            ->select('item_id', DB::raw('SUM(qty) as total_qty'), DB::raw('SUM(line_total) as total_cost'))
             ->with('item:id,name,unit')
             ->groupBy('item_id')
             ->get();
@@ -264,12 +264,12 @@ class ProcessingBatchController extends Controller
 
         $row = 3;
         $seq = 1;
-        foreach ($outputs as $o) {
-            $qty = (float) $o->total_qty;
-            $cost = (float) $o->total_cost;
+        foreach ($inputs as $i) {
+            $qty = (float) $i->total_qty;
+            $cost = (float) $i->total_cost;
             $sheet->setCellValue('A' . $row, $seq);
-            $sheet->setCellValue('B' . $row, $o->item?->name ?? '');
-            $sheet->setCellValue('C' . $row, $o->item?->unit ?? '');
+            $sheet->setCellValue('B' . $row, $i->item?->name ?? '');
+            $sheet->setCellValue('C' . $row, $i->item?->unit ?? '');
             $sheet->setCellValue('D' . $row, $qty);
             $sheet->setCellValue('E' . $row, $cost);
             $row++;
