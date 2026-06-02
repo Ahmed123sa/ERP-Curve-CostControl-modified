@@ -11,7 +11,7 @@ class ProcessingBatchInput extends Model
     public $incrementing = false;
 
     protected $fillable = [
-        'id', 'batch_id', 'item_id', 'qty', 'cost_per_kg', 'line_total',
+        'id', 'batch_id', 'batch_day_id', 'item_id', 'qty', 'cost_per_kg', 'line_total',
     ];
 
     protected function casts(): array
@@ -26,6 +26,11 @@ class ProcessingBatchInput extends Model
     public function batch(): BelongsTo
     {
         return $this->belongsTo(ProcessingBatch::class, 'batch_id');
+    }
+
+    public function day(): BelongsTo
+    {
+        return $this->belongsTo(ProcessingBatchDay::class, 'batch_day_id');
     }
 
     public function item(): BelongsTo

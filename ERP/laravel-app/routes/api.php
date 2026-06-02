@@ -172,8 +172,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('market-prices/latest', [\App\Http\Controllers\Production\MarketPriceController::class, 'latest']);
         Route::apiResource('slaughter', \App\Http\Controllers\Production\SlaughterController::class)->except(['edit', 'create']);
         Route::post('slaughter/{slaughter}/post', [\App\Http\Controllers\Production\SlaughterController::class, 'postToProduction']);
+        Route::get('processing/summary/export', [\App\Http\Controllers\Production\ProcessingBatchController::class, 'exportSummary']);
+        Route::get('processing/summary', [\App\Http\Controllers\Production\ProcessingBatchController::class, 'summary']);
+        Route::post('processing/summary/post-to-daily', [\App\Http\Controllers\Production\ProcessingBatchController::class, 'postToDaily']);
         Route::apiResource('processing', \App\Http\Controllers\Production\ProcessingBatchController::class)->except(['edit', 'create']);
-        Route::post('processing/{processing}/sync-costs', [\App\Http\Controllers\Production\ProcessingBatchController::class, 'syncOutputCosts']);
+        Route::post('processing/{processing}/sync-costs', [\App\Http\Controllers\Production\ProcessingBatchController::class, 'syncOutputC
+osts']);
     });
 
     // ── Menu Engineering Module ──────────────────────────

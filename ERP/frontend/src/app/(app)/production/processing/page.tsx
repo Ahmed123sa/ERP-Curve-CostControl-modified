@@ -25,6 +25,15 @@ interface ProcessStep {
   net_weight: string;
 }
 
+interface DayForm {
+  tempId: string;
+  date: string;
+  processes: ProcessStep[];
+  inputs: InputRow[];
+  outputs: OutputRow[];
+  expanded: boolean;
+}
+
 function emptyInput(): InputRow {
   return { tempId: Math.random().toString(36).slice(2), item_id: '', name: '', qty: '', cost_per_kg: '' };
 }
@@ -33,16 +42,28 @@ function emptyOutput(): OutputRow {
   return { tempId: Math.random().toString(36).slice(2), item_id: '', name: '', qty: '' };
 }
 
+function emptyDay(date?: string): DayForm {
+  return {
+    tempId: Math.random().toString(36).slice(2),
+    date: date || new Date().toISOString().slice(0, 10),
+    processes: [],
+    inputs: [emptyInput()],
+    outputs: [emptyOutput()],
+    expanded: true,
+  };
+}
+
 export default function ProcessingPage() {
   const qc = useQueryClient();
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [name, setName] = useState('');
-  const [inputs, setInputs] = useState<InputRow[]>([emptyInput()]);
-  const [processes, setProcesses] = useState<ProcessStep[]>([]);
-  const [outputs, setOutputs] = useState<OutputRow[]>([emptyOutput()]);
+  const [days, setDays] = useState<DayForm[]>([emptyDay()]);
   const [showForm, setShowForm] = useState(false);
   const [editBatchId, setEditBatchId] = useState<string | null>(null);
+  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set());
   const { currentClient } = useAuthStore();
+  const [tab, setTab] = useState<'batches' | 'summary'>('batches');
+  const today = new Date();
+  const [summaryMonth, setSummaryMonth] = useState(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`);
 
   const { data: items = [] } = useQuery({
     queryKey: ['items', currentClient?.id],
@@ -52,6 +73,18 @@ export default function ProcessingPage() {
   const { data: batches, isLoading } = useQuery({
     queryKey: ['processing-batches'],
     queryFn: () => api.get('/production/processing').then(r => r.data),
+  });
+
+  const { data: summary, isLoading: summaryLoading } = useQuery({
+    queryKey: ['processing-summary', summaryMonth],
+    queryFn: () => api.get('/production/processing/summary', { params: { month: summaryMonth } }).then(r => r.data),
+    enabled: tab === 'summary',
+  });
+
+  const { data: dailyRecipes } = useQuery({
+    queryKey: ['daily-recipes'],
+    queryFn: () => api.get('/production/daily', { params: { month: summaryMonth } }).then(r => r.data),
+    enabled: tab === 'summary',
   });
 
   const itemsById = useMemo(() => {
@@ -87,6 +120,10 @@ export default function ProcessingPage() {
     onSuccess: () => { toast.success('تم الحذف'); invalidate(); },
   });
 
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const [syncItems, setSyncItems] = useState<{ item_id: string; name: string; cost: number; dayId: string }[]>([]);
+  const [selectedSyncIds, setSelectedSyncIds] = useState<Set<string>>(new Set());
+
   const syncMutation = useMutation({
     mutationFn: ({ id, item_ids }: { id: string; item_ids: string[] }) => api.post(`/production/processing/${id}/sync-costs`, { item_ids }),
     onSuccess: (r: any) => {
@@ -96,50 +133,61 @@ export default function ProcessingPage() {
     onError: (err: any) => toast.error(err?.response?.data?.message || 'خطأ في التحديث'),
   });
 
-  const [showSyncModal, setShowSyncModal] = useState(false);
-  const [syncItems, setSyncItems] = useState<{ item_id: string; name: string; cost: number }[]>([]);
-  const [selectedSyncIds, setSelectedSyncIds] = useState<Set<string>>(new Set());
+  const [showPostModal, setShowPostModal] = useState(false);
+  const [postEntries, setPostEntries] = useState<{ item_id: string; name: string; qty: number; recipe_id: string; day: number }[]>([]);
 
-  const openSyncModal = () => {
-    const items = outputs.filter(o => o.item_id).map(o => {
-      const item = itemsById[o.item_id];
-      const calc = outputTotals[outputs.findIndex(x => x.tempId === o.tempId)];
-      return { item_id: o.item_id, name: item?.name || o.name || '', cost: calc?.costPerKg || 0 };
+  const postToDailyMutation = useMutation({
+    mutationFn: (payload: any) => api.post('/production/processing/summary/post-to-daily', payload),
+    onSuccess: (r: any) => {
+      toast.success(r.data.message);
+      setShowPostModal(false);
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.message || 'خطأ في التحويل'),
+  });
+
+  const toggleBatchExpand = (id: string) => {
+    setExpandedBatches(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
     });
-    setSyncItems(items);
-    setSelectedSyncIds(new Set(items.map(i => i.item_id)));
-    setShowSyncModal(true);
+  };
+
+  const toggleDayExpand = (dayTempId: string) => {
+    setDays(prev => prev.map(d => d.tempId === dayTempId ? { ...d, expanded: !d.expanded } : d));
   };
 
   const resetForm = () => {
     setShowForm(false);
     setEditBatchId(null);
-    setDate(new Date().toISOString().slice(0, 10));
     setName('');
-    setInputs([emptyInput()]);
-    setProcesses([]);
-    setOutputs([emptyOutput()]);
+    setDays([emptyDay()]);
   };
 
   const loadBatchForEdit = async (batchId: string) => {
     try {
       const { data } = await api.get(`/production/processing/${batchId}`);
-      setDate(data.date.slice(0, 10));
       setName(data.name || '');
-      setProcesses((data.processes || []).map((p: any) => ({ name: p.name || '', net_weight: String(p.net_weight || '') })));
-      setInputs(data.inputs.length ? data.inputs.map((i: any) => ({
+      const loadedDays: DayForm[] = (data.days || []).map((d: any, idx: number) => ({
         tempId: Math.random().toString(36).slice(2),
-        item_id: i.item_id,
-        name: i.item?.name || '',
-        qty: String(i.qty),
-        cost_per_kg: String(i.cost_per_kg),
-      })) : [emptyInput()]);
-      setOutputs(data.outputs.length ? data.outputs.map((o: any) => ({
-        tempId: Math.random().toString(36).slice(2),
-        item_id: o.item_id,
-        name: o.item?.name || '',
-        qty: String(o.qty),
-      })) : [emptyOutput()]);
+        date: d.date?.slice(0, 10) || new Date().toISOString().slice(0, 10),
+        processes: (d.processes || []).map((p: any) => ({ name: p.name || '', net_weight: String(p.net_weight || '') })),
+        inputs: d.inputs.length ? d.inputs.map((i: any) => ({
+          tempId: Math.random().toString(36).slice(2),
+          item_id: i.item_id,
+          name: i.item?.name || '',
+          qty: String(i.qty),
+          cost_per_kg: String(i.cost_per_kg),
+        })) : [emptyInput()],
+        outputs: d.outputs.length ? d.outputs.map((o: any) => ({
+          tempId: Math.random().toString(36).slice(2),
+          item_id: o.item_id,
+          name: o.item?.name || '',
+          qty: String(o.qty),
+        })) : [emptyOutput()],
+        expanded: idx === 0,
+      }));
+      setDays(loadedDays);
       setEditBatchId(batchId);
       setShowForm(true);
     } catch {
@@ -147,10 +195,33 @@ export default function ProcessingPage() {
     }
   };
 
-  // ── Input handlers ──
-  const updateInput = (idx: number, field: string, value: string) => {
-    setInputs(prev => {
-      const next = [...prev];
+  // ── Day handlers ──
+  const updateDay = (dayTempId: string, field: string, value: any) => {
+    setDays(prev => prev.map(d => d.tempId === dayTempId ? { ...d, [field]: value } : d));
+  };
+
+  const addDay = () => {
+    const last = days[days.length - 1];
+    const newDay = emptyDay();
+    // copy items from last day as defaults
+    if (last) {
+      newDay.inputs = last.inputs.map(i => ({ ...emptyInput(), item_id: i.item_id, name: i.name, cost_per_kg: i.cost_per_kg }));
+      newDay.outputs = last.outputs.map(o => ({ ...emptyOutput(), item_id: o.item_id, name: o.name }));
+      newDay.processes = last.processes.map(p => ({ ...p }));
+    }
+    setDays(prev => [...prev, newDay]);
+  };
+
+  const removeDay = (dayTempId: string) => {
+    if (days.length <= 1) { toast.error('يجب وجود يوم واحد على الأقل'); return; }
+    setDays(prev => prev.filter(d => d.tempId !== dayTempId));
+  };
+
+  // ── Input handlers (per day) ──
+  const updateDayInput = (dayTempId: string, idx: number, field: string, value: string) => {
+    setDays(prev => prev.map(d => {
+      if (d.tempId !== dayTempId) return d;
+      const next = [...d.inputs];
       next[idx] = { ...next[idx], [field]: value };
       if (field === 'item_id') {
         const item = itemsById[value];
@@ -159,98 +230,106 @@ export default function ProcessingPage() {
           next[idx].cost_per_kg = String(parseFloat(item.default_cost) || 0);
         }
       }
-      return next;
-    });
+      return { ...d, inputs: next };
+    }));
   };
 
-  const addInput = () => setInputs(prev => [...prev, emptyInput()]);
-  const removeInput = (idx: number) => setInputs(prev => prev.filter((_, i) => i !== idx));
+  const addDayInput = (dayTempId: string) => {
+    setDays(prev => prev.map(d => d.tempId === dayTempId ? { ...d, inputs: [...d.inputs, emptyInput()] } : d));
+  };
 
-  // ── Process handlers ──
-  const addProcess = () => setProcesses(prev => [...prev, { name: '', net_weight: '' }]);
-  const updateProcess = (idx: number, field: string, value: string) => {
-    setProcesses(prev => {
-      const next = [...prev];
+  const removeDayInput = (dayTempId: string, idx: number) => {
+    setDays(prev => prev.map(d => d.tempId === dayTempId ? { ...d, inputs: d.inputs.filter((_, i) => i !== idx) } : d));
+  };
+
+  // ── Process handlers (per day) ──
+  const addDayProcess = (dayTempId: string) => {
+    setDays(prev => prev.map(d => d.tempId === dayTempId ? { ...d, processes: [...d.processes, { name: '', net_weight: '' }] } : d));
+  };
+
+  const updateDayProcess = (dayTempId: string, idx: number, field: string, value: string) => {
+    setDays(prev => prev.map(d => {
+      if (d.tempId !== dayTempId) return d;
+      const next = [...d.processes];
       next[idx] = { ...next[idx], [field]: value };
-      return next;
-    });
+      return { ...d, processes: next };
+    }));
   };
-  const removeProcess = (idx: number) => setProcesses(prev => prev.filter((_, i) => i !== idx));
 
-  // ── Output handlers ──
-  const updateOutput = (idx: number, field: string, value: string) => {
-    setOutputs(prev => {
-      const next = [...prev];
+  const removeDayProcess = (dayTempId: string, idx: number) => {
+    setDays(prev => prev.map(d => d.tempId === dayTempId ? { ...d, processes: d.processes.filter((_, i) => i !== idx) } : d));
+  };
+
+  // ── Output handlers (per day) ──
+  const updateDayOutput = (dayTempId: string, idx: number, field: string, value: string) => {
+    setDays(prev => prev.map(d => {
+      if (d.tempId !== dayTempId) return d;
+      const next = [...d.outputs];
       next[idx] = { ...next[idx], [field]: value };
       if (field === 'item_id') {
         const item = itemsById[value];
         if (item) next[idx].name = item.name || '';
       }
-      return next;
-    });
+      return { ...d, outputs: next };
+    }));
   };
 
-  const addOutput = () => setOutputs(prev => [...prev, emptyOutput()]);
-  const removeOutput = (idx: number) => setOutputs(prev => prev.filter((_, i) => i !== idx));
+  const addDayOutput = (dayTempId: string) => {
+    setDays(prev => prev.map(d => d.tempId === dayTempId ? { ...d, outputs: [...d.outputs, emptyOutput()] } : d));
+  };
 
-  // ── Calculations ──
-  const totalInputCost = useMemo(() =>
-    inputs.reduce((s, inp) => s + (parseFloat(inp.qty) || 0) * (parseFloat(inp.cost_per_kg) || 0), 0),
-    [inputs],
-  );
+  const removeDayOutput = (dayTempId: string, idx: number) => {
+    setDays(prev => prev.map(d => d.tempId === dayTempId ? { ...d, outputs: d.outputs.filter((_, i) => i !== idx) } : d));
+  };
 
-  const outputTotals = useMemo(() => {
-    const totalOutputQty = outputs.reduce((s, out) => s + (parseFloat(out.qty) || 0), 0);
-    return outputs.map(out => {
+  // ── Calculations (per day) ──
+  function calcDay(day: DayForm) {
+    const totalInputCost = day.inputs.reduce((s, inp) => s + (parseFloat(inp.qty) || 0) * (parseFloat(inp.cost_per_kg) || 0), 0);
+    const totalOutputQty = day.outputs.reduce((s, out) => s + (parseFloat(out.qty) || 0), 0);
+    const outputTotals = day.outputs.map(out => {
       const qty = parseFloat(out.qty) || 0;
       const allocPct = totalOutputQty > 0 ? (qty / totalOutputQty) * 100 : 0;
       const totalCost = totalOutputQty > 0 ? totalInputCost * (qty / totalOutputQty) : 0;
       const costPerKg = qty > 0 ? totalCost / qty : 0;
       return { allocPct, totalCost, costPerKg };
     });
-  }, [outputs, totalInputCost]);
+    const processChain = (() => {
+      const steps: { name: string; net: number; lossPct: number }[] = [];
+      let prev = day.inputs.reduce((s, inp) => s + (parseFloat(inp.qty) || 0), 0);
+      for (const p of day.processes) {
+        const net = parseFloat(p.net_weight) || 0;
+        const lossPct = prev > 0 && net > 0 ? ((prev - net) / prev) * 100 : 0;
+        steps.push({ name: p.name, net, lossPct });
+        if (net > 0) prev = net;
+      }
+      return steps;
+    })();
+    return { totalInputCost, totalOutputQty, outputTotals, processChain };
+  }
 
-  const totalInputQty = useMemo(() =>
-    inputs.reduce((s, inp) => s + (parseFloat(inp.qty) || 0), 0),
-    [inputs],
-  );
-
-  const processChain = useMemo(() => {
-    const steps: { name: string; net: number; lossPct: number }[] = [];
-    let prev = totalInputQty;
-    for (const p of processes) {
-      const net = parseFloat(p.net_weight) || 0;
-      const lossPct = prev > 0 && net > 0 ? ((prev - net) / prev) * 100 : 0;
-      steps.push({ name: p.name, net, lossPct });
-      if (net > 0) prev = net;
-    }
-    return steps;
-  }, [processes, totalInputQty]);
-
-  const estimatedOutputPct = useMemo(() => {
-    if (processChain.length === 0) return 100;
-    const last = processChain[processChain.length - 1];
-    return totalInputQty > 0 && last.net > 0 ? (last.net / totalInputQty) * 100 : 0;
-  }, [processChain, totalInputQty]);
-
+  // ── Submit ──
   const handleSubmit = () => {
     const payload = {
-      date,
       name: name.trim(),
-      processes: processes.filter(p => p.name.trim()).map(p => ({ name: p.name.trim(), net_weight: parseFloat(p.net_weight) || 0 })),
-      inputs: inputs.filter(inp => inp.item_id && inp.qty).map(inp => ({
-        item_id: inp.item_id,
-        qty: parseFloat(inp.qty) || 0,
-        cost_per_kg: parseFloat(inp.cost_per_kg) || 0,
-      })),
-      outputs: outputs.filter(out => out.item_id && out.qty).map(out => ({
-        item_id: out.item_id,
-        qty: parseFloat(out.qty) || 0,
+      notes: null,
+      days: days.map((d, idx) => ({
+        ...(editBatchId ? { id: (d as any).id || undefined } : {}),
+        date: d.date,
+        processes: d.processes.filter(p => p.name.trim()).map(p => ({ name: p.name.trim(), net_weight: parseFloat(p.net_weight) || 0 })),
+        inputs: d.inputs.filter(inp => inp.item_id && inp.qty).map(inp => ({
+          item_id: inp.item_id,
+          qty: parseFloat(inp.qty) || 0,
+          cost_per_kg: parseFloat(inp.cost_per_kg) || 0,
+        })),
+        outputs: d.outputs.filter(out => out.item_id && out.qty).map(out => ({
+          item_id: out.item_id,
+          qty: parseFloat(out.qty) || 0,
+        })),
       })),
     };
-    if (!payload.inputs.length) { toast.error('أضف مدخل واحد على الأقل'); return; }
-    if (!payload.outputs.length) { toast.error('أضف مخرج واحد على الأقل'); return; }
     if (!payload.name) { toast.error('أدخل اسم المعالجة'); return; }
+    const hasInvalidDay = payload.days.some(d => !d.inputs.length || !d.outputs.length);
+    if (hasInvalidDay) { toast.error('كل يوم يحتاج مدخل ومخرج واحد على الأقل'); return; }
     if (editBatchId) {
       updateMutation.mutate({ id: editBatchId, payload });
     } else {
@@ -258,273 +337,468 @@ export default function ProcessingPage() {
     }
   };
 
+  const openSyncModal = () => {
+    const items = days.flatMap(d => calcDay(d).outputTotals.map((calc, i) => ({
+      item_id: d.outputs[i]?.item_id || '',
+      name: d.outputs[i]?.name || '',
+      cost: calc.costPerKg,
+      dayId: d.tempId,
+    }))).filter(i => i.item_id);
+    setSyncItems(items);
+    setSelectedSyncIds(new Set(items.map(i => i.item_id)));
+    setShowSyncModal(true);
+  };
+
+  // ── Render helpers ──
+  function renderDayForm(day: DayForm, idx: number) {
+    const calc = calcDay(day);
+    return (
+      <div key={day.tempId} className="border border-gray-100 rounded-lg mb-3">
+        <div className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-t-lg cursor-pointer select-none"
+          onClick={() => toggleDayExpand(day.tempId)}>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-400">{day.expanded ? '▼' : '▶'}</span>
+            <span className="text-sm font-medium text-gray-700">
+              {day.date || 'تاريخ'} — {calc.totalOutputQty.toFixed(2)} كجم
+            </span>
+          </div>
+          <button onClick={(e) => { e.stopPropagation(); removeDay(day.tempId); }}
+            className="text-xs text-red-400 hover:text-red-600">حذف اليوم</button>
+        </div>
+
+        {day.expanded && (
+          <div className="p-3 space-y-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">التاريخ</label>
+              <input type="date" value={day.date} onChange={(e) => updateDay(day.tempId, 'date', e.target.value)}
+                className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm w-48" />
+            </div>
+
+            {/* المدخلات */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-gray-500 font-medium">المدخلات (الخامات)</label>
+                <button onClick={() => addDayInput(day.tempId)} className="text-xs text-blue-600">+ أضف مدخل</button>
+              </div>
+              <table className="w-full text-sm border border-gray-100 rounded-lg overflow-hidden">
+                <thead>
+                  <tr className="bg-gray-50 text-right text-gray-500 text-xs">
+                    <th className="px-3 py-1.5 font-normal">الصنف</th>
+                    <th className="px-3 py-1.5 font-normal w-24">الكمية (كجم)</th>
+                    <th className="px-3 py-1.5 font-normal w-24">سعر الكيلو</th>
+                    <th className="px-3 py-1.5 font-normal w-24 text-left">الإجمالي</th>
+                    <th className="px-3 py-1.5 w-8"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {day.inputs.map((inp, inpIdx) => {
+                    const lineTotal = (parseFloat(inp.qty) || 0) * (parseFloat(inp.cost_per_kg) || 0);
+                    return (
+                      <tr key={inp.tempId} className="border-t border-gray-50">
+                        <td className="px-1 py-1">
+                          <select value={inp.item_id} onChange={(e) => updateDayInput(day.tempId, inpIdx, 'item_id', e.target.value)}
+                            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm">
+                            <option value="">اختر...</option>
+                            {items.map((item: any) => (
+                              <option key={item.id} value={item.id}>{item.name} ({item.unit})</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-1 py-1">
+                          <input type="number" value={inp.qty} onChange={(e) => updateDayInput(day.tempId, inpIdx, 'qty', e.target.value)}
+                            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" placeholder="0" />
+                        </td>
+                        <td className="px-1 py-1">
+                          <input type="number" value={inp.cost_per_kg} onChange={(e) => updateDayInput(day.tempId, inpIdx, 'cost_per_kg', e.target.value)}
+                            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" placeholder="0" />
+                        </td>
+                        <td className="px-2 py-1.5 text-left tabular-nums text-gray-600">
+                          {lineTotal > 0 ? lineTotal.toFixed(2) : '—'}
+                        </td>
+                        <td className="px-1 py-1">
+                          <button onClick={() => removeDayInput(day.tempId, inpIdx)} className="text-gray-300 hover:text-red-400 text-xs">✕</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-gray-50 border-t border-gray-100">
+                    <td className="px-3 py-1.5 text-xs text-gray-500 font-medium">إجمالي تكلفة المدخلات</td>
+                    <td colSpan={3} className="px-3 py-1.5 text-left tabular-nums font-mono font-bold text-blue-700">
+                      {calc.totalInputCost.toFixed(2)} ج
+                    </td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            {/* العمليات */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-gray-500 font-medium">العمليات (اختياري — أدخل الوزن الصافي بعد كل عملية)</label>
+                <button onClick={() => addDayProcess(day.tempId)} className="text-xs text-blue-600">+ أضف عملية</button>
+              </div>
+              {day.processes.length > 0 && (
+                <table className="w-full text-sm border border-gray-100 rounded-lg overflow-hidden">
+                  <thead>
+                    <tr className="bg-gray-50 text-right text-gray-500 text-xs">
+                      <th className="px-3 py-1.5 font-normal">العملية</th>
+                      <th className="px-3 py-1.5 font-normal w-28">الوزن الصافي (كجم)</th>
+                      <th className="px-3 py-1.5 font-normal w-24 text-left">الفاقد %</th>
+                      <th className="px-3 py-1.5 w-8"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {day.processes.map((p, pIdx) => {
+                      const prev = pIdx === 0
+                        ? day.inputs.reduce((s, inp) => s + (parseFloat(inp.qty) || 0), 0)
+                        : (() => { const pp = calc.processChain[pIdx - 1]; return pp ? pp.net : 0; })();
+                      const net = parseFloat(p.net_weight) || 0;
+                      const lossPct = prev > 0 && net > 0 ? ((prev - net) / prev) * 100 : 0;
+                      return (
+                        <tr key={pIdx} className="border-t border-gray-50">
+                          <td className="px-3 py-1.5">
+                            <input type="text" value={p.name} onChange={(e) => updateDayProcess(day.tempId, pIdx, 'name', e.target.value)}
+                              placeholder="مثال: تقشير"
+                              className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
+                          </td>
+                          <td className="px-1 py-1.5">
+                            <input type="number" value={p.net_weight} onChange={(e) => updateDayProcess(day.tempId, pIdx, 'net_weight', e.target.value)}
+                              className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" placeholder="0" />
+                          </td>
+                          <td className="px-3 py-1.5 text-left tabular-nums text-amber-600 text-xs">
+                            {lossPct > 0 ? `${lossPct.toFixed(1)}%` : '—'}
+                          </td>
+                          <td className="px-1 py-1.5">
+                            <button onClick={() => removeDayProcess(day.tempId, pIdx)} className="text-gray-300 hover:text-red-400 text-xs">✕</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* المخرجات */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-gray-500 font-medium">المخرجات (المنتج النهائي)</label>
+                <button onClick={() => addDayOutput(day.tempId)} className="text-xs text-blue-600">+ أضف مخرج</button>
+              </div>
+              <table className="w-full text-sm border border-gray-100 rounded-lg overflow-hidden">
+                <thead>
+                  <tr className="bg-gray-50 text-right text-gray-500 text-xs">
+                    <th className="px-3 py-1.5 font-normal">الصنف</th>
+                    <th className="px-3 py-1.5 font-normal w-24">الكمية (كجم)</th>
+                    <th className="px-3 py-1.5 font-normal w-20 text-left">نسبة التوزيع</th>
+                    <th className="px-3 py-1.5 font-normal w-24 text-left">التكلفة الإجمالية</th>
+                    <th className="px-3 py-1.5 font-normal w-24 text-left">تكلفة الكيلو</th>
+                    <th className="px-3 py-1.5 w-8"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {day.outputs.map((out, outIdx) => {
+                    const calcItem = calc.outputTotals[outIdx] || { allocPct: 0, totalCost: 0, costPerKg: 0 };
+                    return (
+                      <tr key={out.tempId} className="border-t border-gray-50">
+                        <td className="px-1 py-1">
+                          <select value={out.item_id} onChange={(e) => updateDayOutput(day.tempId, outIdx, 'item_id', e.target.value)}
+                            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm">
+                            <option value="">اختر...</option>
+                            {items.map((item: any) => (
+                              <option key={item.id} value={item.id}>{item.name} ({item.unit})</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-1 py-1">
+                          <input type="number" value={out.qty} onChange={(e) => updateDayOutput(day.tempId, outIdx, 'qty', e.target.value)}
+                            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" placeholder="0" />
+                        </td>
+                        <td className="px-2 py-1.5 text-left text-gray-500 tabular-nums text-xs">{calcItem.allocPct.toFixed(1)}%</td>
+                        <td className="px-2 py-1.5 text-left font-mono tabular-nums text-blue-700">{calcItem.totalCost > 0 ? calcItem.totalCost.toFixed(2) : '—'}</td>
+                        <td className="px-2 py-1.5 text-left font-mono tabular-nums text-green-700">{calcItem.costPerKg > 0 ? calcItem.costPerKg.toFixed(2) + ' ج' : '—'}</td>
+                        <td className="px-1 py-1">
+                          <button onClick={() => removeDayOutput(day.tempId, outIdx)} className="text-gray-300 hover:text-red-400 text-xs">✕</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Render ──
   return (
     <div className="space-y-4" dir="rtl">
       <div className="flex justify-between items-center">
-        <h2 className="text-lg font-semibold text-gray-800">معالجة المواد</h2>
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
+          <button onClick={() => setTab('batches')} className={`px-3 py-1.5 text-sm rounded-lg transition-all ${tab === 'batches' ? 'bg-white shadow-sm font-medium text-blue-700' : 'text-gray-500 hover:text-gray-700'}`}>كل المعالجات</button>
+          <button onClick={() => setTab('summary')} className={`px-3 py-1.5 text-sm rounded-lg transition-all ${tab === 'summary' ? 'bg-white shadow-sm font-medium text-blue-700' : 'text-gray-500 hover:text-gray-700'}`}>ملخص شهري</button>
+        </div>
         <button onClick={() => { resetForm(); setShowForm(true); }}
           className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
           + معالجة جديدة
         </button>
       </div>
 
-      {showForm && (
-        <div className="border border-gray-100 rounded-xl p-4 space-y-4 bg-white">
-          <h3 className="font-semibold text-gray-700">{editBatchId ? 'تعديل المعالجة' : 'معالجة جديدة'}</h3>
+      {tab === 'batches' && (<>
+        {showForm && (
+          <div className="border border-gray-100 rounded-xl p-4 space-y-4 bg-white">
+            <h3 className="font-semibold text-gray-700">{editBatchId ? 'تعديل المعالجة' : 'معالجة جديدة'}</h3>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">التاريخ</label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            </div>
             <div>
               <label className="block text-xs text-gray-500 mb-1">الاسم / البيان</label>
               <input type="text" value={name} onChange={(e) => setName(e.target.value)}
-                placeholder="مثال: تقشير جمبري"
+                placeholder="مثال: مكرونة بينه مستوي"
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
             </div>
-          </div>
 
-          {/* المدخلات */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs text-gray-500 font-medium">المدخلات (الخامات)</label>
-              <button onClick={addInput} className="text-xs text-blue-600 hover:text-blue-700">+ أضف مدخل</button>
-            </div>
-            <table className="w-full text-sm border border-gray-100 rounded-lg overflow-hidden">
-              <thead>
-                <tr className="bg-gray-50 text-right text-gray-500 text-xs">
-                  <th className="px-3 py-2 font-normal">الصنف</th>
-                  <th className="px-3 py-2 font-normal w-28">الكمية (كجم)</th>
-                  <th className="px-3 py-2 font-normal w-28">سعر الكيلو</th>
-                  <th className="px-3 py-2 font-normal w-28 text-left">الإجمالي</th>
-                  <th className="px-3 py-2 w-8"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {inputs.map((inp, idx) => {
-                  const lineTotal = (parseFloat(inp.qty) || 0) * (parseFloat(inp.cost_per_kg) || 0);
-                  return (
-                    <tr key={inp.tempId} className="border-t border-gray-50">
-                      <td className="px-1 py-1">
-                        <select value={inp.item_id}
-                          onChange={(e) => updateInput(idx, 'item_id', e.target.value)}
-                          className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm">
-                          <option value="">اختر...</option>
-                          {items.map((item: any) => (
-                            <option key={item.id} value={item.id}>{item.name} ({item.unit})</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-1 py-1">
-                        <input type="number" value={inp.qty}
-                          onChange={(e) => updateInput(idx, 'qty', e.target.value)}
-                          className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" placeholder="0" />
-                      </td>
-                      <td className="px-1 py-1">
-                        <input type="number" value={inp.cost_per_kg}
-                          onChange={(e) => updateInput(idx, 'cost_per_kg', e.target.value)}
-                          className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" placeholder="0" />
-                      </td>
-                      <td className="px-3 py-1.5 text-left font-mono font-medium tabular-nums text-blue-700">
-                        {lineTotal > 0 ? lineTotal.toFixed(2) : '—'}
-                      </td>
-                      <td className="px-1 py-1">
-                        <button onClick={() => removeInput(idx)} className="text-gray-300 hover:text-red-400 text-xs">✕</button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                <tr className="bg-gray-50 border-t border-gray-100 font-medium text-sm">
-                  <td colSpan={3} className="px-3 py-2 text-gray-600">إجمالي تكلفة المدخلات</td>
-                  <td className="px-3 py-2 text-left text-blue-700 tabular-nums">{totalInputCost.toFixed(2)} ج</td>
-                  <td></td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-
-          {/* العمليات */}
-          <div className="border border-blue-100 rounded-lg p-3 bg-blue-50/30 space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-xs text-blue-700 font-medium">العمليات (اختياري — أدخل الوزن الصافي بعد كل عملية)</label>
-              <button onClick={addProcess} className="text-xs text-blue-600 hover:text-blue-700">+ أضف عملية</button>
-            </div>
-            {processes.length > 0 && (
-              <div className="space-y-1.5">
-                {processChain.map((step, idx) => {
-                  const prevWt = idx === 0 ? totalInputQty : processChain[idx - 1].net;
-                  return (
-                    <div key={idx} className="flex gap-2 items-center">
-                      <span className="text-xs text-gray-400 w-14">{prevWt.toFixed(2)} كجم →</span>
-                      <input type="text" value={processes[idx].name}
-                        onChange={(e) => updateProcess(idx, 'name', e.target.value)}
-                        placeholder="اسم العملية"
-                        className="w-40 border border-blue-200 rounded-lg px-3 py-1.5 text-sm" />
-                      <input type="number" value={processes[idx].net_weight}
-                        onChange={(e) => updateProcess(idx, 'net_weight', e.target.value)}
-                        placeholder="الوزن الصافي"
-                        className="w-28 border border-blue-200 rounded-lg px-3 py-1.5 text-sm" />
-                      <span className="text-xs text-gray-400 w-16">بعد العملية</span>
-                      {step.lossPct > 0 && (
-                        <span className="text-xs text-orange-500 w-20">فاقد {step.lossPct.toFixed(1)}%</span>
-                      )}
-                      <button onClick={() => removeProcess(idx)} className="text-gray-300 hover:text-red-400 text-xs">✕</button>
-                    </div>
-                  );
-                })}
-                {processes.length > 0 && (
-                  <div className="text-xs text-blue-600 mt-1">
-                    نسبة الصافي المتوقعة: <strong>{estimatedOutputPct.toFixed(1)}%</strong>
-                    {totalInputCost > 0 && estimatedOutputPct > 0 && (
-                      <span className="mr-2">
-                        | التكلفة المتوقعة للكيلو: <strong>{(totalInputCost / (totalInputQty * estimatedOutputPct / 100)).toFixed(2)} ج</strong>
-                      </span>
-                    )}
-                  </div>
-                )}
+            {/* الأيام */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs text-gray-500 font-medium">تواريخ المعالجة</label>
+                <button onClick={addDay} className="text-xs text-blue-600 hover:text-blue-700">+ إضافة يوم</button>
               </div>
-            )}
-          </div>
-
-          {/* المخرجات */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs text-gray-500 font-medium">المخرجات (المنتج النهائي)</label>
-              <button onClick={addOutput} className="text-xs text-blue-600 hover:text-blue-700">+ أضف مخرج</button>
+              {days.map((day, idx) => renderDayForm(day, idx))}
             </div>
-            <table className="w-full text-sm border border-gray-100 rounded-lg overflow-hidden">
-              <thead>
-                <tr className="bg-gray-50 text-right text-gray-500 text-xs">
-                  <th className="px-3 py-2 font-normal">الصنف</th>
-                  <th className="px-3 py-2 font-normal w-28">الكمية (كجم)</th>
-                  <th className="px-3 py-2 font-normal w-24 text-left">نسبة التوزيع</th>
-                  <th className="px-3 py-2 font-normal w-28 text-left">التكلفة الإجمالية</th>
-                  <th className="px-3 py-2 font-normal w-28 text-left">تكلفة الكيلو</th>
-                  <th className="px-3 py-2 w-8"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {outputs.map((out, idx) => {
-                  const calc = outputTotals[idx] || { allocPct: 0, totalCost: 0, costPerKg: 0 };
-                  return (
-                    <tr key={out.tempId} className="border-t border-gray-50">
-                      <td className="px-1 py-1">
-                        <select value={out.item_id}
-                          onChange={(e) => updateOutput(idx, 'item_id', e.target.value)}
-                          className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm">
-                          <option value="">اختر...</option>
-                          {items.map((item: any) => (
-                            <option key={item.id} value={item.id}>{item.name} ({item.unit})</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-1 py-1">
-                        <input type="number" value={out.qty}
-                          onChange={(e) => updateOutput(idx, 'qty', e.target.value)}
-                          className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" placeholder="0" />
-                      </td>
-                      <td className="px-3 py-1.5 text-left text-gray-500 tabular-nums">{calc.allocPct.toFixed(1)}%</td>
-                      <td className="px-3 py-1.5 text-left font-mono font-medium tabular-nums text-blue-700">
-                        {calc.totalCost > 0 ? calc.totalCost.toFixed(2) : '—'}
-                      </td>
-                      <td className="px-3 py-1.5 text-left font-mono font-bold tabular-nums text-green-700">
-                        {calc.costPerKg > 0 ? calc.costPerKg.toFixed(2) + ' ج' : '—'}
-                      </td>
-                      <td className="px-1 py-1">
-                        <button onClick={() => removeOutput(idx)} className="text-gray-300 hover:text-red-400 text-xs">✕</button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
 
-          {editBatchId && outputs.some(o => o.item_id) && (
-            <>
+            {/* تحديث سعر المنتجات — يظهر فقط في وضع التعديل */}
+            {editBatchId && days.some(d => d.outputs.some(o => o.item_id)) && (
               <div className="flex justify-end">
                 <button onClick={openSyncModal} className="px-3 py-1.5 text-xs border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50">
                   تحديث سعر المنتجات
                 </button>
               </div>
+            )}
 
-              {showSyncModal && (
-                <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center" onClick={() => setShowSyncModal(false)}>
-                  <div className="bg-white rounded-xl shadow-xl p-5 w-full max-w-sm mx-4" onClick={(e) => e.stopPropagation()}>
-                    <h4 className="font-semibold text-sm mb-3">تحديث سعر المنتجات</h4>
-                    <p className="text-xs text-gray-500 mb-3">اختر المنتجات اللي عاوز تحدث سعرها في الأصناف:</p>
-                    <div className="space-y-2 max-h-48 overflow-auto">
-                      {syncItems.map((item) => (
-                        <label key={item.item_id} className="flex items-center gap-2 cursor-pointer text-sm p-2 rounded hover:bg-gray-50">
-                          <input type="checkbox" checked={selectedSyncIds.has(item.item_id)}
-                            onChange={() => { const next = new Set(selectedSyncIds); if (next.has(item.item_id)) next.delete(item.item_id); else next.add(item.item_id); setSelectedSyncIds(next); }}
-                            className="rounded border-gray-300" />
-                          <span className="flex-1">{item.name}</span>
-                          <span className="font-mono text-xs text-green-600">{item.cost.toFixed(2)} ج</span>
-                        </label>
-                      ))}
-                    </div>
-                    <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-gray-100">
-                      <button onClick={() => setShowSyncModal(false)} className="px-3 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50">إلغاء</button>
-                      <button onClick={() => { if (editBatchId) syncMutation.mutate({ id: editBatchId, item_ids: Array.from(selectedSyncIds) }); }}
-                        disabled={syncMutation.isPending || !selectedSyncIds.size}
-                        className="px-3 py-1.5 text-xs bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-40">
-                        {syncMutation.isPending ? 'جاري...' : `تحديث (${selectedSyncIds.size})`}
-                      </button>
-                    </div>
+            {showSyncModal && (
+              <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center" onClick={() => setShowSyncModal(false)}>
+                <div className="bg-white rounded-xl shadow-xl p-5 w-full max-w-sm mx-4" onClick={(e) => e.stopPropagation()}>
+                  <h4 className="font-semibold text-sm mb-3">تحديث سعر المنتجات</h4>
+                  <p className="text-xs text-gray-500 mb-3">اختر المنتجات اللي عاوز تحدث سعرها في الأصناف:</p>
+                  <div className="space-y-1 max-h-48 overflow-auto">
+                    {Array.from(new Map(syncItems.map(i => [i.item_id, i])).values()).map((item) => (
+                      <label key={item.item_id} className="flex items-center gap-2 cursor-pointer text-sm p-1.5 rounded hover:bg-gray-50">
+                        <input type="checkbox" checked={selectedSyncIds.has(item.item_id)}
+                          onChange={() => { const next = new Set(selectedSyncIds); if (next.has(item.item_id)) next.delete(item.item_id); else next.add(item.item_id); setSelectedSyncIds(next); }}
+                          className="rounded border-gray-300" />
+                        <span className="flex-1">{item.name}</span>
+                        <span className="font-mono text-xs text-green-600">{item.cost.toFixed(2)} ج</span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-gray-100">
+                    <button onClick={() => setShowSyncModal(false)} className="px-3 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50">إلغاء</button>
+                    <button onClick={() => { if (editBatchId) syncMutation.mutate({ id: editBatchId, item_ids: Array.from(selectedSyncIds) }); }}
+                      disabled={syncMutation.isPending || !selectedSyncIds.size}
+                      className="px-3 py-1.5 text-xs bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-40">
+                      {syncMutation.isPending ? 'جاري...' : `تحديث (${selectedSyncIds.size})`}
+                    </button>
                   </div>
                 </div>
-              )}
-            </>
-          )}
+              </div>
+            )}
 
-          <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
-            <button onClick={resetForm} className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">إلغاء</button>
-            <button onClick={handleSubmit} disabled={saveMutation.isPending || updateMutation.isPending}
-              className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
-              {saveMutation.isPending || updateMutation.isPending ? 'جاري الحفظ...' : editBatchId ? '💾 تحديث المعالجة' : '💾 حفظ المعالجة'}
-            </button>
+            <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
+              <button onClick={resetForm} className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">إلغاء</button>
+              <button onClick={handleSubmit} disabled={saveMutation.isPending || updateMutation.isPending}
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
+                {saveMutation.isPending || updateMutation.isPending ? 'جاري الحفظ...' : editBatchId ? '💾 تحديث المعالجة' : '💾 حفظ المعالجة'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* عرض المعالجات السابقة */}
+        {isLoading ? (
+          <p className="text-gray-400">جاري التحميل...</p>
+        ) : !batches?.length ? (
+          <p className="text-gray-400 py-8 text-center">لا توجد معالجات — أضف معالجة جديدة</p>
+        ) : (
+          <div className="space-y-2">
+            {batches.map((b: any) => (
+              <div key={b.id} className="border border-gray-100 rounded-xl overflow-hidden">
+                <div className="flex justify-between items-center p-4 hover:bg-gray-50 transition-all cursor-pointer"
+                  onClick={() => toggleBatchExpand(b.id)}>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-gray-400 w-4">{expandedBatches.has(b.id) ? '▼' : '▶'}</span>
+                    <div>
+                      <div className="font-medium text-gray-800">{b.name}</div>
+                      <div className="text-xs text-gray-400 mt-0.5">
+                        {b.dates_count} يوم · {b.dates?.slice(0, 3).join('، ')}{b.dates_count > 3 ? '...' : ''}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex gap-3 items-center">
+                    <span className="px-2 py-0.5 text-xs bg-blue-50 text-blue-700 rounded-full font-mono">
+                      {b.total_output_qty} كجم
+                    </span>
+                    <button onClick={(e) => { e.stopPropagation(); loadBatchForEdit(b.id); }}
+                      className="px-2 py-1 text-xs text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50">
+                      عرض
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); if (confirm('حذف المعالجة وجميع أيامها؟')) deleteMutation.mutate(b.id); }}
+                      className="px-2 py-1 text-xs text-red-500 border border-red-200 rounded-lg hover:bg-red-50">حذف</button>
+                  </div>
+                </div>
+
+                {expandedBatches.has(b.id) && b.dates && (
+                  <div className="border-t border-gray-100 bg-gray-50 px-4 py-2 space-y-1">
+                    {b.dates.map((date: string) => (
+                      <div key={date} className="text-sm text-gray-600 flex items-center gap-2">
+                        <span className="text-gray-400">📅</span>
+                        <span dir="ltr">{date}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </>)} {/* end batches tab */}
+
+      {tab === 'summary' && (<>
+        <div className="border border-gray-100 rounded-xl p-3 bg-white">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <input type="month" value={summaryMonth} onChange={(e) => setSummaryMonth(e.target.value)}
+              className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm" />
+            <div className="flex gap-2">
+              <button onClick={() => {
+                const a = document.createElement('a');
+                a.href = `/api/production/processing/summary/export?month=${summaryMonth}`;
+                a.download = `ملخص_معالجة_${summaryMonth}.xlsx`;
+                a.click();
+              }} className="px-3 py-1.5 text-xs border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50">
+                تصدير إكسل
+              </button>
+              <button onClick={() => {
+                if (!summary?.outputs?.length) { toast.error('لا توجد مخرجات للتحويل'); return; }
+                const entries = summary.outputs.map((o: any) => ({ item_id: o.item_id, name: o.name, qty: o.total_qty, recipe_id: '', day: parseInt(today.getDate().toString()) }));
+                setPostEntries(entries);
+                setShowPostModal(true);
+              }} className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700">
+                تحويل للإنتاج اليومي
+              </button>
+            </div>
           </div>
         </div>
-      )}
 
-      {/* عرض المعالجات السابقة */}
-      {isLoading ? (
-        <p className="text-gray-400">جاري التحميل...</p>
-      ) : !batches?.length ? (
-        <p className="text-gray-400 py-8 text-center">لا توجد معالجات — أضف معالجة جديدة</p>
-      ) : (
-        <div className="space-y-2">
-          {batches.map((b: any) => (
-            <div key={b.id} className="border border-gray-100 rounded-xl p-4 hover:border-gray-200 transition-all">
-              <div className="flex justify-between items-start">
-                <div className="cursor-pointer" onClick={() => loadBatchForEdit(b.id)}>
-                  <div className="font-medium text-gray-800 hover:text-blue-700">{b.name}</div>
-                  <div className="text-xs text-gray-400 mt-0.5">{b.date}</div>
-                </div>
-                <div className="flex gap-2 items-center">
-                  <span className="text-sm text-gray-500">
-                    {b.inputs_count} مدخل · {b.outputs_count} مخرج
-                  </span>
-                  <span className="px-2 py-0.5 text-xs bg-blue-50 text-blue-700 rounded-full font-mono">
-                    {b.total_input_cost.toFixed(2)} ج
-                  </span>
-                  <button onClick={(e) => { e.stopPropagation(); loadBatchForEdit(b.id); }}
-                    className="px-2 py-1 text-xs text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50">
-                    عرض
-                  </button>
-                  <button onClick={(e) => { e.stopPropagation(); if (confirm('حذف المعالجة؟')) deleteMutation.mutate(b.id); }}
-                    className="px-2 py-1 text-xs text-red-500 border border-red-200 rounded-lg hover:bg-red-50">حذف</button>
-                </div>
+        {summaryLoading ? (
+          <p className="text-gray-400 py-4">جاري التحميل...</p>
+        ) : !summary?.inputs?.length && !summary?.outputs?.length ? (
+          <p className="text-gray-400 py-8 text-center">لا توجد معالجات في هذا الشهر</p>
+        ) : (
+          <div className="grid grid-cols-1 gap-4">
+            <div className="border border-gray-100 rounded-xl p-4 bg-white">
+              <h3 className="font-semibold text-sm text-gray-700 mb-3">المدخلات (الخامات)</h3>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-right text-gray-500 text-xs">
+                    <th className="px-3 py-2 font-normal">الصنف</th>
+                    <th className="px-3 py-2 font-normal text-left">إجمالي الكمية</th>
+                    <th className="px-3 py-2 font-normal text-left">متوسط سعر الكيلو</th>
+                    <th className="px-3 py-2 font-normal text-left">إجمالي التكلفة</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.inputs.map((i: any) => (
+                    <tr key={i.item_id} className="border-t border-gray-50">
+                      <td className="px-3 py-2 text-sm">{i.name}</td>
+                      <td className="px-3 py-2 text-left tabular-nums">{i.total_qty.toFixed(2)} {i.unit}</td>
+                      <td className="px-3 py-2 text-left tabular-nums text-blue-700">{i.avg_cost_per_kg.toFixed(2)} ج</td>
+                      <td className="px-3 py-2 text-left tabular-nums font-medium">{i.total_cost.toFixed(2)} ج</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-gray-50 border-t border-gray-200 font-medium text-sm">
+                    <td className="px-3 py-2 text-gray-600">الإجمالي</td>
+                    <td className="px-3 py-2 text-left tabular-nums">{summary.totals.total_input_qty.toFixed(2)}</td>
+                    <td className="px-3 py-2 text-left tabular-nums">—</td>
+                    <td className="px-3 py-2 text-left tabular-nums text-blue-700">{summary.totals.total_input_cost.toFixed(2)} ج</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            <div className="border border-gray-100 rounded-xl p-4 bg-white">
+              <h3 className="font-semibold text-sm text-gray-700 mb-3">المخرجات (المنتج النهائي)</h3>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-right text-gray-500 text-xs">
+                    <th className="px-3 py-2 font-normal">الصنف</th>
+                    <th className="px-3 py-2 font-normal text-left">إجمالي الكمية</th>
+                    <th className="px-3 py-2 font-normal text-left">متوسط سعر الكيلو</th>
+                    <th className="px-3 py-2 font-normal text-left">إجمالي التكلفة</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.outputs.map((o: any) => (
+                    <tr key={o.item_id} className="border-t border-gray-50">
+                      <td className="px-3 py-2 text-sm">{o.name}</td>
+                      <td className="px-3 py-2 text-left tabular-nums">{o.total_qty.toFixed(2)} {o.unit}</td>
+                      <td className="px-3 py-2 text-left tabular-nums text-green-700">{o.avg_cost_per_kg.toFixed(2)} ج</td>
+                      <td className="px-3 py-2 text-left tabular-nums font-medium">{o.total_cost.toFixed(2)} ج</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-gray-50 border-t border-gray-200 font-medium text-sm">
+                    <td className="px-3 py-2 text-gray-600">الإجمالي</td>
+                    <td className="px-3 py-2 text-left tabular-nums">{summary.totals.total_output_qty.toFixed(2)}</td>
+                    <td className="px-3 py-2 text-left tabular-nums">—</td>
+                    <td className="px-3 py-2 text-left tabular-nums text-green-700">{summary.totals.total_output_cost.toFixed(2)} ج</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {showPostModal && (
+          <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center" onClick={() => setShowPostModal(false)}>
+            <div className="bg-white rounded-xl shadow-xl p-5 w-full max-w-lg mx-4" onClick={(e) => e.stopPropagation()}>
+              <h4 className="font-semibold text-sm mb-3">تحويل للإنتاج اليومي</h4>
+              <p className="text-xs text-gray-500 mb-3">اختر الوصفة لكل صنف واليوم:</p>
+              <div className="space-y-3 max-h-64 overflow-auto mb-4">
+                {postEntries.map((entry, idx) => (
+                  <div key={entry.item_id} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg text-sm">
+                    <span className="w-28 truncate font-medium text-gray-700">{entry.name}</span>
+                    <span className="text-xs text-gray-400 w-16">{entry.qty.toFixed(2)} كجم</span>
+                    <select value={entry.recipe_id} onChange={(e) => { const next = [...postEntries]; next[idx] = { ...next[idx], recipe_id: e.target.value }; setPostEntries(next); }}
+                      className="flex-1 border border-gray-200 rounded-lg px-2 py-1 text-xs">
+                      <option value="">اختر وصفة...</option>
+                      {dailyRecipes?.recipes?.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                    </select>
+                    <input type="number" min={1} max={31} value={entry.day} onChange={(e) => { const next = [...postEntries]; next[idx] = { ...next[idx], day: parseInt(e.target.value) || 1 }; setPostEntries(next); }}
+                      className="w-14 border border-gray-200 rounded-lg px-2 py-1 text-xs text-center" placeholder="اليوم" />
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
+                <button onClick={() => setShowPostModal(false)} className="px-3 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50">إلغاء</button>
+                <button onClick={() => {
+                  const valid = postEntries.filter(e => e.recipe_id);
+                  if (!valid.length) { toast.error('اختر وصفة لكل صنف على الأقل'); return; }
+                  postToDailyMutation.mutate({ month: summaryMonth, entries: valid.map(e => ({ item_id: e.item_id, qty: e.qty, recipe_id: e.recipe_id, day: e.day })) });
+                }} disabled={postToDailyMutation.isPending}
+                  className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-40">
+                  {postToDailyMutation.isPending ? 'جاري...' : 'تحويل'}
+                </button>
               </div>
             </div>
-          ))}
-        </div>
-      )}
+          </div>
+        )}
+      </>)} {/* end summary tab */}
     </div>
   );
 }
