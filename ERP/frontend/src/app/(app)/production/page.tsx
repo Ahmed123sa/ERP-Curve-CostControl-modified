@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import toast from 'react-hot-toast';
@@ -9,11 +9,36 @@ export default function DailyProductionPage() {
   const today = new Date();
   const [month, setMonth] = useState(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`);
   const [editData, setEditData] = useState<Record<string, Record<number, string>>>({});
+  const [showAddItem, setShowAddItem] = useState(false);
+  const [addItemId, setAddItemId] = useState('');
 
   const { data, isLoading } = useQuery({
     queryKey: ['daily-production', month],
     queryFn: () => api.get('/production/daily', { params: { month } }).then(r => r.data),
   });
+
+  const { data: allItems } = useQuery({
+    queryKey: ['items-list'],
+    queryFn: () => api.get('/items').then(r => r.data),
+    enabled: showAddItem,
+  });
+
+  const itemsById = useMemo(() => {
+    const map: Record<string, any> = {};
+    (allItems || []).forEach((i: any) => { map[i.id] = i; });
+    return map;
+  }, [allItems]);
+
+  const addManualItem = () => {
+    if (!addItemId) return;
+    const item = itemsById[addItemId];
+    if (!item) return;
+    // أضف سطر للصنف في الجدول
+    setEditData(prev => ({ ...prev, [addItemId]: {} }));
+    setAddItemId('');
+    setShowAddItem(false);
+    toast.success(`تم إضافة ${item.name}`);
+  };
 
   useEffect(() => {
     if (data?.data) {
@@ -92,6 +117,10 @@ export default function DailyProductionPage() {
           className="px-3 py-2 border border-gray-200 rounded-xl text-sm"
         />
         <div className="flex gap-2">
+          <button onClick={() => { setAddItemId(''); setShowAddItem(true); }}
+            className="px-3 py-2 text-sm border border-dashed border-gray-300 text-gray-500 rounded-lg hover:border-blue-300 hover:text-blue-600">
+            + إضافة صنف
+          </button>
           <button
             onClick={handleSave}
             disabled={saveMutation.isPending}
@@ -111,8 +140,10 @@ export default function DailyProductionPage() {
 
       {isLoading ? (
         <p className="text-gray-400">جاري التحميل...</p>
-      ) : !data?.recipes?.length ? (
-        <p className="text-gray-400">لا توجد وصفات — أضف وصفات أولاً من تبويب "إدارة الوصفات"</p>
+      ) : !data?.recipes?.length && !Object.keys(editData).length ? (
+        <p className="text-gray-400 py-8 text-center">
+          لا توجد وصفات أو أصناف — أضف وصفات من تبويب "إدارة الوصفات" أو استخدم زر "إضافة صنف"
+        </p>
       ) : (
         <div className="border border-gray-100 rounded-xl overflow-auto">
           <table className="w-full text-sm">
@@ -168,6 +199,25 @@ export default function DailyProductionPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {showAddItem && (
+        <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center" onClick={() => setShowAddItem(false)}>
+          <div className="bg-white rounded-xl shadow-xl p-5 w-full max-w-sm mx-4" onClick={(e) => e.stopPropagation()}>
+            <h4 className="font-semibold text-sm mb-3">إضافة صنف للإنتاج اليومي</h4>
+            <select value={addItemId} onChange={(e) => setAddItemId(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm mb-4">
+              <option value="">اختر الصنف...</option>
+              {(allItems || []).map((item: any) => (
+                <option key={item.id} value={item.id}>{item.name} ({item.unit})</option>
+              ))}
+            </select>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowAddItem(false)} className="px-3 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50">إلغاء</button>
+              <button onClick={addManualItem} disabled={!addItemId}
+                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">إضافة</button>
+            </div>
+          </div>
         </div>
       )}
     </div>

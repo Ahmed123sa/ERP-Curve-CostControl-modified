@@ -61,6 +61,31 @@ class DailyProductionController extends Controller
             }
         }
 
+        // إضافة الأصناف اليدوية (الوارد من المعالجات بدون وصفة)
+        $manualIds = DailyProduction::where('client_id', $clientId)
+            ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
+            ->whereNotNull('recipe_id')
+            ->pluck('recipe_id')
+            ->unique()
+            ->reject(fn($rid) => $recipes->contains('id', $rid))
+            ->values();
+
+        foreach ($manualIds as $rid) {
+            $item = Item::find($rid);
+            if (!$item) continue;
+            $expanded[] = [
+                'id'          => $rid,
+                'name'        => $item->name,
+                'unit'        => $item->unit,
+                'outputItem'  => ['id' => $item->id, 'name' => $item->name, 'unit' => $item->unit],
+                'outputWarehouse' => null,
+                'is_size'     => false,
+                'size_index'  => null,
+                'grams'       => null,
+                'item_id'     => $item->id,
+            ];
+        }
+
         // قراءة الإنتاج اليومي — مفتاح مركب recipe_id|size_index
         $entries = DailyProduction::where('client_id', $clientId)
             ->whereBetween('date', [$start->toDateString(), $end->toDateString()])

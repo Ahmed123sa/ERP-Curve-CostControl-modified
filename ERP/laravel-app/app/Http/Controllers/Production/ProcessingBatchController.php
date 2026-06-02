@@ -312,7 +312,7 @@ class ProcessingBatchController extends Controller
             'entries'  => 'required|array|min:1',
             'entries.*.item_id'   => 'required|string',
             'entries.*.qty'       => 'required|numeric|min:0',
-            'entries.*.recipe_id' => 'required|string',
+            'entries.*.recipe_id' => 'nullable|string',
             'entries.*.day'       => 'required|integer|between:1,31',
         ]);
 
@@ -322,7 +322,7 @@ class ProcessingBatchController extends Controller
 
         foreach ($data['entries'] as $entry) {
             $date = sprintf('%s-%s-%02d', $year, $monthNum, (int) $entry['day']);
-            $recipeId = $entry['recipe_id'];
+            $recipeId = $entry['recipe_id'] ?? $entry['item_id'];
             $sizeIndex = null;
             if (str_contains($recipeId, '::size::')) {
                 $parts = explode('::size::', $recipeId);

@@ -143,6 +143,7 @@ export default function ProcessingPage() {
 
   const [showPostModal, setShowPostModal] = useState(false);
   const [postEntries, setPostEntries] = useState<{ item_id: string; name: string; qty: number; recipe_id: string; day: number }[]>([]);
+  const [selectedPostIds, setSelectedPostIds] = useState<Set<string>>(new Set());
 
   const postToDailyMutation = useMutation({
     mutationFn: (payload: any) => api.post('/production/processing/summary/post-to-daily', payload),
@@ -717,6 +718,7 @@ export default function ProcessingPage() {
                 if (!summary?.outputs?.length) { toast.error('لا توجد مخرجات للتحويل'); return; }
                 const entries = summary.outputs.map((o: any) => ({ item_id: o.item_id, name: o.name, qty: o.total_qty, recipe_id: '', day: parseInt(today.getDate().toString()) }));
                 setPostEntries(entries);
+                setSelectedPostIds(new Set(entries.map(e => e.item_id)));
                 setShowPostModal(true);
               }} className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700">
                 تحويل للإنتاج اليومي
@@ -810,16 +812,20 @@ export default function ProcessingPage() {
           <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center" onClick={() => setShowPostModal(false)}>
             <div className="bg-white rounded-xl shadow-xl p-5 w-full max-w-lg mx-4" onClick={(e) => e.stopPropagation()}>
               <h4 className="font-semibold text-sm mb-3">تحويل للإنتاج اليومي</h4>
-              <p className="text-xs text-gray-500 mb-3">اختر الوصفة لكل صنف واليوم:</p>
+              <p className="text-xs text-gray-500 mb-3">اختر الأصناف اللي عاوز ترحلها واربطها بوصفة:</p>
               <div className="space-y-3 max-h-64 overflow-auto mb-4">
                 {postEntries.map((entry, idx) => (
                   <div key={entry.item_id} className="flex items-center gap-2 p-2 bg-gray-50 rounded-lg text-sm">
-                    <span className="w-28 truncate font-medium text-gray-700">{entry.name}</span>
+                    <input type="checkbox" checked={selectedPostIds.has(entry.item_id)}
+                      onChange={() => { const next = new Set(selectedPostIds); if (next.has(entry.item_id)) next.delete(entry.item_id); else next.add(entry.item_id); setSelectedPostIds(next); }}
+                      className="rounded border-gray-300" />
+                    <span className={`w-24 truncate font-medium ${selectedPostIds.has(entry.item_id) ? 'text-gray-700' : 'text-gray-400 line-through'}`}>{entry.name}</span>
                     <span className="text-xs text-gray-400 w-16">{entry.qty.toFixed(2)} كجم</span>
                     <select value={entry.recipe_id} onChange={(e) => { const next = [...postEntries]; next[idx] = { ...next[idx], recipe_id: e.target.value }; setPostEntries(next); }}
                       className="flex-1 border border-gray-200 rounded-lg px-2 py-1 text-xs">
                       <option value="">اختر وصفة...</option>
                       {dailyRecipes?.recipes?.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                      <option value="">— بدون وصفة (الصنف نفسه)</option>
                     </select>
                     <input type="number" min={1} max={31} value={entry.day} onChange={(e) => { const next = [...postEntries]; next[idx] = { ...next[idx], day: parseInt(e.target.value) || 1 }; setPostEntries(next); }}
                       className="w-14 border border-gray-200 rounded-lg px-2 py-1 text-xs text-center" placeholder="اليوم" />
@@ -829,12 +835,12 @@ export default function ProcessingPage() {
               <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
                 <button onClick={() => setShowPostModal(false)} className="px-3 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50">إلغاء</button>
                 <button onClick={() => {
-                  const valid = postEntries.filter(e => e.recipe_id);
-                  if (!valid.length) { toast.error('اختر وصفة لكل صنف على الأقل'); return; }
-                  postToDailyMutation.mutate({ month: summaryMonth, entries: valid.map(e => ({ item_id: e.item_id, qty: e.qty, recipe_id: e.recipe_id, day: e.day })) });
+                  const checked = postEntries.filter(e => selectedPostIds.has(e.item_id));
+                  if (!checked.length) { toast.error('اختر صنف واحد على الأقل'); return; }
+                  postToDailyMutation.mutate({ month: summaryMonth, entries: checked.map(e => ({ item_id: e.item_id, qty: e.qty, recipe_id: e.recipe_id || null, day: e.day })) });
                 }} disabled={postToDailyMutation.isPending}
                   className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-40">
-                  {postToDailyMutation.isPending ? 'جاري...' : 'تحويل'}
+                  {postToDailyMutation.isPending ? 'جاري...' : `تحويل (${selectedPostIds.size})`}
                 </button>
               </div>
             </div>
