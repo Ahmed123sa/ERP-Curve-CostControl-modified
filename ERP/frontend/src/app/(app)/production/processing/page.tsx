@@ -41,6 +41,7 @@ export default function ProcessingPage() {
   const [processes, setProcesses] = useState<ProcessStep[]>([]);
   const [outputs, setOutputs] = useState<OutputRow[]>([emptyOutput()]);
   const [showForm, setShowForm] = useState(false);
+  const [editBatchId, setEditBatchId] = useState<string | null>(null);
   const { currentClient } = useAuthStore();
 
   const { data: items = [] } = useQuery({
@@ -71,18 +72,79 @@ export default function ProcessingPage() {
     onError: (err: any) => toast.error(err?.response?.data?.message || 'خطأ في الحفظ'),
   });
 
+  const updateMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: any }) => api.put(`/production/processing/${id}`, payload),
+    onSuccess: () => {
+      toast.success('تم تحديث المعالجة');
+      invalidate();
+      resetForm();
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.message || 'خطأ في التحديث'),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/production/processing/${id}`),
     onSuccess: () => { toast.success('تم الحذف'); invalidate(); },
   });
 
+  const syncMutation = useMutation({
+    mutationFn: ({ id, item_ids }: { id: string; item_ids: string[] }) => api.post(`/production/processing/${id}/sync-costs`, { item_ids }),
+    onSuccess: (r: any) => {
+      toast.success(r.data.message);
+      setShowSyncModal(false);
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.message || 'خطأ في التحديث'),
+  });
+
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const [syncItems, setSyncItems] = useState<{ item_id: string; name: string; cost: number }[]>([]);
+  const [selectedSyncIds, setSelectedSyncIds] = useState<Set<string>>(new Set());
+
+  const openSyncModal = () => {
+    const items = outputs.filter(o => o.item_id).map(o => {
+      const item = itemsById[o.item_id];
+      const calc = outputTotals[outputs.findIndex(x => x.tempId === o.tempId)];
+      return { item_id: o.item_id, name: item?.name || o.name || '', cost: calc?.costPerKg || 0 };
+    });
+    setSyncItems(items);
+    setSelectedSyncIds(new Set(items.map(i => i.item_id)));
+    setShowSyncModal(true);
+  };
+
   const resetForm = () => {
     setShowForm(false);
+    setEditBatchId(null);
     setDate(new Date().toISOString().slice(0, 10));
     setName('');
     setInputs([emptyInput()]);
     setProcesses([]);
     setOutputs([emptyOutput()]);
+  };
+
+  const loadBatchForEdit = async (batchId: string) => {
+    try {
+      const { data } = await api.get(`/production/processing/${batchId}`);
+      setDate(data.date.slice(0, 10));
+      setName(data.name || '');
+      setProcesses((data.processes || []).map((p: any) => ({ name: p.name || '', net_weight: String(p.net_weight || '') })));
+      setInputs(data.inputs.length ? data.inputs.map((i: any) => ({
+        tempId: Math.random().toString(36).slice(2),
+        item_id: i.item_id,
+        name: i.item?.name || '',
+        qty: String(i.qty),
+        cost_per_kg: String(i.cost_per_kg),
+      })) : [emptyInput()]);
+      setOutputs(data.outputs.length ? data.outputs.map((o: any) => ({
+        tempId: Math.random().toString(36).slice(2),
+        item_id: o.item_id,
+        name: o.item?.name || '',
+        qty: String(o.qty),
+      })) : [emptyOutput()]);
+      setEditBatchId(batchId);
+      setShowForm(true);
+    } catch {
+      toast.error('فشل تحميل بيانات المعالجة');
+    }
   };
 
   // ── Input handlers ──
@@ -189,7 +251,11 @@ export default function ProcessingPage() {
     if (!payload.inputs.length) { toast.error('أضف مدخل واحد على الأقل'); return; }
     if (!payload.outputs.length) { toast.error('أضف مخرج واحد على الأقل'); return; }
     if (!payload.name) { toast.error('أدخل اسم المعالجة'); return; }
-    saveMutation.mutate(payload);
+    if (editBatchId) {
+      updateMutation.mutate({ id: editBatchId, payload });
+    } else {
+      saveMutation.mutate(payload);
+    }
   };
 
   return (
@@ -204,7 +270,7 @@ export default function ProcessingPage() {
 
       {showForm && (
         <div className="border border-gray-100 rounded-xl p-4 space-y-4 bg-white">
-          <h3 className="font-semibold text-gray-700">معالجة جديدة</h3>
+          <h3 className="font-semibold text-gray-700">{editBatchId ? 'تعديل المعالجة' : 'معالجة جديدة'}</h3>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -378,11 +444,49 @@ export default function ProcessingPage() {
             </table>
           </div>
 
+          {editBatchId && outputs.some(o => o.item_id) && (
+            <>
+              <div className="flex justify-end">
+                <button onClick={openSyncModal} className="px-3 py-1.5 text-xs border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50">
+                  تحديث سعر المنتجات
+                </button>
+              </div>
+
+              {showSyncModal && (
+                <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center" onClick={() => setShowSyncModal(false)}>
+                  <div className="bg-white rounded-xl shadow-xl p-5 w-full max-w-sm mx-4" onClick={(e) => e.stopPropagation()}>
+                    <h4 className="font-semibold text-sm mb-3">تحديث سعر المنتجات</h4>
+                    <p className="text-xs text-gray-500 mb-3">اختر المنتجات اللي عاوز تحدث سعرها في الأصناف:</p>
+                    <div className="space-y-2 max-h-48 overflow-auto">
+                      {syncItems.map((item) => (
+                        <label key={item.item_id} className="flex items-center gap-2 cursor-pointer text-sm p-2 rounded hover:bg-gray-50">
+                          <input type="checkbox" checked={selectedSyncIds.has(item.item_id)}
+                            onChange={() => { const next = new Set(selectedSyncIds); if (next.has(item.item_id)) next.delete(item.item_id); else next.add(item.item_id); setSelectedSyncIds(next); }}
+                            className="rounded border-gray-300" />
+                          <span className="flex-1">{item.name}</span>
+                          <span className="font-mono text-xs text-green-600">{item.cost.toFixed(2)} ج</span>
+                        </label>
+                      ))}
+                    </div>
+                    <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-gray-100">
+                      <button onClick={() => setShowSyncModal(false)} className="px-3 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50">إلغاء</button>
+                      <button onClick={() => { if (editBatchId) syncMutation.mutate({ id: editBatchId, item_ids: Array.from(selectedSyncIds) }); }}
+                        disabled={syncMutation.isPending || !selectedSyncIds.size}
+                        className="px-3 py-1.5 text-xs bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-40">
+                        {syncMutation.isPending ? 'جاري...' : `تحديث (${selectedSyncIds.size})`}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
           <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
             <button onClick={resetForm} className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">إلغاء</button>
-            <button onClick={handleSubmit} disabled={saveMutation.isPending}
+            <button onClick={handleSubmit} disabled={saveMutation.isPending || updateMutation.isPending}
               className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
-              {saveMutation.isPending ? 'جاري الحفظ...' : '💾 حفظ المعالجة'}
+              {saveMutation.isPending || updateMutation.isPending ? 'جاري الحفظ...' : editBatchId ? '💾 تحديث المعالجة' : '💾 حفظ المعالجة'}
             </button>
           </div>
         </div>
@@ -396,10 +500,10 @@ export default function ProcessingPage() {
       ) : (
         <div className="space-y-2">
           {batches.map((b: any) => (
-            <div key={b.id} className="border border-gray-100 rounded-xl p-4 hover:border-gray-200">
+            <div key={b.id} className="border border-gray-100 rounded-xl p-4 hover:border-gray-200 transition-all">
               <div className="flex justify-between items-start">
-                <div>
-                  <div className="font-medium text-gray-800">{b.name}</div>
+                <div className="cursor-pointer" onClick={() => loadBatchForEdit(b.id)}>
+                  <div className="font-medium text-gray-800 hover:text-blue-700">{b.name}</div>
                   <div className="text-xs text-gray-400 mt-0.5">{b.date}</div>
                 </div>
                 <div className="flex gap-2 items-center">
@@ -409,7 +513,11 @@ export default function ProcessingPage() {
                   <span className="px-2 py-0.5 text-xs bg-blue-50 text-blue-700 rounded-full font-mono">
                     {b.total_input_cost.toFixed(2)} ج
                   </span>
-                  <button onClick={() => { if (confirm('حذف المعالجة؟')) deleteMutation.mutate(b.id); }}
+                  <button onClick={(e) => { e.stopPropagation(); loadBatchForEdit(b.id); }}
+                    className="px-2 py-1 text-xs text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50">
+                    عرض
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); if (confirm('حذف المعالجة؟')) deleteMutation.mutate(b.id); }}
                     className="px-2 py-1 text-xs text-red-500 border border-red-200 rounded-lg hover:bg-red-50">حذف</button>
                 </div>
               </div>

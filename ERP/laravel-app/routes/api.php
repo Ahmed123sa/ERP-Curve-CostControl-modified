@@ -173,6 +173,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('slaughter', \App\Http\Controllers\Production\SlaughterController::class)->except(['edit', 'create']);
         Route::post('slaughter/{slaughter}/post', [\App\Http\Controllers\Production\SlaughterController::class, 'postToProduction']);
         Route::apiResource('processing', \App\Http\Controllers\Production\ProcessingBatchController::class)->except(['edit', 'create']);
+        Route::post('processing/{processing}/sync-costs', [\App\Http\Controllers\Production\ProcessingBatchController::class, 'syncOutputCosts']);
     });
 
     // ── Menu Engineering Module ──────────────────────────
