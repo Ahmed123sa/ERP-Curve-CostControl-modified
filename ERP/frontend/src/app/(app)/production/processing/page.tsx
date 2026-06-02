@@ -709,7 +709,7 @@ export default function ProcessingPage() {
               <button onClick={() => {
                 const a = document.createElement('a');
                 a.href = `/api/production/processing/summary/export?month=${summaryMonth}`;
-                a.download = `ملخص_معالجة_${summaryMonth}.xlsx`;
+                a.download = `معمل_${summaryMonth}.xlsx`;
                 a.click();
               }} className="px-3 py-1.5 text-xs border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50">
                 تصدير إكسل

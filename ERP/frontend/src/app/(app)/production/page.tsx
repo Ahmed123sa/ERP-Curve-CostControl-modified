@@ -60,7 +60,6 @@ export default function DailyProductionPage() {
       api.post('/production/daily', { month, entries }),
     onSuccess: () => {
       toast.success('تم حفظ الإنتاج اليومي');
-      setEditData({});
       qc.invalidateQueries({ queryKey: ['daily-production'] });
     },
     onError: (err: any) => toast.error(err?.response?.data?.message || JSON.stringify(err?.response?.data?.errors) || 'خطأ في الحفظ'),

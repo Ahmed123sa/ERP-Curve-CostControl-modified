@@ -236,64 +236,55 @@ class ProcessingBatchController extends Controller
             ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
             ->pluck('id');
 
-        $inputs = ProcessingBatchInput::whereIn('batch_day_id', $dayIds)
-            ->select('item_id', DB::raw('SUM(qty) as total_qty'), DB::raw('SUM(line_total) as total_cost'))
-            ->with('item:id,name,unit')
-            ->groupBy('item_id')
-            ->get();
-
         $outputs = ProcessingBatchOutput::whereIn('batch_day_id', $dayIds)
             ->select('item_id', DB::raw('SUM(qty) as total_qty'), DB::raw('SUM(total_cost) as total_cost'))
             ->with('item:id,name,unit')
             ->groupBy('item_id')
             ->get();
 
+        [$year, $monthNum] = explode('-', $month);
+        $headerDate = sprintf('%02d/%02d', $monthNum, $year);
+
         $spreadsheet = new Spreadsheet();
-
         $sheet = $spreadsheet->getActiveSheet();
-        $sheet->setTitle('المدخلات');
+        $sheet->setTitle('معمل');
         $sheet->setRightToLeft(true);
-        $sheet->setCellValue('A1', 'الصنف');
-        $sheet->setCellValue('B1', 'الوحدة');
-        $sheet->setCellValue('C1', 'إجمالي الكمية');
-        $sheet->setCellValue('D1', 'متوسط سعر الكيلو');
-        $sheet->setCellValue('E1', 'إجمالي التكلفة');
 
-        $row = 2;
-        foreach ($inputs as $i) {
-            $qty = (float) $i->total_qty;
-            $cost = (float) $i->total_cost;
-            $sheet->setCellValue('A' . $row, $i->item?->name ?? '');
-            $sheet->setCellValue('B' . $row, $i->item?->unit ?? '');
-            $sheet->setCellValue('C' . $row, $qty);
-            $sheet->setCellValue('D' . $row, $qty > 0 ? round($cost / $qty, 4) : 0);
-            $sheet->setCellValue('E' . $row, $cost);
-            $row++;
-        }
+        // الصف الأول: تاريخ الشهر + اسم الموقع (يطابق صيغة رفع الأذون)
+        $sheet->setCellValue('A1', sprintf('%s | معمل', $headerDate));
+        $sheet->mergeCells('A1:E1');
+        $sheet->getStyle('A1')->getFont()->setBold(true);
 
-        $sheet2 = $spreadsheet->createSheet();
-        $sheet2->setTitle('المخرجات');
-        $sheet2->setRightToLeft(true);
-        $sheet2->setCellValue('A1', 'الصنف');
-        $sheet2->setCellValue('B1', 'الوحدة');
-        $sheet2->setCellValue('C1', 'إجمالي الكمية');
-        $sheet2->setCellValue('D1', 'متوسط سعر الكيلو');
-        $sheet2->setCellValue('E1', 'إجمالي التكلفة');
+        // رأس الأعمدة
+        $sheet->setCellValue('A2', 'م');
+        $sheet->setCellValue('B2', 'الصنف');
+        $sheet->setCellValue('C2', 'الوحدة');
+        $sheet->setCellValue('D2', 'الكمية');
+        $sheet->setCellValue('E2', 'التكلفة');
 
-        $row = 2;
+        $row = 3;
+        $seq = 1;
         foreach ($outputs as $o) {
             $qty = (float) $o->total_qty;
             $cost = (float) $o->total_cost;
-            $sheet2->setCellValue('A' . $row, $o->item?->name ?? '');
-            $sheet2->setCellValue('B' . $row, $o->item?->unit ?? '');
-            $sheet2->setCellValue('C' . $row, $qty);
-            $sheet2->setCellValue('D' . $row, $qty > 0 ? round($cost / $qty, 4) : 0);
-            $sheet2->setCellValue('E' . $row, $cost);
+            $sheet->setCellValue('A' . $row, $seq);
+            $sheet->setCellValue('B' . $row, $o->item?->name ?? '');
+            $sheet->setCellValue('C' . $row, $o->item?->unit ?? '');
+            $sheet->setCellValue('D' . $row, $qty);
+            $sheet->setCellValue('E' . $row, $cost);
             $row++;
+            $seq++;
         }
 
+        // ضبط عرض الأعمدة
+        $sheet->getColumnDimension('A')->setWidth(6);
+        $sheet->getColumnDimension('B')->setWidth(30);
+        $sheet->getColumnDimension('C')->setWidth(12);
+        $sheet->getColumnDimension('D')->setWidth(14);
+        $sheet->getColumnDimension('E')->setWidth(16);
+
         $writer = new Xlsx($spreadsheet);
-        $filename = sprintf('ملخص_معالجة_%s.xlsx', $month);
+        $filename = sprintf('معمل_%s.xlsx', $month);
 
         ob_start();
         $writer->save('php://output');
