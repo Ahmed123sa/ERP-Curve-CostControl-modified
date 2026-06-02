@@ -15,6 +15,12 @@ export default function PayrollAttendancePage() {
   const [popup, setPopup] = useState<{ employee: any; day: number; record?: any } | null>(null);
   const [shiftStart, setShiftStart] = useState('09:00');
   const [shiftEnd, setShiftEnd] = useState('18:00');
+  const [painting, setPainting] = useState<{ field: 'start' | 'end'; value: string; day: number } | null>(null);
+  const [showBatch, setShowBatch] = useState(false);
+  const [batchFrom, setBatchFrom] = useState(1);
+  const [batchTo, setBatchTo] = useState(31);
+  const [batchStart, setBatchStart] = useState('09:00');
+  const [batchEnd, setBatchEnd] = useState('18:00');
 
   const daysInMonth = new Date(year, month, 0).getDate();
 
@@ -109,13 +115,52 @@ export default function PayrollAttendancePage() {
     setPopup({ employee: selectedEmployee, day, record });
   };
 
+  const paintSave = async (field: 'start' | 'end', day: number) => {
+    if (!painting || !selectedEmpId) return;
+    const targetRecord = recordMap[day];
+    const start = field === 'start' ? painting.value : (targetRecord?.shift_start?.substring(0, 5) || '09:00');
+    const end = field === 'end' ? painting.value : (targetRecord?.shift_end?.substring(0, 5) || '18:00');
+    try {
+      await payrollApi.storeAttendance({
+        employee_id: selectedEmpId,
+        date: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+        shift_start: start,
+        shift_end: end,
+      });
+      qc.invalidateQueries({ queryKey: ['payroll-attendance', month, year, selectedEmpId] });
+      qc.invalidateQueries({ queryKey: ['payroll-attendance'] });
+      qc.invalidateQueries({ queryKey: ['payroll-monthly'] });
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'فشل الحفظ');
+    }
+  };
+
+  const handlePaintClick = (field: 'start' | 'end', record: any, day: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!record) return;
+    const value = field === 'start'
+      ? (record.shift_start?.substring(0, 5) || '09:00')
+      : (record.shift_end?.substring(0, 5) || '18:00');
+    if (painting && painting.field === field && painting.day === day) {
+      setPainting(null);
+      return;
+    }
+    if (painting && painting.field === field && painting.day !== day) {
+      paintSave(field, day);
+      return;
+    }
+    setPainting({ field, value, day });
+  };
+
   const handleSave = () => {
     if (!popup || !selectedEmployee) return;
+    const start = parseSmartTime(shiftStart) || shiftStart;
+    const end = parseSmartTime(shiftEnd) || shiftEnd;
     storeMut.mutate({
       employee_id: selectedEmployee.id,
       date: `${year}-${String(month).padStart(2, '0')}-${String(popup.day).padStart(2, '0')}`,
-      shift_start: shiftStart,
-      shift_end: shiftEnd,
+      shift_start: start,
+      shift_end: end,
     });
   };
 
@@ -126,11 +171,66 @@ export default function PayrollAttendancePage() {
     }
   };
 
+  const [batchSaving, setBatchSaving] = useState(false);
+  const [batchDone, setBatchDone] = useState(0);
+
+  const handleBatchSave = async () => {
+    if (!selectedEmpId) return;
+    const start = parseSmartTime(batchStart) || batchStart;
+    const end = parseSmartTime(batchEnd) || batchEnd;
+    const from = Math.max(1, batchFrom);
+    const to = Math.min(daysInMonth, batchTo);
+    if (from > to) return toast.error('نطاق غير صحيح');
+    setBatchSaving(true);
+    setBatchDone(0);
+    const total = to - from + 1;
+    let success = 0;
+    for (let day = from; day <= to; day++) {
+      try {
+        await payrollApi.storeAttendance({
+          employee_id: selectedEmpId,
+          date: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+          shift_start: start,
+          shift_end: end,
+        });
+        success++;
+      } catch { /* skip */ }
+      setBatchDone(day - from + 1);
+    }
+    qc.invalidateQueries({ queryKey: ['payroll-attendance', month, year, selectedEmpId] });
+    qc.invalidateQueries({ queryKey: ['payroll-attendance'] });
+    qc.invalidateQueries({ queryKey: ['payroll-monthly'] });
+    setBatchSaving(false);
+    if (success === total) toast.success(`تم تسجيل ${total} أيام`);
+    else toast.success(`تم تسجيل ${success} من ${total} أيام`);
+  };
+
   const computeHours = (start: string, end: string) => {
     const s = new Date(`2000-01-01T${start}`);
     let e = new Date(`2000-01-01T${end}`);
     if (e <= s) e = new Date(e.getTime() + 86400000);
     return ((e.getTime() - s.getTime()) / 3600000);
+  };
+
+  const parseSmartTime = (val: string): string | null => {
+    const s = val.trim().toLowerCase().replace(/\s+/g, '');
+    if (!s) return null;
+    if (/^\d{1,2}:\d{2}$/.test(s)) {
+      const [h, m] = s.split(':').map(Number);
+      if (h >= 0 && h <= 23 && m >= 0 && m <= 59) return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      return null;
+    }
+    const isPm = s.endsWith('p') || s.endsWith('pm');
+    const numStr = s.replace(/pm?$/, '');
+    const parts = numStr.split(/[.,:]/);
+    let h = parseInt(parts[0], 10);
+    let m = parts[1] ? parseInt(parts[1].padEnd(2, '0').substring(0, 2), 10) : 0;
+    if (isNaN(h)) return null;
+    if (isNaN(m)) m = 0;
+    if (isPm && h < 12) h += 12;
+    if (!isPm && h === 12) h = 0;
+    if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   };
 
   const dayNames = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
@@ -199,10 +299,16 @@ export default function PayrollAttendancePage() {
             {[2024, 2025, 2026, 2027].map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
           {selectedEmpId && (
-            <button onClick={handleExport} className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
-              <svg className="inline w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-              تصدير إكسل
-            </button>
+            <>
+              <button onClick={() => setShowBatch(!showBatch)} className={`px-3 py-1.5 text-sm rounded-lg border transition-all ${showBatch ? 'bg-green-100 border-green-300 text-green-700' : 'bg-white border-gray-300 text-gray-600 hover:border-green-300'}`}>
+                <svg className="inline w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                تسجيل متعدد
+              </button>
+              <button onClick={handleExport} className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
+                <svg className="inline w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                تصدير إكسل
+              </button>
+            </>
           )}
         </div>
       } />
@@ -232,6 +338,40 @@ export default function PayrollAttendancePage() {
           })}
         </div>
       </div>
+
+      {/* Batch panel */}
+      {showBatch && selectedEmpId && (
+        <div className="px-6 mb-3 animate-fade-in">
+          <div className="bg-green-50 border border-green-200 rounded-xl p-4 shadow-sm">
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-gray-500">من يوم</span>
+                <input type="number" min={1} max={daysInMonth} className="w-16 border border-green-300 rounded-lg px-2 py-1.5 text-sm text-center" value={batchFrom} onChange={(e) => setBatchFrom(Math.max(1, Math.min(daysInMonth, parseInt(e.target.value) || 1)))} />
+                <span className="text-gray-500">إلى</span>
+                <input type="number" min={1} max={daysInMonth} className="w-16 border border-green-300 rounded-lg px-2 py-1.5 text-sm text-center" value={batchTo} onChange={(e) => setBatchTo(Math.max(1, Math.min(daysInMonth, parseInt(e.target.value) || daysInMonth)))} />
+              </div>
+              <div className="w-px h-6 bg-green-200" />
+              <input type="text" inputMode="numeric" className="w-20 border border-green-300 rounded-lg px-2 py-1.5 text-sm text-left dir-ltr font-mono" placeholder="9 / 8.30p" value={batchStart} onChange={(e) => setBatchStart(e.target.value)} onBlur={() => { const p = parseSmartTime(batchStart); if (p) setBatchStart(p); }} />
+              <span className="text-xs text-gray-400">→</span>
+              <input type="text" inputMode="numeric" className="w-20 border border-green-300 rounded-lg px-2 py-1.5 text-sm text-left dir-ltr font-mono" placeholder="6 / 5.30p" value={batchEnd} onChange={(e) => setBatchEnd(e.target.value)} onBlur={() => { const p = parseSmartTime(batchEnd); if (p) setBatchEnd(p); }} />
+              <button onClick={handleBatchSave} disabled={batchSaving} className="px-4 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50">
+                {batchSaving ? `جاري الحفظ ${batchDone}/${batchTo - batchFrom + 1}` : 'تسجيل الأيام المحددة'}
+              </button>
+              <div className="flex gap-1.5 flex-wrap mr-auto">
+                {[
+                  { label: 'الشهر كامل', fn: () => { setBatchFrom(1); setBatchTo(daysInMonth); } },
+                  { label: 'كل الأحد', fn: () => { const firstSun = 1 + (7 - new Date(year, month - 1, 1).getDay()) % 7; setBatchFrom(firstSun); setBatchTo(firstSun + Math.floor((daysInMonth - firstSun) / 7) * 7); } },
+                  { label: 'كل السبت', fn: () => { const firstSat = 1 + (6 - new Date(year, month - 1, 1).getDay() + 7) % 7; setBatchFrom(firstSat); setBatchTo(firstSat + Math.floor((daysInMonth - firstSat) / 7) * 7); } },
+                ].map((btn) => (
+                  <button key={btn.label} type="button" onClick={btn.fn} className="px-2 py-1 text-[11px] rounded-lg border border-green-200 text-green-600 hover:bg-green-100">
+                    {btn.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {!selectedEmpId || !selectedEmployee ? (
         employees.length > 0 ? (
@@ -280,6 +420,16 @@ export default function PayrollAttendancePage() {
             </div>
           </div>
 
+          {painting && (
+            <div className="px-6 mb-2">
+              <div className="inline-flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5 text-xs text-blue-700">
+                <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M19.5 2.5c-.8-.8-2.1-.8-2.8 0l-1.4 1.4 2.8 2.8 1.4-1.4c.8-.8.8-2 0-2.8zM3 17.3V21h3.7l11-11-3.7-3.7L3 17.3z"/></svg>
+                <span>الفرشاة: <strong>{painting.value}</strong> — اضغط على {painting.field === 'start' ? 'البداية' : 'النهاية'} لأي يوم للصق</span>
+                <button onClick={() => setPainting(null)} className="text-blue-400 hover:text-blue-700 mr-1">&times;</button>
+              </div>
+            </div>
+          )}
+
           {/* Data table */}
           <div className="flex-1 overflow-auto px-6 pb-6">
             {isLoading ? (
@@ -310,18 +460,40 @@ export default function PayrollAttendancePage() {
                       const dayName = dayNames[d.getDay()];
 
                       return (
-                        <tr
-                          key={day}
-                          onClick={() => openPopup(day)}
-                          className={`border-b border-gray-100 cursor-pointer transition-all ${
+                          <tr
+                            key={day}
+                            onClick={() => { if (!painting) openPopup(day); }}
+                            className={`group border-b border-gray-100 cursor-pointer transition-all ${
                             present ? 'hover:bg-blue-50/60' : 'hover:bg-gray-50'
                           } ${day % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}
                         >
                           <td className="px-3 py-2 text-center text-xs text-gray-400 font-medium">{day}</td>
                           <td className="px-3 py-2 text-center text-xs text-gray-600">{dateStr}</td>
                           <td className={`px-3 py-2 text-center text-[11px] font-medium ${d.getDay() === 5 ? 'text-red-400' : 'text-gray-500'}`}>{dayName}</td>
-                          <td className="px-3 py-2 text-center text-xs font-medium text-gray-700">{record?.shift_start?.substring(0, 5) ?? '—'}</td>
-                          <td className="px-3 py-2 text-center text-xs font-medium text-gray-700">{record?.shift_end?.substring(0, 5) ?? '—'}</td>
+                          <td className="px-3 py-2 text-center">
+                            <div className="inline-flex items-center gap-0.5">
+                              <span onClick={(e) => { e.stopPropagation(); if (painting?.field === 'start' && painting.day !== day) { paintSave('start', day); } else if (!painting) { openPopup(day); } }} className={`text-xs font-medium rounded px-1 cursor-pointer transition-all ${record?.shift_start ? 'text-gray-700' : 'text-gray-300'} ${painting?.field === 'start' && painting.day !== day ? 'hover:bg-blue-100' : 'hover:bg-gray-100'}`}>
+                                {record?.shift_start?.substring(0, 5) ?? '—'}
+                              </span>
+                              {record && (
+                                <button onClick={(e) => handlePaintClick('start', record, day, e)} className={`p-0.5 rounded transition-all ${painting?.field === 'start' && painting?.day === day ? 'bg-blue-100 text-blue-600 ring-2 ring-blue-400' : 'opacity-0 group-hover:opacity-100 text-gray-300 hover:text-blue-500 hover:bg-blue-50'}`}>
+                                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M19.5 2.5c-.8-.8-2.1-.8-2.8 0l-1.4 1.4 2.8 2.8 1.4-1.4c.8-.8.8-2 0-2.8zM3 17.3V21h3.7l11-11-3.7-3.7L3 17.3z"/></svg>
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            <div className="inline-flex items-center gap-0.5">
+                              <span onClick={(e) => { e.stopPropagation(); if (painting?.field === 'end' && painting.day !== day) { paintSave('end', day); } else if (!painting) { openPopup(day); } }} className={`text-xs font-medium rounded px-1 cursor-pointer transition-all ${record?.shift_end ? 'text-gray-700' : 'text-gray-300'} ${painting?.field === 'end' && painting.day !== day ? 'hover:bg-blue-100' : 'hover:bg-gray-100'}`}>
+                                {record?.shift_end?.substring(0, 5) ?? '—'}
+                              </span>
+                              {record && (
+                                <button onClick={(e) => handlePaintClick('end', record, day, e)} className={`p-0.5 rounded transition-all ${painting?.field === 'end' && painting?.day === day ? 'bg-blue-100 text-blue-600 ring-2 ring-blue-400' : 'opacity-0 group-hover:opacity-100 text-gray-300 hover:text-blue-500 hover:bg-blue-50'}`}>
+                                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M19.5 2.5c-.8-.8-2.1-.8-2.8 0l-1.4 1.4 2.8 2.8 1.4-1.4c.8-.8.8-2 0-2.8zM3 17.3V21h3.7l11-11-3.7-3.7L3 17.3z"/></svg>
+                                </button>
+                              )}
+                            </div>
+                          </td>
                           <td className={`px-3 py-2 text-center text-xs font-bold ${present ? 'text-gray-800' : 'text-gray-300'}`}>
                             {present ? record.total_hours.toFixed(1) : '—'}
                           </td>
@@ -361,11 +533,22 @@ export default function PayrollAttendancePage() {
             <div className="space-y-3">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">بداية الوردية</label>
-                <input type="time" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" value={shiftStart} onChange={(e) => setShiftStart(e.target.value)} />
+                <input type="text" inputMode="numeric" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-left dir-ltr font-mono" placeholder="e.g. 9 / 9.30 / 3p / 9-6" value={shiftStart} onChange={(e) => { const v = e.target.value; if (v.includes('-')) { const p = v.split('-'); const s = parseSmartTime(p[0].trim()); const en = parseSmartTime(p[1].trim()); if (s) setShiftStart(s); if (en) setShiftEnd(en); } else { setShiftStart(v); } }} onBlur={() => { const p = parseSmartTime(shiftStart); if (p) setShiftStart(p); }} />
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">نهاية الوردية</label>
-                <input type="time" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" value={shiftEnd} onChange={(e) => setShiftEnd(e.target.value)} />
+                <input type="text" inputMode="numeric" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-left dir-ltr font-mono" placeholder="e.g. 6 / 6.30 / 6p / 5.45p" value={shiftEnd} onChange={(e) => setShiftEnd(e.target.value)} onBlur={() => { const p = parseSmartTime(shiftEnd); if (p) setShiftEnd(p); }} />
+              </div>
+              <div className="flex gap-1.5 flex-wrap">
+                {[['09:00-18:00','9-6'], ['10:00-19:00','10-7'], ['08:00-17:00','8-5'], ['12:00-21:00','12-9']].map(([hh, label]) => {
+                  const [s, e] = hh.split('-');
+                  const active = shiftStart === s && shiftEnd === e;
+                  return (
+                    <button key={label} type="button" onClick={() => { setShiftStart(s); setShiftEnd(e); }} className={`px-2.5 py-1 text-[11px] rounded-lg border transition-all ${active ? 'bg-blue-100 border-blue-300 text-blue-700 font-semibold' : 'border-gray-200 text-gray-500 hover:border-blue-200'}`}>
+                      {label}
+                    </button>
+                  );
+                })}
               </div>
               <div className="flex gap-3 text-xs text-gray-500 bg-gray-50 rounded-lg p-2">
                 <span>إجمالي: <strong className="text-blue-700">{computeHours(shiftStart, shiftEnd).toFixed(2)} س</strong></span>
