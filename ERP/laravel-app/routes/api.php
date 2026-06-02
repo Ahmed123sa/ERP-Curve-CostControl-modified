@@ -175,6 +175,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('processing/summary/export', [\App\Http\Controllers\Production\ProcessingBatchController::class, 'exportSummary']);
         Route::get('processing/summary', [\App\Http\Controllers\Production\ProcessingBatchController::class, 'summary']);
         Route::post('processing/summary/post-to-daily', [\App\Http\Controllers\Production\ProcessingBatchController::class, 'postToDaily']);
+        Route::post('processing/summary/sync-item-cost', [\App\Http\Controllers\Production\ProcessingBatchController::class, 'syncSummaryItemCost']);
+        Route::post('processing/delete-month', [\App\Http\Controllers\Production\ProcessingBatchController::class, 'deleteByMonth']);
         Route::apiResource('processing', \App\Http\Controllers\Production\ProcessingBatchController::class)->except(['edit', 'create']);
         Route::post('processing/{processing}/sync-costs', [\App\Http\Controllers\Production\ProcessingBatchController::class, 'syncOutputC
 osts']);

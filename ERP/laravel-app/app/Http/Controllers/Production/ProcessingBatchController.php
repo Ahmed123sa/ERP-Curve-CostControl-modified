@@ -21,8 +21,22 @@ class ProcessingBatchController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $batches = ProcessingBatch::where('client_id', $request->user()->current_client_id)
-            ->with('days')
+        $clientId = $request->user()->current_client_id;
+        $month = $request->query('month');
+
+        $query = ProcessingBatch::where('client_id', $clientId);
+
+        if ($month) {
+            $start = Carbon::parse($month . '-01');
+            $end = $start->copy()->endOfMonth();
+            $idsInMonth = ProcessingBatchDay::whereBetween('date', [$start->toDateString(), $end->toDateString()])
+                ->whereHas('batch', fn($q) => $q->where('client_id', $clientId))
+                ->pluck('batch_id')
+                ->unique();
+            $query->whereIn('id', $idsInMonth);
+        }
+
+        $batches = $query->with('days')
             ->orderBy('created_at', 'desc')
             ->get()
             ->map(function ($b) {
@@ -332,6 +346,78 @@ class ProcessingBatchController extends Controller
 
         return response()->json([
             'message' => sprintf('تم تحويل %d صنف للإنتاج اليومي', $created),
+        ]);
+    }
+
+    public function deleteByMonth(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'month' => 'required|date_format:Y-m',
+        ]);
+
+        $clientId = $request->user()->current_client_id;
+        $start = Carbon::parse($data['month'] . '-01');
+        $end = $start->copy()->endOfMonth();
+
+        $dayIds = ProcessingBatchDay::whereHas('batch', fn($q) => $q->where('client_id', $clientId))
+            ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
+            ->pluck('id');
+
+        DB::transaction(function () use ($dayIds) {
+            ProcessingBatchInput::whereIn('batch_day_id', $dayIds)->delete();
+            ProcessingBatchOutput::whereIn('batch_day_id', $dayIds)->delete();
+            ProcessingBatchDay::whereIn('id', $dayIds)->delete();
+        });
+
+        ProcessingBatch::where('client_id', $clientId)
+            ->whereDoesntHave('days')
+            ->delete();
+
+        return response()->json(['message' => sprintf('تم حذف معالجات شهر %s', $data['month'])]);
+    }
+
+    public function syncSummaryItemCost(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'item_id' => 'required|string',
+            'month'   => 'required|date_format:Y-m',
+        ]);
+
+        $clientId = $request->user()->current_client_id;
+        $start = Carbon::parse($data['month'] . '-01');
+        $end = $start->copy()->endOfMonth();
+
+        $dayIds = ProcessingBatchDay::whereHas('batch', fn($q) => $q->where('client_id', $clientId))
+            ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
+            ->pluck('id');
+
+        $outputs = ProcessingBatchOutput::whereIn('batch_day_id', $dayIds)
+            ->where('item_id', $data['item_id'])
+            ->get();
+
+        if ($outputs->isEmpty()) {
+            return response()->json(['message' => 'لا توجد مخرجات لهذا الصنف في الشهر'], 404);
+        }
+
+        $totalQty = $outputs->sum('qty');
+        $weightedCost = $totalQty > 0
+            ? $outputs->sum(fn($o) => $o->qty * $o->effective_cost_per_kg) / $totalQty
+            : 0;
+
+        $item = Item::find($data['item_id']);
+        if (!$item) {
+            return response()->json(['message' => 'الصنف غير موجود'], 404);
+        }
+
+        $oldCost = $item->default_cost;
+        $item->update(['default_cost' => round($weightedCost, 4)]);
+
+        return response()->json([
+            'message'  => sprintf('تم تحديث سعر %s', $item->name),
+            'item_id'  => $item->id,
+            'name'     => $item->name,
+            'old_cost' => (float) $oldCost,
+            'new_cost' => (float) round($weightedCost, 4),
         ]);
     }
 

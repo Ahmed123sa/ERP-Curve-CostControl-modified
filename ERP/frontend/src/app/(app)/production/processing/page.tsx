@@ -64,6 +64,7 @@ export default function ProcessingPage() {
   const [tab, setTab] = useState<'batches' | 'summary'>('batches');
   const today = new Date();
   const [summaryMonth, setSummaryMonth] = useState(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`);
+  const [batchesMonth, setBatchesMonth] = useState(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`);
 
   const { data: items = [] } = useQuery({
     queryKey: ['items', currentClient?.id],
@@ -71,8 +72,8 @@ export default function ProcessingPage() {
   });
 
   const { data: batches, isLoading } = useQuery({
-    queryKey: ['processing-batches'],
-    queryFn: () => api.get('/production/processing').then(r => r.data),
+    queryKey: ['processing-batches', batchesMonth],
+    queryFn: () => api.get('/production/processing', { params: { month: batchesMonth } }).then(r => r.data),
   });
 
   const { data: summary, isLoading: summaryLoading } = useQuery({
@@ -94,6 +95,7 @@ export default function ProcessingPage() {
   }, [items]);
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['processing-batches'] });
+  const invalidateSummary = () => qc.invalidateQueries({ queryKey: ['processing-summary', summaryMonth] });
 
   const saveMutation = useMutation({
     mutationFn: (payload: any) => api.post('/production/processing', payload),
@@ -120,6 +122,12 @@ export default function ProcessingPage() {
     onSuccess: () => { toast.success('تم الحذف'); invalidate(); },
   });
 
+  const deleteMonthMutation = useMutation({
+    mutationFn: (month: string) => api.post('/production/processing/delete-month', { month }),
+    onSuccess: (r: any) => { toast.success(r.data.message); invalidate(); },
+    onError: (err: any) => toast.error(err?.response?.data?.message || 'خطأ في حذف الشهر'),
+  });
+
   const [showSyncModal, setShowSyncModal] = useState(false);
   const [syncItems, setSyncItems] = useState<{ item_id: string; name: string; cost: number; dayId: string }[]>([]);
   const [selectedSyncIds, setSelectedSyncIds] = useState<Set<string>>(new Set());
@@ -143,6 +151,16 @@ export default function ProcessingPage() {
       setShowPostModal(false);
     },
     onError: (err: any) => toast.error(err?.response?.data?.message || 'خطأ في التحويل'),
+  });
+
+  const syncItemCostMutation = useMutation({
+    mutationFn: ({ item_id, month }: { item_id: string; month: string }) =>
+      api.post('/production/processing/summary/sync-item-cost', { item_id, month }),
+    onSuccess: (r: any) => {
+      toast.success(r.data.message);
+      invalidateSummary();
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.message || 'خطأ في تحديث السعر'),
   });
 
   const toggleBatchExpand = (id: string) => {
@@ -550,6 +568,21 @@ export default function ProcessingPage() {
       </div>
 
       {tab === 'batches' && (<>
+        {!showForm && (
+          <div className="border border-gray-100 rounded-xl p-3 bg-white">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <input type="month" value={batchesMonth} onChange={(e) => setBatchesMonth(e.target.value)}
+                className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm" />
+              <button onClick={() => {
+                if (!confirm(`حذف جميع معالجات شهر ${batchesMonth}؟ هذا لن يؤثر على الإنتاج اليومي.`)) return;
+                deleteMonthMutation.mutate(batchesMonth);
+              }}
+                className="px-3 py-1.5 text-xs border border-red-300 text-red-600 rounded-lg hover:bg-red-50">
+                حذف معالجات الشهر
+              </button>
+            </div>
+          </div>
+        )}
         {showForm && (
           <div className="border border-gray-100 rounded-xl p-4 space-y-4 bg-white">
             <h3 className="font-semibold text-gray-700">{editBatchId ? 'تعديل المعالجة' : 'معالجة جديدة'}</h3>
@@ -739,6 +772,7 @@ export default function ProcessingPage() {
                     <th className="px-3 py-2 font-normal text-left">إجمالي الكمية</th>
                     <th className="px-3 py-2 font-normal text-left">متوسط سعر الكيلو</th>
                     <th className="px-3 py-2 font-normal text-left">إجمالي التكلفة</th>
+                    <th className="px-3 py-2 font-normal w-20"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -748,6 +782,13 @@ export default function ProcessingPage() {
                       <td className="px-3 py-2 text-left tabular-nums">{o.total_qty.toFixed(2)} {o.unit}</td>
                       <td className="px-3 py-2 text-left tabular-nums text-green-700">{o.avg_cost_per_kg.toFixed(2)} ج</td>
                       <td className="px-3 py-2 text-left tabular-nums font-medium">{o.total_cost.toFixed(2)} ج</td>
+                      <td className="px-3 py-2">
+                        <button onClick={() => syncItemCostMutation.mutate({ item_id: o.item_id, month: summaryMonth })}
+                          disabled={syncItemCostMutation.isPending}
+                          className="px-2 py-1 text-xs border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 disabled:opacity-40 whitespace-nowrap">
+                          تحديث السعر
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -757,6 +798,7 @@ export default function ProcessingPage() {
                     <td className="px-3 py-2 text-left tabular-nums">{summary.totals.total_output_qty.toFixed(2)}</td>
                     <td className="px-3 py-2 text-left tabular-nums">—</td>
                     <td className="px-3 py-2 text-left tabular-nums text-green-700">{summary.totals.total_output_cost.toFixed(2)} ج</td>
+                    <td></td>
                   </tr>
                 </tfoot>
               </table>
