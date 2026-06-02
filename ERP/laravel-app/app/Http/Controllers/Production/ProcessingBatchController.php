@@ -242,36 +242,30 @@ class ProcessingBatchController extends Controller
             ->groupBy('item_id')
             ->get();
 
-        [$year, $monthNum] = explode('-', $month);
-        $headerDate = sprintf('%02d/%02d', $monthNum, $year);
+        $headerDate = $end->format('d/m');
 
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('معمل');
         $sheet->setRightToLeft(true);
 
-        // الصف الأول: تاريخ الشهر + اسم الموقع (يطابق صيغة رفع الأذون)
+        // الصف الأول: تاريخ آخر يوم + اسم الموقع
         $sheet->setCellValue('A1', sprintf('%s | معمل', $headerDate));
-        $sheet->mergeCells('A1:E1');
+        $sheet->mergeCells('A1:C1');
         $sheet->getStyle('A1')->getFont()->setBold(true);
 
         // رأس الأعمدة
         $sheet->setCellValue('A2', 'م');
         $sheet->setCellValue('B2', 'الصنف');
-        $sheet->setCellValue('C2', 'الوحدة');
-        $sheet->setCellValue('D2', 'الكمية');
-        $sheet->setCellValue('E2', 'التكلفة');
+        $sheet->setCellValue('C2', 'الكمية');
 
         $row = 3;
         $seq = 1;
         foreach ($inputs as $i) {
             $qty = (float) $i->total_qty;
-            $cost = (float) $i->total_cost;
             $sheet->setCellValue('A' . $row, $seq);
             $sheet->setCellValue('B' . $row, $i->item?->name ?? '');
-            $sheet->setCellValue('C' . $row, $i->item?->unit ?? '');
-            $sheet->setCellValue('D' . $row, $qty);
-            $sheet->setCellValue('E' . $row, $cost);
+            $sheet->setCellValue('C' . $row, $qty);
             $row++;
             $seq++;
         }
@@ -279,9 +273,7 @@ class ProcessingBatchController extends Controller
         // ضبط عرض الأعمدة
         $sheet->getColumnDimension('A')->setWidth(6);
         $sheet->getColumnDimension('B')->setWidth(30);
-        $sheet->getColumnDimension('C')->setWidth(12);
-        $sheet->getColumnDimension('D')->setWidth(14);
-        $sheet->getColumnDimension('E')->setWidth(16);
+        $sheet->getColumnDimension('C')->setWidth(14);
 
         $writer = new Xlsx($spreadsheet);
         $filename = sprintf('معمل_%s.xlsx', $month);
