@@ -346,21 +346,28 @@ class ProcessingBatchController extends Controller
         $updated = [];
 
         $allOutputs = $batch->days->flatMap->outputs;
+        $grouped = $allOutputs->groupBy('item_id');
 
-        foreach ($allOutputs as $output) {
-            if (in_array($output->item_id, $data['item_ids'])) {
-                $item = Item::find($output->item_id);
-                if ($item) {
-                    $oldCost = $item->default_cost;
-                    $item->update(['default_cost' => $output->effective_cost_per_kg]);
-                    $updated[] = [
-                        'item_id'  => $item->id,
-                        'name'     => $item->name,
-                        'old_cost' => (float) $oldCost,
-                        'new_cost' => (float) $output->effective_cost_per_kg,
-                    ];
-                }
-            }
+        foreach ($grouped as $itemId => $outputs) {
+            if (!in_array($itemId, $data['item_ids'])) continue;
+
+            $item = Item::find($itemId);
+            if (!$item) continue;
+
+            $totalQty = $outputs->sum('qty');
+            $weightedCost = $totalQty > 0
+                ? $outputs->sum(fn($o) => $o->qty * $o->effective_cost_per_kg) / $totalQty
+                : 0;
+
+            $oldCost = $item->default_cost;
+            $item->update(['default_cost' => round($weightedCost, 4)]);
+
+            $updated[] = [
+                'item_id'  => $item->id,
+                'name'     => $item->name,
+                'old_cost' => (float) $oldCost,
+                'new_cost' => (float) round($weightedCost, 4),
+            ];
         }
 
         return response()->json([
