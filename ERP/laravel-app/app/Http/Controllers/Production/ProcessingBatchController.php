@@ -285,14 +285,15 @@ class ProcessingBatchController extends Controller
 
         $writer = new Xlsx($spreadsheet);
         $filename = sprintf('معمل_%s.xlsx', $month);
+        $asciiName = 'export.xlsx';
 
         ob_start();
         $writer->save('php://output');
         $content = ob_get_clean();
 
         return response($content, 200, [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+            'Content-Type'        => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => 'attachment; filename="' . $asciiName . '"; filename*=UTF-8\'\'' . rawurlencode($filename),
         ]);
     }
 
