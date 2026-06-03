@@ -116,7 +116,8 @@ export default function VoucherHistoryPage() {
     }
   };
 
-  const toggleSelect = (id: string) => {
+  const toggleSelect = (id: string, type?: string) => {
+    if (type === 'closing') return;
     setSelected(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
@@ -125,15 +126,21 @@ export default function VoucherHistoryPage() {
   };
 
   const toggleAll = () => {
-    if (selected.size === list.length) {
+    const selectable = list.filter((v: any) => v.type !== 'closing');
+    if (selected.size === selectable.length) {
       setSelected(new Set());
     } else {
-      setSelected(new Set(list.map((v: any) => v.id)));
+      setSelected(new Set(selectable.map((v: any) => v.id)));
     }
   };
 
   const handleDeleteSelected = () => {
     if (!selected.size) return;
+    const closingCount = list.filter((v: any) => selected.has(v.id) && v.type === 'closing').length;
+    if (closingCount > 0) {
+      toast.error('لا يمكن حذف أذون آخر المدة');
+      return;
+    }
     const openingCount = list.filter((v: any) => selected.has(v.id) && v.type === 'opening').length;
     let msg = `⚠️ سيتم حذف ${selected.size} إذن!\nهذا الإجراء لا يمكن التراجع عنه.`;
     if (openingCount > 0) {
@@ -144,7 +151,8 @@ export default function VoucherHistoryPage() {
   };
 
   const hasSelected = selected.size > 0;
-  const allSelected = list.length > 0 && selected.size === list.length;
+  const selectableCount = list.filter((v: any) => v.type !== 'closing').length;
+  const allSelected = selectableCount > 0 && selected.size === selectableCount;
 
   const monthName = month ? MONTHS[+month.split('-')[1] - 1] ?? '' : '';
 
@@ -276,6 +284,7 @@ export default function VoucherHistoryPage() {
                         type="checkbox"
                         checked={allSelected}
                         onChange={toggleAll}
+                        disabled={selectableCount === 0}
                         className="rounded border-gray-300"
                       />
                     </th>
@@ -314,12 +323,14 @@ export default function VoucherHistoryPage() {
                       className={`hover:bg-blue-50/40 transition-colors ${selected.has(v.id) ? 'bg-blue-50' : ''}`}
                     >
                       <td className="px-2 py-3.5">
-                        <input
-                          type="checkbox"
-                          checked={selected.has(v.id)}
-                          onChange={() => toggleSelect(v.id)}
-                          className="rounded border-gray-300"
-                        />
+                        {v.type === 'closing' ? null : (
+                          <input
+                            type="checkbox"
+                            checked={selected.has(v.id)}
+                            onChange={() => toggleSelect(v.id, v.type)}
+                            className="rounded border-gray-300"
+                          />
+                        )}
                       </td>
                       <td className="px-4 py-3.5 font-medium text-gray-700">
                         {(() => { const [y,m,d] = (v.date||'').split('T')[0].split('-'); return d&&m&&y ? `${d}/${m}/${y}` : v.date; })()}
@@ -351,25 +362,31 @@ export default function VoucherHistoryPage() {
                       </td>
                       <td className="px-4 py-3.5 text-center">
                         <div className="flex items-center justify-center gap-1.5">
-                          <Link
-                            href={`/vouchers/${v.id}/edit`}
-                            className="text-blue-500 hover:text-blue-700 hover:bg-blue-50 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors inline-flex items-center gap-1"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                            </svg>
-                            تعديل
-                          </Link>
-                          <button
-                            onClick={() => handleDelete(v.id, `${TYPE_LABELS[v.type] ?? v.type} — ${(v.date||'').split('T')[0]}`)}
-                            disabled={deleteMutation.isPending}
-                            className="text-red-400 hover:text-red-600 hover:bg-red-50 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-40 inline-flex items-center gap-1"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                            حذف
-                          </button>
+                          {v.type === 'closing' ? (
+                            <span className="text-xs text-gray-400 italic">أذن آخر المدة</span>
+                          ) : (
+                            <>
+                              <Link
+                                href={`/vouchers/${v.id}/edit`}
+                                className="text-blue-500 hover:text-blue-700 hover:bg-blue-50 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors inline-flex items-center gap-1"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                                تعديل
+                              </Link>
+                              <button
+                                onClick={() => handleDelete(v.id, `${TYPE_LABELS[v.type] ?? v.type} — ${(v.date||'').split('T')[0]}`)}
+                                disabled={deleteMutation.isPending}
+                                className="text-red-400 hover:text-red-600 hover:bg-red-50 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-40 inline-flex items-center gap-1"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                                حذف
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>

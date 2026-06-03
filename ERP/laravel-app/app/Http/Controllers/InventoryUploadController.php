@@ -103,6 +103,17 @@ class InventoryUploadController extends Controller
         $month    = $request->month;
         $warehouseId = $request->warehouse_id;
 
+        if ($type === 'final') {
+            $locked = \App\Models\MonthlyClosing::where('client_id', $clientId)
+                ->where('warehouse_id', $warehouseId)
+                ->where('month', $month)
+                ->where('is_locked', true)
+                ->exists();
+            if ($locked) {
+                abort(403, 'الشهر مقفول — لا يمكن رفع ملف إكسيل للجرد');
+            }
+        }
+
         DB::transaction(function () use ($request, $clientId, $userId, $type, $month, $warehouseId) {
             
             if ($type === 'opening') {

@@ -70,6 +70,16 @@ export default function EditVoucherPage() {
     );
   }
 
+  if (voucher.type === 'closing') {
+    return (
+      <div className="flex items-center justify-center h-64 text-amber-600 flex-col gap-4">
+        <span className="text-4xl">🔒</span>
+        <span>لا يمكن تعديل إذن آخر المدة</span>
+        <a href="/vouchers/history" className="text-blue-500 underline text-sm">العودة للسجل</a>
+      </div>
+    );
+  }
+
   const displayDate = (voucher.date || '').split('T')[0];
   const initialRows = (voucher.lines ?? []).map((line: any) => ({
     id:             Math.random().toString(36).slice(2),
