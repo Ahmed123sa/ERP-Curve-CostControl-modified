@@ -6,6 +6,7 @@ use App\Models\Production\DailyProduction;
 use App\Models\Production\ProductionDeduction;
 use App\Models\Production\Recipe;
 use App\Models\Item;
+use App\Models\Warehouse;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -74,18 +75,42 @@ class DailyProductionController extends Controller
         foreach ($manualIds as $rid) {
             $item = Item::find($rid);
             if (!$item) continue;
+            $wh = $item->default_warehouse_id
+                ? (object) ['id' => $item->default_warehouse_id, 'name' => Warehouse::find($item->default_warehouse_id)?->name]
+                : null;
             $expanded[] = [
                 'id'          => $rid,
                 'name'        => $item->name,
                 'unit'        => $item->unit,
                 'outputItem'  => ['id' => $item->id, 'name' => $item->name, 'unit' => $item->unit],
-                'outputWarehouse' => null,
+                'outputWarehouse' => $wh,
                 'is_size'     => false,
                 'size_index'  => null,
                 'grams'       => null,
                 'item_id'     => $item->id,
             ];
         }
+
+        // تحميل آخر اختيارات المخازن لكل recipe_id
+        $warehouseSelections = DailyProduction::where('client_id', $clientId)
+            ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
+            ->whereNotNull('warehouse_id')
+            ->select('recipe_id', 'warehouse_id')
+            ->get()
+            ->groupBy('recipe_id')
+            ->map(fn($items) => $items->last()->warehouse_id);
+
+        // إضافة selectedWarehouse لكل صف موسع
+        foreach ($expanded as &$row) {
+            $rid = $row['is_size'] ? $row['recipe_id'] : $row['id'];
+            if ($row['is_size']) {
+                // المقاسات تشارك نفس warehouse بتاع الوصفة الأم
+                $row['selectedWarehouse'] = $warehouseSelections[$rid] ?? $row['outputWarehouse']?->id ?? null;
+            } else {
+                $row['selectedWarehouse'] = $warehouseSelections[$rid] ?? $row['outputWarehouse']?->id ?? null;
+            }
+        }
+        unset($row);
 
         // قراءة الإنتاج اليومي — مفتاح مركب recipe_id|size_index
         $entries = DailyProduction::where('client_id', $clientId)
@@ -107,9 +132,10 @@ class DailyProductionController extends Controller
         }
 
         return response()->json([
-            'month'   => $month,
-            'recipes' => $expanded,
-            'data'    => $data,
+            'month'      => $month,
+            'recipes'    => $expanded,
+            'data'       => $data,
+            'warehouses' => Warehouse::where('client_id', $clientId)->where('is_active', true)->get(['id', 'name']),
         ]);
     }
 
@@ -119,9 +145,10 @@ class DailyProductionController extends Controller
         $data = $request->validate([
             'month'    => 'required|date_format:Y-m',
             'entries'  => 'required|array',
-            'entries.*.recipe_id' => 'required|string',
-            'entries.*.day'       => 'required|integer|between:1,31',
-            'entries.*.qty'       => 'required|numeric|min:0',
+            'entries.*.recipe_id'    => 'required|string',
+            'entries.*.day'          => 'required|integer|between:1,31',
+            'entries.*.qty'          => 'required|numeric|min:0',
+            'entries.*.warehouse_id' => 'nullable|string|exists:warehouses,id',
         ]);
 
         $month = $data['month'];
@@ -149,7 +176,10 @@ class DailyProductionController extends Controller
                         'size_index' => $sizeIndex,
                         'date'       => $date,
                     ],
-                    ['qty' => $entry['qty']]
+                    [
+                        'qty' => $entry['qty'],
+                        'warehouse_id' => $entry['warehouse_id'] ?? null,
+                    ]
                 );
             } else {
                 DailyProduction::where('client_id', $clientId)

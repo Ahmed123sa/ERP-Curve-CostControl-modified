@@ -7,6 +7,7 @@ use App\Models\MonthlyClosing;
 use App\Models\Item;
 use App\Models\Warehouse;
 use App\Models\Branch;
+use App\Models\DispatchOrder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Carbon;
 
@@ -122,11 +123,24 @@ class CostCalculationService
             $openingQty   = $openingQtyThisMonth;
             $openingValue = $openingValThisMonth;
         } else {
-            $openingQtyFromPrev = $this->currentStock($clientId, $warehouseId, $itemId, $prevMonth);
-            $openingAvgFromPrev = $this->weightedAverageCost($clientId, $warehouseId, $itemId, $prevMonth);
-            $openingValueFromPrev = round($openingQtyFromPrev * $openingAvgFromPrev, 2);
-            $openingQty   = $openingQtyFromPrev;
-            $openingValue = $openingValueFromPrev;
+            // لو الشهر السابق مش مقفّل → أول المدة = صفر (عشان المستخدم ما يشتغلش على بيانات ناقصة)
+            $prevMonthStr = $startOfMonth->copy()->subMonth()->format('Y-m');
+            $prevHasClosing = MonthlyClosing::where('client_id', $clientId)
+                ->where('warehouse_id', $warehouseId)
+                ->where('item_id', $itemId)
+                ->where('month', $prevMonthStr)
+                ->where('is_locked', true)
+                ->exists();
+            if ($prevHasClosing) {
+                $openingQtyFromPrev = $this->currentStock($clientId, $warehouseId, $itemId, $prevMonth);
+                $openingAvgFromPrev = $this->weightedAverageCost($clientId, $warehouseId, $itemId, $prevMonth);
+                $openingValueFromPrev = round($openingQtyFromPrev * $openingAvgFromPrev, 2);
+                $openingQty   = $openingQtyFromPrev;
+                $openingValue = $openingValueFromPrev;
+            } else {
+                $openingQty   = 0;
+                $openingValue = 0;
+            }
         }
 
         // مشتريات (خارجي)
@@ -184,31 +198,46 @@ class CostCalculationService
         $closingValue          = round($closingQtyTheoretical * $avgCost, 2);
 
         // 5. المنصرف موزعاً على المواقع المستلمة (فروع أو مخازن)
-        // يحل branch_id لـ warehouse_id عبر:
-        //   أ) مباشرة لو branch_id = warehouse.id
-        //   ب) اسم الفرع → warehouse بنفس الاسم و type='branch'
-        $branchDispatches = DB::table('stock_ledger')
-            ->join('dispatch_orders', 'stock_ledger.ref_id', '=', 'dispatch_orders.id')
-            ->leftJoin('warehouses as dest', 'dispatch_orders.branch_id', '=', 'dest.id')
-            ->leftJoin('branches', 'dispatch_orders.branch_id', '=', 'branches.id')
-            ->leftJoin('warehouses as dest2', function($join) {
-                $join->on('branches.name', '=', 'dest2.name')
-                     ->where('dest2.type', 'branch');
-            })
-            ->where('stock_ledger.client_id', $clientId)
-            ->where('stock_ledger.warehouse_id', $warehouseId)
-            ->where('stock_ledger.item_id', $itemId)
-            ->where('stock_ledger.ref_type', 'dispatch_order')
-            ->whereIn('stock_ledger.movement_type', ['out', 'transfer_out'])
-            ->whereBetween('stock_ledger.date', [$startOfMonth->toDateString(), $endOfMonth->toDateString()])
-            ->selectRaw('COALESCE(dest.id, dest2.id, dispatch_orders.branch_id) as branch_id')
-            ->selectRaw('COALESCE(dest.name, dest2.name, branches.name, dispatch_orders.branch_id) as branch_name')
-            ->selectRaw('SUM(ABS(stock_ledger.qty)) as qty')
-            ->groupBy(DB::raw('COALESCE(dest.id, dest2.id, dispatch_orders.branch_id)'), DB::raw('COALESCE(dest.name, dest2.name, branches.name, dispatch_orders.branch_id)'))
-            ->having('branch_id', '!=', $warehouseId)
-            ->get()
-            ->keyBy('branch_id')
-            ->toArray();
+        // يستخدم نفس collection $ledger بتاعة internal_out_qty لضمان التطابق
+        $branchDispatches = [];
+        $dispatchOutEntries = $ledger->where('voucher_type', 'dispatch')
+            ->whereIn('movement_type', ['out', 'transfer_out']);
+
+        if ($dispatchOutEntries->isNotEmpty()) {
+            $refIds = $dispatchOutEntries->pluck('ref_id')->unique()->toArray();
+            $dispatchOrders = DispatchOrder::with('branch')
+                ->whereIn('id', $refIds)
+                ->get()
+                ->keyBy('id');
+
+            $branchWarehouses = Warehouse::where('type', 'branch')
+                ->where('client_id', $clientId)
+                ->get();
+            $branchWarehousesById   = $branchWarehouses->keyBy('id');
+            $branchWarehousesByName = $branchWarehouses->keyBy('name');
+
+            foreach ($dispatchOutEntries as $entry) {
+                $order = $dispatchOrders->get($entry->ref_id);
+                if (!$order || !$order->branch_id) continue;
+
+                $dest = $branchWarehousesById->get($order->branch_id)
+                     ?? $branchWarehousesByName->get($order->branch?->name);
+
+                $resolvedId   = $dest?->id ?? $order->branch_id;
+                $resolvedName = $dest?->name ?? ($order->branch?->name ?? $order->branch_id);
+
+                if ($resolvedId == $warehouseId) continue;
+
+                if (!isset($branchDispatches[$resolvedId])) {
+                    $branchDispatches[$resolvedId] = [
+                        'branch_id'   => $resolvedId,
+                        'branch_name' => $resolvedName,
+                        'qty'         => 0,
+                    ];
+                }
+                $branchDispatches[$resolvedId]['qty'] += abs((float) $entry->qty);
+            }
+        }
 
         return [
             'opening_qty'            => $openingQty,

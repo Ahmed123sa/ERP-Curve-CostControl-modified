@@ -426,7 +426,7 @@ class ReportController extends Controller
                 $j->on('stock_ledger.ref_id', '=', 'dispatch_orders.id')
                   ->where('stock_ledger.ref_type', '=', 'dispatch_order');
             })
-            ->where('dispatch_orders.type', 'purchase')
+            ->whereIn('dispatch_orders.type', ['purchase', 'production'])
             ->get(['stock_ledger.item_id', 'stock_ledger.date', 'stock_ledger.qty']);
 
         $perItem = $lines->groupBy('item_id');

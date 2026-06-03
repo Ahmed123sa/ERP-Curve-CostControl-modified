@@ -14,7 +14,7 @@ class DailyProduction extends Model
     public $incrementing = false;
 
     protected $fillable = [
-        'id', 'client_id', 'recipe_id', 'date', 'qty', 'notes', 'size_index',
+        'id', 'client_id', 'recipe_id', 'date', 'qty', 'warehouse_id', 'notes', 'size_index',
     ];
 
     protected function casts(): array
@@ -28,5 +28,10 @@ class DailyProduction extends Model
     public function recipe(): BelongsTo
     {
         return $this->belongsTo(Recipe::class, 'recipe_id');
+    }
+
+    public function warehouse(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\Warehouse::class, 'warehouse_id');
     }
 }

@@ -9,6 +9,7 @@ export default function DailyProductionPage() {
   const today = new Date();
   const [month, setMonth] = useState(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`);
   const [editData, setEditData] = useState<Record<string, Record<number, string>>>({});
+  const [warehouseSel, setWarehouseSel] = useState<Record<string, string>>({});
   const [showAddItem, setShowAddItem] = useState(false);
   const [addItemId, setAddItemId] = useState('');
 
@@ -54,13 +55,19 @@ export default function DailyProductionPage() {
         }
       }
       setEditData(mapped);
+      const wh: Record<string, string> = {};
+      for (const r of (data.recipes || [])) {
+        if (r.selectedWarehouse) wh[r.id] = r.selectedWarehouse;
+      }
+      setWarehouseSel(wh);
     } else {
       setEditData({});
+      setWarehouseSel({});
     }
   }, [data]);
 
   const saveMutation = useMutation({
-    mutationFn: (entries: { recipe_id: string; day: number; qty: number }[]) =>
+    mutationFn: (entries: { recipe_id: string; day: number; qty: number; warehouse_id?: string }[]) =>
       api.post('/production/daily', { month, entries }),
     onSuccess: () => {
       toast.success('تم حفظ الإنتاج اليومي');
@@ -99,11 +106,12 @@ export default function DailyProductionPage() {
     : 30;
 
   const handleSave = () => {
-    const entries: { recipe_id: string; day: number; qty: number }[] = [];
+    const entries: { recipe_id: string; day: number; qty: number; warehouse_id?: string }[] = [];
     for (const [recipeId, days] of Object.entries(editData)) {
+      const wh = warehouseSel[recipeId] || undefined;
       for (const [day, val] of Object.entries(days)) {
         const qty = parseFloat(val) || 0;
-        entries.push({ recipe_id: recipeId, day: parseInt(day), qty });
+        entries.push({ recipe_id: recipeId, day: parseInt(day), qty, warehouse_id: wh });
       }
     }
     if (!entries.length) { toast('لا توجد كميات للحفظ'); return; }
@@ -192,7 +200,16 @@ export default function DailyProductionPage() {
                       </>
                     )}
                   </td>
-                  <td className="px-3 py-1.5 text-xs text-gray-400">{recipe.outputWarehouse?.name || '—'}</td>
+                  <td className="px-3 py-1.5 text-xs">
+                    <select value={warehouseSel[recipe.id] ?? ''}
+                      onChange={e => setWarehouseSel(p => ({...p, [recipe.id]: e.target.value}))}
+                      className="w-28 px-1 py-1 text-xs border border-gray-200 rounded bg-white focus:border-blue-300 focus:outline-none">
+                      <option value="">—</option>
+                      {(data?.warehouses || []).map((w: any) => (
+                        <option key={w.id} value={w.id}>{w.name}</option>
+                      ))}
+                    </select>
+                  </td>
                   {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => (
                     <td key={d} className="px-1 py-1 text-center">
                       <input
