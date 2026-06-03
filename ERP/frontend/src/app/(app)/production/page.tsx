@@ -23,6 +23,11 @@ export default function DailyProductionPage() {
     enabled: showAddItem,
   });
 
+  const { data: deductionsData } = useQuery({
+    queryKey: ['production-deductions', month],
+    queryFn: () => api.get('/production/deductions', { params: { month } }).then(r => r.data),
+  });
+
   const itemsById = useMemo(() => {
     const map: Record<string, any> = {};
     (allItems || []).forEach((i: any) => { map[i.id] = i; });
@@ -33,7 +38,6 @@ export default function DailyProductionPage() {
     if (!addItemId) return;
     const item = itemsById[addItemId];
     if (!item) return;
-    // أضف سطر للصنف في الجدول
     setEditData(prev => ({ ...prev, [addItemId]: {} }));
     setAddItemId('');
     setShowAddItem(false);
@@ -72,6 +76,15 @@ export default function DailyProductionPage() {
       qc.invalidateQueries({ queryKey: ['daily-production'] });
     },
     onError: () => toast.error('خطأ في الترحيل'),
+  });
+
+  const toggleDeduction = useMutation({
+    mutationFn: ({ recipe_id, deduct }: { recipe_id: string; deduct: boolean }) =>
+      api.post('/production/deductions/toggle', { recipe_id, month, deduct }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['production-deductions'] });
+    },
+    onError: () => toast.error('خطأ في حفظ الخصم'),
   });
 
   const updateCell = (recipeId: string, day: number, val: string) => {
@@ -154,6 +167,7 @@ export default function DailyProductionPage() {
                   <th key={d} className="px-2 py-2.5 font-medium text-center min-w-[50px]">{d}</th>
                 ))}
                 <th className="px-3 py-2.5 font-medium text-center bg-blue-50 min-w-[70px]">الإجمالي</th>
+                <th className="px-3 py-2.5 font-medium text-center min-w-[70px]">خصم</th>
               </tr>
             </thead>
             <tbody>
@@ -193,6 +207,14 @@ export default function DailyProductionPage() {
                   ))}
                   <td className="px-3 py-1.5 text-center font-medium text-blue-700 bg-blue-50/50">
                     {totalRow(recipe.id)}
+                  </td>
+                  <td className="px-3 py-1.5 text-center">
+                    {!recipe.is_size && (
+                      <input type="checkbox"
+                        checked={!!deductionsData?.[recipe.id]}
+                        onChange={(e) => toggleDeduction.mutate({ recipe_id: recipe.id, deduct: e.target.checked })}
+                        className="w-4 h-4 accent-blue-600 cursor-pointer" />
+                    )}
                   </td>
                 </tr>
               ))}

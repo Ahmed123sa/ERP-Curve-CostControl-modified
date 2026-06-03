@@ -161,6 +161,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('recipes/sync-costs', [\App\Http\Controllers\Production\RecipeController::class, 'syncCosts']);
         Route::get('daily', [\App\Http\Controllers\Production\DailyProductionController::class, 'index']);
         Route::post('daily', [\App\Http\Controllers\Production\DailyProductionController::class, 'store']);
+        Route::get('deductions', [\App\Http\Controllers\Production\DailyProductionController::class, 'deductions']);
+        Route::post('deductions/toggle', [\App\Http\Controllers\Production\DailyProductionController::class, 'toggleDeduction']);
         Route::get('post-preview', [\App\Http\Controllers\Production\ProductionPostController::class, 'preview']);
         Route::post('post', [\App\Http\Controllers\Production\ProductionPostController::class, 'post']);
         Route::get('market-prices/scrape', [\App\Http\Controllers\Production\MarketPriceController::class, 'scrape']);

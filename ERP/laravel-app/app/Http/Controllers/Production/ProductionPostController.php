@@ -3,10 +3,12 @@ namespace App\Http\Controllers\Production;
 
 use App\Http\Controllers\Controller;
 use App\Models\Production\DailyProduction;
+use App\Models\Production\ProductionDeduction;
 use App\Models\Production\Recipe;
 use App\Models\Item;
 use App\Models\DispatchOrder;
 use App\Models\DispatchLine;
+use App\Models\StockLedger;
 use App\Services\StockLedgerService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -15,6 +17,34 @@ use Illuminate\Http\Request;
 class ProductionPostController extends Controller
 {
     public function __construct(private StockLedgerService $ledger) {}
+
+    private function maybeDeduct(Request $request, string $recipeId, float $totalCost, string $orderId, string $warehouseId): void
+    {
+        $clientId = $request->user()->current_client_id;
+        $month = $request->input('month', now()->format('Y-m'));
+
+        $deduction = ProductionDeduction::where('client_id', $clientId)
+            ->where('recipe_id', $recipeId)
+            ->where('month', $month)
+            ->where('deduct', true)
+            ->first();
+
+        if (!$deduction) return;
+
+        StockLedger::create([
+            'client_id'     => $clientId,
+            'warehouse_id'  => $warehouseId,
+            'item_id'       => $recipeId,
+            'date'          => now()->toDateString(),
+            'movement_type' => 'in',
+            'voucher_type'  => 'purchase',
+            'qty'           => 0,
+            'unit_cost'     => 0,
+            'total_cost'    => -$totalCost,
+            'ref_type'      => 'dispatch_order',
+            'ref_id'        => $orderId,
+        ]);
+    }
 
     private function calcRecipeCost(Recipe $recipe): float
     {
@@ -194,6 +224,8 @@ class ProductionPostController extends Controller
                         voucherType:  'production'
                     );
 
+                    $this->maybeDeduct($request, $recipe->id, $variantTotalCost, $order->id, $recipe->output_warehouse_id);
+
                     $created[] = [
                         'voucher_id' => $order->id,
                         'item'       => Item::find($variantItemId)?->name ?? $recipe->name,
@@ -241,6 +273,8 @@ class ProductionPostController extends Controller
                     refId:        $order->id,
                     voucherType:  'production'
                 );
+
+                $this->maybeDeduct($request, $recipe->id, $totalCost, $order->id, $recipe->output_warehouse_id);
 
                 $created[] = [
                     'voucher_id' => $order->id,

@@ -3,6 +3,7 @@ namespace App\Http\Controllers\Production;
 
 use App\Http\Controllers\Controller;
 use App\Models\Production\DailyProduction;
+use App\Models\Production\ProductionDeduction;
 use App\Models\Production\Recipe;
 use App\Models\Item;
 use Carbon\Carbon;
@@ -160,5 +161,47 @@ class DailyProductionController extends Controller
         }
 
         return response()->json(['message' => 'تم حفظ الإنتاج اليومي']);
+    }
+
+    public function deductions(Request $request): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+        $month = $request->query('month', now()->format('Y-m'));
+
+        $items = ProductionDeduction::where('client_id', $clientId)
+            ->where('month', $month)
+            ->get()
+            ->keyBy('recipe_id')
+            ->map(fn($d) => $d->deduct);
+
+        return response()->json($items);
+    }
+
+    public function toggleDeduction(Request $request): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+        $data = $request->validate([
+            'recipe_id' => 'required|string',
+            'month'     => 'required|date_format:Y-m',
+            'deduct'    => 'required|boolean',
+        ]);
+
+        if ($data['deduct']) {
+            ProductionDeduction::updateOrCreate(
+                [
+                    'client_id' => $clientId,
+                    'recipe_id' => $data['recipe_id'],
+                    'month'     => $data['month'],
+                ],
+                ['deduct' => true]
+            );
+        } else {
+            ProductionDeduction::where('client_id', $clientId)
+                ->where('recipe_id', $data['recipe_id'])
+                ->where('month', $data['month'])
+                ->delete();
+        }
+
+        return response()->json(['message' => 'تم']);
     }
 }
