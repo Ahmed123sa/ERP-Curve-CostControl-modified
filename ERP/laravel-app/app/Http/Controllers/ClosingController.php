@@ -312,6 +312,27 @@ class ClosingController extends Controller
         return response()->json(['message' => "تم إقفال الشهر ({$count} صنف)"]);
     }
 
+    public function unlock(Request $request): JsonResponse
+    {
+        $request->validate([
+            'warehouse_id' => 'required|uuid',
+            'month'        => 'required|date_format:Y-m',
+        ]);
+
+        $clientId = $request->user()->current_client_id;
+
+        $count = MonthlyClosing::where('client_id', $clientId)
+            ->where('warehouse_id', $request->warehouse_id)
+            ->where('month', $request->month)
+            ->update([
+                'is_locked'  => false,
+                'locked_by'  => null,
+                'locked_at'  => null,
+            ]);
+
+        return response()->json(['message' => "تم فك إقفال الشهر ({$count} صنف)"]);
+    }
+
     /**
      * تعديل خلية وارد يومي (كمية) في التقفيل ← تحديث الفاتورة الأصلية + إعادة توليد التقفيل
      */

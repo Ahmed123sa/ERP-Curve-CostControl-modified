@@ -90,6 +90,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/closing/sync-physical', [ClosingController::class, 'syncPhysicalToActual']);
         Route::patch('/closing/{closing}/actual', [ClosingController::class, 'updateActual']);
         Route::post('/closing/lock', [ClosingController::class, 'lock']);
+        Route::post('/closing/unlock', [ClosingController::class, 'unlock']);
         Route::get('/closing/export', [ClosingController::class, 'export']);
         Route::get('/closing/export-pdf', [ClosingController::class, 'exportPdf']);
     });

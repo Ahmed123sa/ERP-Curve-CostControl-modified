@@ -136,7 +136,16 @@ export default function ClosingPage() {
     }
   });
 
-  const isSingleLocked = Array.isArray(singleData) && singleData.some((r: any) => r.is_locked);
+  const isSingleLocked = Array.isArray(singleData) && singleData.length > 0 && singleData.some((r: any) => r.is_locked);
+
+  const unlockMutation = useMutation({
+    mutationFn: () => api.post('/closing/unlock', { warehouse_id: warehouseId, month }),
+    onSuccess: () => {
+      toast.success('تم فك إقفال الشهر ✓');
+      qc.invalidateQueries({ queryKey: ['closing'] });
+      qc.invalidateQueries({ queryKey: ['grand-summary'] });
+    }
+  });
 
   // 4. تحديث الجرد الفعلي فردياً
   const updateActualMutation = useMutation({
@@ -233,7 +242,17 @@ export default function ClosingPage() {
                 </button>
                 {!editMode && (
                   <>
-                    {!isSingleLocked && (
+                    {isSingleLocked ? (
+                      <button
+                        onClick={() => {
+                          if (window.confirm('فك إقفال الشهر؟ هتقدر تعدل تاني')) {
+                            unlockMutation.mutate();
+                          }
+                        }}
+                        disabled={unlockMutation.isPending}
+                        className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700"
+                      >🔓 فك الإقفال</button>
+                    ) : (
                       <button
                         onClick={() => {
                           if (window.confirm('هل تأكد من إقفال الشهر؟ مش هينعدل بعد كده')) {
