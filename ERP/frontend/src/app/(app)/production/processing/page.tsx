@@ -88,6 +88,39 @@ export default function ProcessingPage() {
     enabled: tab === 'summary',
   });
 
+  const { data: branches = [] } = useQuery({
+    queryKey: ['branches'],
+    queryFn: () => api.get('/branches').then(r => r.data),
+    enabled: tab === 'summary',
+  });
+
+  const lastDayOfMonth = useMemo(() => {
+    const [y, m] = summaryMonth.split('-').map(Number);
+    return new Date(y, m, 0).toISOString().slice(0, 10);
+  }, [summaryMonth]);
+
+  const [branchSelections, setBranchSelections] = useState<Record<string, string>>({});
+
+  const dispatchMutation = useMutation({
+    mutationFn: (payload: any) => api.post('/vouchers/manual', payload),
+    onSuccess: () => {
+      toast.success('تم إنشاء إذن الصرف');
+      invalidateSummary();
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.message || 'خطأ في إنشاء إذن الصرف'),
+  });
+
+  const makeDispatch = (item: any, sign: 1 | -1) => {
+    const branchId = branchSelections[item.item_id];
+    if (!branchId) { toast.error('اختر الفرع أولاً'); return; }
+    dispatchMutation.mutate({
+      type: 'dispatch',
+      date: lastDayOfMonth,
+      lines: [{ item_id: item.item_id, qty: sign * item.total_qty, cost: 0 }],
+      branch_id: branchId,
+    });
+  };
+
   const itemsById = useMemo(() => {
     const map: Record<string, any> = {};
     items.forEach((i: any) => { map[i.id] = i; });
@@ -752,6 +785,8 @@ export default function ProcessingPage() {
                     <th className="px-3 py-2 font-normal text-left">إجمالي الكمية</th>
                     <th className="px-3 py-2 font-normal text-left">متوسط سعر الكيلو</th>
                     <th className="px-3 py-2 font-normal text-left">إجمالي التكلفة</th>
+                    <th className="px-3 py-2 font-normal">الفرع</th>
+                    <th className="px-3 py-2 font-normal"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -761,6 +796,28 @@ export default function ProcessingPage() {
                       <td className="px-3 py-2 text-left tabular-nums">{i.total_qty.toFixed(2)} {i.unit}</td>
                       <td className="px-3 py-2 text-left tabular-nums text-blue-700">{i.avg_cost_per_kg.toFixed(2)} ج</td>
                       <td className="px-3 py-2 text-left tabular-nums font-medium">{i.total_cost.toFixed(2)} ج</td>
+                      <td className="px-3 py-2">
+                        <select value={branchSelections[i.item_id] || ''}
+                          onChange={(e) => setBranchSelections(p => ({ ...p, [i.item_id]: e.target.value }))}
+                          className="w-36 border border-gray-200 rounded-lg px-2 py-1 text-xs outline-none">
+                          <option value="">اختر الفرع</option>
+                          {branches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        </select>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex gap-1">
+                          <button onClick={() => makeDispatch(i, 1)}
+                            disabled={dispatchMutation.isPending}
+                            className="px-2 py-1 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 whitespace-nowrap">
+                            إضافة للمعمل
+                          </button>
+                          <button onClick={() => makeDispatch(i, -1)}
+                            disabled={dispatchMutation.isPending}
+                            className="px-2 py-1 text-xs bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-40 whitespace-nowrap">
+                            طرح من المطبخ
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -770,6 +827,8 @@ export default function ProcessingPage() {
                     <td className="px-3 py-2 text-left tabular-nums">{summary.totals.total_input_qty.toFixed(2)}</td>
                     <td className="px-3 py-2 text-left tabular-nums">—</td>
                     <td className="px-3 py-2 text-left tabular-nums text-blue-700">{summary.totals.total_input_cost.toFixed(2)} ج</td>
+                    <td></td>
+                    <td></td>
                   </tr>
                 </tfoot>
               </table>

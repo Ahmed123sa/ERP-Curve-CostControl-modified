@@ -21,7 +21,7 @@ class VoucherManualRequest extends FormRequest
             'lines'        => 'required|array|min:1',
             'lines.*.item_id'      => 'required|uuid',
             'lines.*.warehouse_id' => 'nullable|uuid',
-            'lines.*.qty'          => 'required|numeric|min:0',
+            'lines.*.qty'          => 'required|numeric',
             'lines.*.cost'         => 'nullable|numeric|min:0',
         ];
     }

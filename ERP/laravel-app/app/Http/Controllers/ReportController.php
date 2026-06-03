@@ -85,7 +85,7 @@ class ReportController extends Controller
                 $data = [
                     'opening'      => $c ? (float)$c->opening_qty : 0,
                     'purchases'    => $c ? (float)$c->in_qty : 0,
-                    'internal_in'  => $c ? (float)$c->internal_in_qty : 0,
+                    'internal_in'  => $c ? ((float)$c->internal_in_qty - ($loc->type === 'branch' ? (float)$c->internal_out_qty : 0)) : 0,
                     'internal_out' => $c ? (float)$c->internal_out_qty : 0,
                     'consumption'  => $c ? (float)$c->consumption_qty : 0,
                     'theoretical'  => $c ? (float)$c->closing_qty_theoretical : 0,
@@ -104,8 +104,10 @@ class ReportController extends Controller
                     $row['totals']['purchases_qty'] += $data['purchases'];
                 }
                 
-                // إجمالي المنصرف للفروع (من المخازن)
-                $row['totals']['dispatch_qty'] += $data['internal_out'];
+                // إجمالي المنصرف للفروع = صافي المستلم للفروع
+                if ($loc->type === 'branch') {
+                    $row['totals']['dispatch_qty'] += $data['internal_in'];
+                }
                 
                 // الاستهلاك للمخازن فقط
                 if ($loc->type === 'main' || $loc->type === 'sub') {
@@ -479,14 +481,14 @@ class ReportController extends Controller
         $lines = StockLedger::withoutGlobalScope('client')
             ->where('stock_ledger.client_id', $clientId)
             ->where('stock_ledger.warehouse_id', $branchId)
-            ->whereIn('stock_ledger.movement_type', ['in', 'transfer_in'])
+            ->whereIn('stock_ledger.movement_type', ['in', 'transfer_in', 'out', 'transfer_out'])
             ->whereBetween('stock_ledger.date', [$start->toDateString(), $end->toDateString()])
             ->join('dispatch_orders', function ($j) {
                 $j->on('stock_ledger.ref_id', '=', 'dispatch_orders.id')
                   ->where('stock_ledger.ref_type', '=', 'dispatch_order');
             })
             ->whereIn('dispatch_orders.type', ['purchase', 'dispatch'])
-            ->get(['stock_ledger.item_id', 'stock_ledger.date', 'stock_ledger.qty']);
+            ->get(['stock_ledger.item_id', 'stock_ledger.date', 'stock_ledger.qty', 'stock_ledger.movement_type']);
 
         $perItem = $lines->groupBy('item_id');
         $grid = [];
@@ -494,7 +496,11 @@ class ReportController extends Controller
             $days = array_fill(1, $daysInMonth, 0.0);
             foreach ($perItem->get($item->id, collect()) as $line) {
                 $day = Carbon::parse($line->date)->day;
-                $days[$day] += (float) $line->qty;
+                $qty = (float) $line->qty;
+                if (in_array($line->movement_type, ['out', 'transfer_out'])) {
+                    $qty = -$qty;
+                }
+                $days[$day] += $qty;
             }
             $grid[] = [
                 'item_id'   => $item->id,

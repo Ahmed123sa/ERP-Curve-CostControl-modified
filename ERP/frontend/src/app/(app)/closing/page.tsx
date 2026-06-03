@@ -383,7 +383,7 @@ export default function ClosingPage() {
                             <td className="px-1.5 py-1 text-center font-mono border border-gray-300">{row.opening_qty}</td>
                             {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => {
                               const cellKey = `${row.item_id}_${String(d).padStart(2,'0')}`;
-                              const cellVal = row.daily.days?.[d] > 0 ? Number(row.daily.days[d]) : 0;
+                              const cellVal = row.daily.days?.[d] != null ? Number(row.daily.days[d]) : 0;
                               const pending = pendingEdits.find((e: any) => e.item_id === row.item_id && e.day === d && e.type === 'qty');
                               const displayVal = pending ? pending.newVal : cellVal;
 
@@ -412,7 +412,7 @@ export default function ClosingPage() {
                                     <input
                                       type="number"
                                       step="0.001"
-                                      defaultValue={cellVal > 0 ? cellVal : ''}
+                                      defaultValue={cellVal !== 0 ? cellVal : ''}
                                       className="w-full h-full bg-transparent text-center text-green-700 outline-none focus:bg-yellow-100 rounded text-xs"
                                       onFocus={async () => {
                                         if (!cellOrdersCache[cellKey]) {
@@ -443,8 +443,8 @@ export default function ClosingPage() {
                               }
 
                               return (
-                                <td key={d} className="px-2 py-1.5 text-center font-mono text-xs text-green-700 border border-gray-300">
-                                  {cellVal > 0 ? cellVal.toFixed(3) : ''}
+                                <td key={d} className={`px-2 py-1.5 text-center font-mono text-xs border border-gray-300 ${cellVal < 0 ? 'text-red-600' : 'text-green-700'}`}>
+                                  {cellVal !== 0 ? cellVal.toFixed(3) : ''}
                                 </td>
                               );
                             })}
@@ -453,7 +453,7 @@ export default function ClosingPage() {
                             {!isBranch && <td className="px-1.5 py-1 text-center font-mono border border-gray-300">{row.closing_qty_actual}</td>}
                             {isBranch && <td className="px-1.5 py-1 text-center font-mono border border-gray-300">{row.closing_qty_actual}</td>}
                             {isBranch && <td className="px-1.5 py-1 text-center font-mono text-blue-600 border border-gray-300">
-                              {(() => { const v = Number(row.opening_qty || 0) + Number(row.in_qty || 0) - Number(row.closing_qty_actual || 0); return v > 0 ? v.toFixed(3) : ''; })()}
+                              {(() => { const v = Number(row.opening_qty || 0) + (row.daily?.total || 0) - Number(row.closing_qty_actual || 0); return v.toFixed(3); })()}
                             </td>}
                             {!isBranch && <td className="px-1.5 py-1 text-center font-mono text-orange-600 border border-gray-300">
                               {(Object.values(row.branch_dispatches || {}) as any[]).reduce((s: number, d: any) => s + Number(d.qty || 0), 0) || ''}
@@ -464,7 +464,7 @@ export default function ClosingPage() {
                             {!isBranch && <td className="px-1.5 py-1 text-center font-mono border border-gray-300">{closingVal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>}
                             {isBranch && <td className="px-1.5 py-1 text-center font-mono border border-gray-300">{closingVal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>}
                             {isBranch && <td className="px-1.5 py-1 text-center font-mono text-blue-600 border border-gray-300">
-                              {(() => { const v = Number(row.opening_qty || 0) + Number(row.in_qty || 0) - Number(row.closing_qty_actual || 0); return v > 0 ? (v * avgCost).toLocaleString('en-US', { minimumFractionDigits: 2 }) : ''; })()}
+                              {(() => { const v = Number(row.opening_qty || 0) + (row.daily?.total || 0) - Number(row.closing_qty_actual || 0); return (v * avgCost).toLocaleString('en-US', { minimumFractionDigits: 2 }); })()}
                             </td>}
                             {!isBranch && <td className="px-1.5 py-1 text-center font-mono border border-gray-300">{theoreticalVal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>}
                             {!isBranch && <td className="px-1.5 py-1 text-center font-mono font-bold text-red-600 border border-gray-300">{diffQty}</td>}

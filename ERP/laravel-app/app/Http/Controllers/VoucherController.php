@@ -139,7 +139,7 @@ class VoucherController extends Controller
                 $validLines = [];
                 foreach (($voucherData['lines'] ?? []) as $lineIndex => $line) {
                     $qty = (float) ($line['qty'] ?? 0);
-                    if ($qty < 0.001) {
+                    if ($qty >= 0 && $qty < 0.001) {
                         $skipped[] = [
                             'voucher_index' => $voucherIndex,
                             'line_index'    => $lineIndex,
@@ -198,10 +198,10 @@ class VoucherController extends Controller
                     if ($voucherData['type'] === 'dispatch' && $cost <= 0) {
                         $item = Item::where('id', $line['item_id'])->where('client_id', $clientId)->first();
                         if ($item && $item->default_cost > 0) {
-                            $cost = round($qty * $item->default_cost, 2);
+                            $cost = round(abs($qty) * $item->default_cost, 2);
                         }
                     }
-                    $unitCost = $qty > 0 && $cost > 0 ? round($cost / $qty, 4) : 0;
+                    $unitCost = $qty != 0 && $cost > 0 ? round(abs($cost / $qty), 4) : 0;
 
                     $sourceWhId = null;
                     $destWhId   = null;
@@ -218,11 +218,19 @@ class VoucherController extends Controller
                         $sourceWhId = $this->resolveWarehouseId($clientId, $loc, $line['item_id']);
                         $destWhId   = $branchId ? $this->resolveBranchTargetWhId($clientId, $branchId) : $warehouseId;
 
-                        if ($sourceWhId) {
-                            $this->ledger->post($clientId, $sourceWhId, $line['item_id'], $orderDate, 'out', $qty, $cost, $unitCost, 'dispatch_order', $order->id, $voucherData['type']);
-                        }
-                        if ($destWhId && $destWhId !== $sourceWhId) {
-                            $this->ledger->post($clientId, $destWhId, $line['item_id'], $orderDate, 'in', $qty, $cost, $unitCost, 'dispatch_order', $order->id, $voucherData['type']);
+                        if ($qty >= 0) {
+                            // صرف عادي: المخزن ⇢ فرع
+                            if ($sourceWhId) {
+                                $this->ledger->post($clientId, $sourceWhId, $line['item_id'], $orderDate, 'out', $qty, $cost, $unitCost, 'dispatch_order', $order->id, $voucherData['type']);
+                            }
+                            if ($destWhId && $destWhId !== $sourceWhId) {
+                                $this->ledger->post($clientId, $destWhId, $line['item_id'], $orderDate, 'in', $qty, $cost, $unitCost, 'dispatch_order', $order->id, $voucherData['type']);
+                            }
+                        } else {
+                            // سالب: طرح من الفرع فقط — المخزن ميتأثرش
+                            if ($destWhId) {
+                                $this->ledger->post($clientId, $destWhId, $line['item_id'], $orderDate, 'out', abs($qty), $cost, $unitCost, 'dispatch_order', $order->id, $voucherData['type']);
+                            }
                         }
                     } elseif ($voucherData['type'] === 'transfer') {
                         $sourceWhId = $warehouseId;
@@ -466,10 +474,10 @@ class VoucherController extends Controller
                 if ($request->type === 'dispatch' && $cost <= 0) {
                     $item = Item::where('id', $line['item_id'])->where('client_id', $clientId)->first();
                     if ($item && $item->default_cost > 0) {
-                        $cost = round($qty * $item->default_cost, 2);
+                        $cost = round(abs($qty) * $item->default_cost, 2);
                     }
                 }
-                $unitCost = $qty > 0 && $cost > 0 ? round($cost / $qty, 4) : 0;
+                $unitCost = $qty != 0 && $cost > 0 ? round(abs($cost / $qty), 4) : 0;
 
                 $lineWhId = ($line['warehouse_id'] ?? null) ?: $warehouseId;
 
@@ -483,30 +491,15 @@ class VoucherController extends Controller
                     'date'         => $line['date'] ?? null,
                 ]);
 
-                $movementType = in_array($request->type, ['purchase', 'opening', 'adjustment', 'return']) ? 'in' : 'out';
-
-                $this->ledger->post(
-                    clientId:     $clientId,
-                    whId:         $lineWhId,
-                    itemId:       $line['item_id'],
-                    date:         $request->date,
-                    movementType: $movementType,
-                    qty:          $qty,
-                    totalCost:    $cost,
-                    unitCost:     $unitCost,
-                    refType:      'dispatch_order',
-                    refId:        $order->id,
-                    voucherType:  $request->type
-                );
-
-                if ($request->type === 'dispatch' && $branchId) {
-                    $targetWhId = $this->resolveBranchTargetWhId($clientId, $branchId);
+                if ($qty >= 0) {
+                    // موجب → مسار عادي
+                    $baseMovement = in_array($request->type, ['purchase', 'opening', 'adjustment', 'return']) ? 'in' : 'out';
                     $this->ledger->post(
                         clientId:     $clientId,
-                        whId:         $targetWhId,
+                        whId:         $lineWhId,
                         itemId:       $line['item_id'],
                         date:         $request->date,
-                        movementType: 'in',
+                        movementType: $baseMovement,
                         qty:          $qty,
                         totalCost:    $cost,
                         unitCost:     $unitCost,
@@ -514,6 +507,58 @@ class VoucherController extends Controller
                         refId:        $order->id,
                         voucherType:  $request->type
                     );
+
+                    if ($request->type === 'dispatch' && $branchId) {
+                        $targetWhId = $this->resolveBranchTargetWhId($clientId, $branchId);
+                        $this->ledger->post(
+                            clientId:     $clientId,
+                            whId:         $targetWhId,
+                            itemId:       $line['item_id'],
+                            date:         $request->date,
+                            movementType: 'in',
+                            qty:          $qty,
+                            totalCost:    $cost,
+                            unitCost:     $unitCost,
+                            refType:      'dispatch_order',
+                            refId:        $order->id,
+                            voucherType:  $request->type
+                        );
+                    }
+                } else {
+                    // سالب — للـ dispatch فقط: طرح من الفرع بدون لمس المخزن
+                    if ($request->type === 'dispatch' && $branchId) {
+                        $targetWhId = $this->resolveBranchTargetWhId($clientId, $branchId);
+                        $this->ledger->post(
+                            clientId:     $clientId,
+                            whId:         $targetWhId,
+                            itemId:       $line['item_id'],
+                            date:         $request->date,
+                            movementType: 'out',
+                            qty:          abs($qty),
+                            totalCost:    $cost,
+                            unitCost:     $unitCost,
+                            refType:      'dispatch_order',
+                            refId:        $order->id,
+                            voucherType:  $request->type
+                        );
+                    } else {
+                        // سالب في non‑dispatch (مشتريات/سحوبات) → عكس الحركة
+                        $baseMovement = in_array($request->type, ['purchase', 'opening', 'adjustment', 'return']) ? 'in' : 'out';
+                        $movementType = $baseMovement === 'in' ? 'out' : 'in';
+                        $this->ledger->post(
+                            clientId:     $clientId,
+                            whId:         $lineWhId,
+                            itemId:       $line['item_id'],
+                            date:         $request->date,
+                            movementType: $movementType,
+                            qty:          abs($qty),
+                            totalCost:    $cost,
+                            unitCost:     $unitCost,
+                            refType:      'dispatch_order',
+                            refId:        $order->id,
+                            voucherType:  $request->type
+                        );
+                    }
                 }
 
                 // تحديث default_cost للصنف بعد ترحيل المشتريات
@@ -602,10 +647,10 @@ class VoucherController extends Controller
                 if ($request->type === 'dispatch' && $cost <= 0) {
                     $item = Item::where('id', $line['item_id'])->where('client_id', $clientId)->first();
                     if ($item && $item->default_cost > 0) {
-                        $cost = round($qty * $item->default_cost, 2);
+                        $cost = round(abs($qty) * $item->default_cost, 2);
                     }
                 }
-                $unitCost = $qty > 0 && $cost > 0 ? round($cost / $qty, 4) : 0;
+                $unitCost = $qty != 0 && $cost > 0 ? round(abs($cost / $qty), 4) : 0;
 
                 DispatchLine::create([
                     'order_id'     => $order->id,
@@ -617,30 +662,14 @@ class VoucherController extends Controller
                     'date'         => $line['date'] ?? null,
                 ]);
 
-                $movementType = in_array($request->type, ['purchase', 'opening', 'adjustment', 'return']) ? 'in' : 'out';
-
-                $this->ledger->post(
-                    clientId:     $clientId,
-                    whId:         $line['warehouse_id'] ?? $request->warehouse_id,
-                    itemId:       $line['item_id'],
-                    date:         $request->date,
-                    movementType: $movementType,
-                    qty:          $qty,
-                    totalCost:    $cost,
-                    unitCost:     $unitCost,
-                    refType:      'dispatch_order',
-                    refId:        $order->id,
-                    voucherType:  $request->type
-                );
-
-                if ($request->type === 'dispatch' && !empty($request->branch_id)) {
-                    $targetWhId = $this->resolveBranchTargetWhId($clientId, $request->branch_id);
+                if ($qty >= 0) {
+                    $baseMovement = in_array($request->type, ['purchase', 'opening', 'adjustment', 'return']) ? 'in' : 'out';
                     $this->ledger->post(
                         clientId:     $clientId,
-                        whId:         $targetWhId,
+                        whId:         $line['warehouse_id'] ?? $request->warehouse_id,
                         itemId:       $line['item_id'],
                         date:         $request->date,
-                        movementType: 'in',
+                        movementType: $baseMovement,
                         qty:          $qty,
                         totalCost:    $cost,
                         unitCost:     $unitCost,
@@ -648,6 +677,56 @@ class VoucherController extends Controller
                         refId:        $order->id,
                         voucherType:  $request->type
                     );
+
+                    if ($request->type === 'dispatch' && !empty($request->branch_id)) {
+                        $targetWhId = $this->resolveBranchTargetWhId($clientId, $request->branch_id);
+                        $this->ledger->post(
+                            clientId:     $clientId,
+                            whId:         $targetWhId,
+                            itemId:       $line['item_id'],
+                            date:         $request->date,
+                            movementType: 'in',
+                            qty:          $qty,
+                            totalCost:    $cost,
+                            unitCost:     $unitCost,
+                            refType:      'dispatch_order',
+                            refId:        $order->id,
+                            voucherType:  $request->type
+                        );
+                    }
+                } else {
+                    if ($request->type === 'dispatch' && !empty($request->branch_id)) {
+                        $targetWhId = $this->resolveBranchTargetWhId($clientId, $request->branch_id);
+                        $this->ledger->post(
+                            clientId:     $clientId,
+                            whId:         $targetWhId,
+                            itemId:       $line['item_id'],
+                            date:         $request->date,
+                            movementType: 'out',
+                            qty:          abs($qty),
+                            totalCost:    $cost,
+                            unitCost:     $unitCost,
+                            refType:      'dispatch_order',
+                            refId:        $order->id,
+                            voucherType:  $request->type
+                        );
+                    } else {
+                        $baseMovement = in_array($request->type, ['purchase', 'opening', 'adjustment', 'return']) ? 'in' : 'out';
+                        $movementType = $baseMovement === 'in' ? 'out' : 'in';
+                        $this->ledger->post(
+                            clientId:     $clientId,
+                            whId:         $line['warehouse_id'] ?? $request->warehouse_id,
+                            itemId:       $line['item_id'],
+                            date:         $request->date,
+                            movementType: $movementType,
+                            qty:          abs($qty),
+                            totalCost:    $cost,
+                            unitCost:     $unitCost,
+                            refType:      'dispatch_order',
+                            refId:        $order->id,
+                            voucherType:  $request->type
+                        );
+                    }
                 }
 
                 if ($request->type === 'purchase' && $unitCost > 0) {
