@@ -140,11 +140,23 @@ class MenuReconciliationService
         }
 
         // Fallback: query stock_ledger directly
-        $opening = (float) StockLedger::where('client_id', $clientId)
+        $prevMonthStr = date('Y-m', strtotime($from . ' -1 month'));
+        $prevLocked = MonthlyClosing::where('client_id', $clientId)
             ->where('warehouse_id', $warehouseId)
             ->where('item_id', $itemId)
-            ->where('date', '<', $from)
-            ->sum(DB::raw("CASE WHEN movement_type IN ('in','transfer_in') THEN qty ELSE -qty END"));
+            ->where('month', $prevMonthStr)
+            ->where('is_locked', true)
+            ->exists();
+
+        if (!$prevLocked) {
+            $opening = 0.0;
+        } else {
+            $opening = (float) StockLedger::where('client_id', $clientId)
+                ->where('warehouse_id', $warehouseId)
+                ->where('item_id', $itemId)
+                ->where('date', '<', $from)
+                ->sum(DB::raw("CASE WHEN movement_type IN ('in','transfer_in') THEN qty ELSE -qty END"));
+        }
 
         $incoming = (float) StockLedger::where('client_id', $clientId)
             ->where('warehouse_id', $warehouseId)

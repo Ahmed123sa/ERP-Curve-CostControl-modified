@@ -154,9 +154,9 @@ export function MonthlyClosingTable({ clientId, warehouseId, month }: Props) {
       ) : (
         <div className="border border-gray-100 rounded-xl overflow-x-auto">
           <table className="w-full text-sm min-w-[900px]">
-            <thead className="bg-gray-50 text-xs text-gray-500">
+            <thead className="sticky top-0 z-10 bg-gray-50 text-xs text-gray-500">
               <tr>
-                <th className="px-3 py-2.5 text-right font-medium sticky right-0 bg-gray-50">الصنف</th>
+                <th className="px-3 py-2.5 text-right font-medium sticky right-0 bg-gray-50 z-10">الصنف</th>
                 <th className="px-3 py-2.5 font-medium">الوحدة</th>
                 <th className="px-3 py-2.5 font-medium" colSpan={2}>أول المدة</th>
                 <th className="px-3 py-2.5 font-medium" colSpan={2}>الوارد</th>
@@ -168,7 +168,7 @@ export function MonthlyClosingTable({ clientId, warehouseId, month }: Props) {
                 <th className="px-3 py-2.5 font-medium">قيمة الفرق</th>
               </tr>
               <tr className="text-gray-400 text-xs border-t border-gray-100">
-                <th className="sticky right-0 bg-gray-50"></th>
+                <th className="sticky right-0 bg-gray-50 z-10"></th>
                 <th></th>
                 <th className="px-3 py-1">كمية</th><th className="px-3 py-1">قيمة</th>
                 <th className="px-3 py-1">كمية</th><th className="px-3 py-1">قيمة</th>
@@ -184,7 +184,7 @@ export function MonthlyClosingTable({ clientId, warehouseId, month }: Props) {
 
                 return (
                   <tr key={row.id} className="border-t border-gray-50 hover:bg-gray-50/50">
-                    <td className="px-3 py-2 font-medium text-gray-800 sticky right-0 bg-white">
+                    <td className="px-3 py-2 font-medium text-gray-800 sticky right-0 bg-white z-10">
                       {row.item_name}
                     </td>
                     <td className="px-3 py-2 text-gray-500">{row.unit}</td>
@@ -262,7 +262,7 @@ export function MonthlyClosingTable({ clientId, warehouseId, month }: Props) {
             {/* المجاميع */}
             <tfoot className="bg-gray-50 border-t-2 border-gray-200 font-semibold text-sm">
               <tr>
-                <td className="px-3 py-3 sticky right-0 bg-gray-50">الإجمالي</td>
+                <td className="px-3 py-3 sticky right-0 bg-gray-50 z-10">الإجمالي</td>
                 <td></td>
                 <td></td>
                 <td className="px-3 py-3 tabular-nums">

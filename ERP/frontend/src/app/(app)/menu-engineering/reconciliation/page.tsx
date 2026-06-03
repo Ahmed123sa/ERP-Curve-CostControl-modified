@@ -206,9 +206,9 @@ export default function ReconciliationPage() {
           <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
             <table className="w-full text-sm border-collapse" style={{ minWidth: ingIds.length * 130 + 300 }}>
               {/* ─── Column headers ─── */}
-              <thead>
+              <thead className="sticky top-0 z-10">
                 <tr className="bg-gray-50 border-b-2 border-gray-300">
-                  <th className="p-2.5 text-right font-bold text-gray-700 min-w-[220px] border-l border-gray-200">
+                  <th className="sticky right-0 bg-gray-50 z-10 p-2.5 text-right font-bold text-gray-700 min-w-[220px] border-l border-gray-200">
                     الصنف
                   </th>
                   <th className="p-2.5 text-center font-bold text-gray-700 min-w-[90px] border-l border-gray-200">
@@ -250,7 +250,7 @@ export default function ReconciliationPage() {
                           key={r.id}
                           className="border-b border-gray-100 hover:bg-blue-50/20"
                         >
-                          <td className="p-2 text-gray-800 border-l border-gray-100">
+                          <td className="sticky right-0 bg-white z-10 p-2 text-gray-800 border-l border-gray-100">
                             {r.name}
                           </td>
                           <td className="p-2 text-center border-l border-gray-100">
@@ -301,7 +301,7 @@ export default function ReconciliationPage() {
 
                 {/* Total theoretical */}
                 <tr className="border-b border-gray-100">
-                  <td className="p-2 font-bold text-gray-800 border-l border-gray-100">
+                  <td className="sticky right-0 bg-white z-10 p-2 font-bold text-gray-800 border-l border-gray-100">
                     إجمالي النظري
                   </td>
                   <td className="p-2 border-l border-gray-100" />
@@ -321,7 +321,7 @@ export default function ReconciliationPage() {
 
                 {/* Opening */}
                 <tr className="border-b border-gray-100">
-                  <td className="p-2 text-gray-700 border-l border-gray-100">أول المدة</td>
+                  <td className="sticky right-0 bg-white z-10 p-2 text-gray-700 border-l border-gray-100">أول المدة</td>
                   <td className="p-2 border-l border-gray-100" />
                   {ingIds.map((id) => (
                     <td
@@ -336,7 +336,7 @@ export default function ReconciliationPage() {
 
                 {/* Purchases */}
                 <tr className="border-b border-gray-100">
-                  <td className="p-2 text-gray-700 border-l border-gray-100">المشتريات</td>
+                  <td className="sticky right-0 bg-white z-10 p-2 text-gray-700 border-l border-gray-100">المشتريات</td>
                   <td className="p-2 border-l border-gray-100" />
                   {ingIds.map((id) => (
                     <td
@@ -351,7 +351,7 @@ export default function ReconciliationPage() {
 
                 {/* Closing */}
                 <tr className="border-b border-gray-100">
-                  <td className="p-2 text-gray-700 border-l border-gray-100">آخر المدة</td>
+                  <td className="sticky right-0 bg-white z-10 p-2 text-gray-700 border-l border-gray-100">آخر المدة</td>
                   <td className="p-2 border-l border-gray-100" />
                   {ingIds.map((id) => (
                     <td
@@ -369,7 +369,7 @@ export default function ReconciliationPage() {
 
                 {/* Actual consumption */}
                 <tr className="border-b border-gray-200 bg-blue-50/20">
-                  <td className="p-2 font-bold text-blue-800 border-l border-gray-100">
+                  <td className="sticky right-0 bg-white z-10 p-2 font-bold text-blue-800 border-l border-gray-100">
                     المنصرف الفعلي
                   </td>
                   <td className="p-2 border-l border-gray-100" />
@@ -389,7 +389,7 @@ export default function ReconciliationPage() {
 
                 {/* Variance */}
                 <tr className="bg-gray-50/50">
-                  <td className="p-2 font-bold text-gray-800 border-l border-gray-100">
+                  <td className="sticky right-0 bg-white z-10 p-2 font-bold text-gray-800 border-l border-gray-100">
                     الانحراف
                   </td>
                   <td className="p-2 border-l border-gray-100" />
