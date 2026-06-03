@@ -127,6 +127,17 @@ export default function ClosingPage() {
     }
   });
 
+  const lockMutation = useMutation({
+    mutationFn: () => api.post('/closing/lock', { warehouse_id: warehouseId, month }),
+    onSuccess: () => {
+      toast.success('تم إقفال الشهر ✓');
+      qc.invalidateQueries({ queryKey: ['closing'] });
+      qc.invalidateQueries({ queryKey: ['grand-summary'] });
+    }
+  });
+
+  const isSingleLocked = Array.isArray(singleData) && singleData.some((r: any) => r.is_locked);
+
   // 4. تحديث الجرد الفعلي فردياً
   const updateActualMutation = useMutation({
     mutationFn: ({ id, actual }: { id: string, actual: number }) => 
@@ -213,14 +224,26 @@ export default function ClosingPage() {
                     setEditMode(!editMode);
                     if (editMode) { setPendingEdits([]); setPopoverTarget(null); }
                   }}
+                  disabled={isSingleLocked}
                   className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${
                     editMode ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-amber-500 text-white hover:bg-amber-600'
-                  }`}
+                  } disabled:opacity-40`}
                 >
                   {editMode ? (pendingEdits.length > 0 ? `💾 حفظ التعديلات (${pendingEdits.length})` : '✏️ وضع التعديل') : '✏️ وضع التعديل'}
                 </button>
                 {!editMode && (
                   <>
+                    {!isSingleLocked && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm('هل تأكد من إقفال الشهر؟ مش هينعدل بعد كده')) {
+                            lockMutation.mutate();
+                          }
+                        }}
+                        disabled={lockMutation.isPending}
+                        className="px-3 py-1.5 bg-gray-800 text-white rounded-lg text-sm hover:bg-gray-900"
+                      >🔒 إقفال الشهر</button>
+                    )}
                     <button
                       onClick={() => downloadExport(`${api.defaults.baseURL}/closing/export?warehouse_id=${warehouseId}&month=${month}`, `تقفيل_${month}.xlsx`)}
                       className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700"
