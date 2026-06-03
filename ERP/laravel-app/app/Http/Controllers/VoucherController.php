@@ -594,7 +594,161 @@ class VoucherController extends Controller
             $this->calc->generateMonthlyClosing($clientId, $warehouseId, $month);
         }
 
+        // التوجيه المباشر — لو وارد مخزن وفيه أصناف مرتبطة بفروع
+        if ($request->type === 'purchase' && $warehouseId) {
+            $this->createLinkedDispatches($clientId, $userId, $warehouseId, $request->date, $request->lines, $order->id);
+        }
+
         return response()->json(['message' => 'تم الحفظ', 'order_id' => $order->id], 201);
+    }
+
+    /**
+     * إنشاء أذون صرف تلقائية للأصناف المرتبطة بفروع (الربط المباشر)
+     */
+    private function createLinkedDispatches(
+        string $clientId,
+        string $userId,
+        string $warehouseId,
+        string $date,
+        array $lines,
+        string $sourceOrderId
+    ): void {
+        // Group lines by linked branch
+        $branchLines = []; // branch_id => [lines]
+        foreach ($lines as $line) {
+            $item = Item::where('id', $line['item_id'])->where('client_id', $clientId)->first();
+            if (!$item || !$item->linked_branch_id) continue;
+            $qty = (float) ($line['qty'] ?? 0);
+            if ($qty <= 0) continue;
+            $branchLines[$item->linked_branch_id][] = $line;
+        }
+
+        if (empty($branchLines)) return;
+
+        foreach ($branchLines as $branchId => $branchItems) {
+            $dispatch = DB::transaction(function () use ($clientId, $userId, $warehouseId, $date, $branchId, $branchItems, $sourceOrderId) {
+                $order = DispatchOrder::create([
+                    'client_id'       => $clientId,
+                    'type'            => 'dispatch',
+                    'date'            => $date,
+                    'warehouse_id'    => $warehouseId,
+                    'branch_id'       => $branchId,
+                    'source_order_id' => $sourceOrderId,
+                    'created_by'      => $userId,
+                    'status'          => 'confirmed',
+                    'source'          => 'manual',
+                    'notes'           => 'توزيع تلقائي من الربط المباشر',
+                ]);
+
+                foreach ($branchItems as $itemData) {
+                    $qty      = (float) $itemData['qty'];
+                    $cost     = (float) ($itemData['cost'] ?? 0);
+                    if ($cost <= 0) {
+                        $item = Item::where('id', $itemData['item_id'])->where('client_id', $clientId)->first();
+                        if ($item && $item->default_cost > 0) {
+                            $cost = round($qty * $item->default_cost, 2);
+                        }
+                    }
+                    $unitCost = $qty > 0 && $cost > 0 ? round($cost / $qty, 4) : 0;
+
+                    DispatchLine::create([
+                        'order_id'     => $order->id,
+                        'item_id'      => $itemData['item_id'],
+                        'warehouse_id' => $warehouseId,
+                        'qty'          => $qty,
+                        'total_cost'   => $cost,
+                        'unit_cost'    => $unitCost,
+                        'date'         => $date,
+                    ]);
+
+                    // خروج من المخزن
+                    $this->ledger->post(
+                        clientId:     $clientId,
+                        whId:         $warehouseId,
+                        itemId:       $itemData['item_id'],
+                        date:         $date,
+                        movementType: 'out',
+                        qty:          $qty,
+                        totalCost:    $cost,
+                        unitCost:     $unitCost,
+                        refType:      'dispatch_order',
+                        refId:        $order->id,
+                        voucherType:  'dispatch'
+                    );
+
+                    // دخول للفرع
+                    $targetWhId = $this->resolveBranchTargetWhId($clientId, $branchId);
+                    if ($targetWhId && $targetWhId !== $warehouseId) {
+                        $this->ledger->post(
+                            clientId:     $clientId,
+                            whId:         $targetWhId,
+                            itemId:       $itemData['item_id'],
+                            date:         $date,
+                            movementType: 'in',
+                            qty:          $qty,
+                            totalCost:    $cost,
+                            unitCost:     $unitCost,
+                            refType:      'dispatch_order',
+                            refId:        $order->id,
+                            voucherType:  'dispatch'
+                        );
+                    }
+                }
+
+                return $order;
+            });
+
+            // تحديث التقفيل للمخزن — خلينا نحسب من تاني عشان الـ out_qty اتغير
+            $month = substr($date, 0, 7);
+            $calc = app(\App\Services\CostCalculationService::class);
+            foreach ($branchItems as $itemData) {
+                $summary = $calc->itemMonthSummary($clientId, $warehouseId, $itemData['item_id'], $month);
+                MonthlyClosing::updateOrCreate(
+                    ['client_id' => $clientId, 'warehouse_id' => $warehouseId, 'item_id' => $itemData['item_id'], 'month' => $month],
+                    [
+                        'opening_qty'             => $summary['opening_qty'],
+                        'opening_value'           => $summary['opening_value'],
+                        'purchases_qty'           => $summary['purchases_qty'],
+                        'purchases_value'         => $summary['purchases_value'],
+                        'internal_in_qty'         => $summary['internal_in_qty'],
+                        'in_qty'                  => $summary['in_qty'],
+                        'in_value'                => $summary['in_value'],
+                        'internal_out_qty'        => $summary['internal_out_qty'],
+                        'consumption_qty'         => $summary['consumption_qty'],
+                        'out_qty'                 => $summary['out_qty'],
+                        'avg_cost'                => $summary['avg_cost'],
+                        'closing_qty_theoretical' => $summary['closing_qty_theoretical'],
+                        'closing_value'           => $summary['closing_value'],
+                        'branch_dispatches'       => $summary['branch_dispatches'],
+                    ]
+                );
+
+                // كمان للفرع
+                $targetWhId = $this->resolveBranchTargetWhId($clientId, $branchId);
+                if ($targetWhId && $targetWhId !== $warehouseId) {
+                    $branchSummary = $calc->itemMonthSummary($clientId, $targetWhId, $itemData['item_id'], $month);
+                    MonthlyClosing::updateOrCreate(
+                        ['client_id' => $clientId, 'warehouse_id' => $targetWhId, 'item_id' => $itemData['item_id'], 'month' => $month],
+                        [
+                            'opening_qty'             => $branchSummary['opening_qty'],
+                            'opening_value'           => $branchSummary['opening_value'],
+                            'purchases_qty'           => $branchSummary['purchases_qty'],
+                            'purchases_value'         => $branchSummary['purchases_value'],
+                            'internal_in_qty'         => $branchSummary['internal_in_qty'],
+                            'in_qty'                  => $branchSummary['in_qty'],
+                            'in_value'                => $branchSummary['in_value'],
+                            'internal_out_qty'        => $branchSummary['internal_out_qty'],
+                            'consumption_qty'         => $branchSummary['consumption_qty'],
+                            'out_qty'                 => $branchSummary['out_qty'],
+                            'avg_cost'                => $branchSummary['avg_cost'],
+                            'closing_qty_theoretical' => $branchSummary['closing_qty_theoretical'],
+                            'closing_value'           => $branchSummary['closing_value'],
+                            'branch_dispatches'       => $branchSummary['branch_dispatches'],
+                        ]
+                    );
+                }
+            }
+        }
     }
 
     // ── تعديل إذن (Reverse + Re-apply) ─────────────────────────
@@ -777,6 +931,19 @@ class VoucherController extends Controller
             }
         });
 
+        // التوجيه المباشر — لو ورد مخزن مع أصناف مرتبطة بفروع
+        if ($request->type === 'purchase') {
+            // 1. امسح أذون التوزيع القديمة المرتبطة (source_order_id)
+            $oldDispatches = DispatchOrder::where('source_order_id', $order->id)->get();
+            foreach ($oldDispatches as $oldDispatch) {
+                $this->ledger->reverseOrder($oldDispatch->id);
+                $oldDispatch->lines()->delete();
+                $oldDispatch->delete();
+            }
+            // 2. أنشئ أذون جديدة بالبيانات المعدلة
+            $this->createLinkedDispatches($clientId, $userId, $request->warehouse_id, $request->date, $request->lines, $order->id);
+        }
+
         // 4. تحديث التقفيل للأصناف والمخازن المتأثرة (قديمة وجديدة)
         $calc = app(\App\Services\CostCalculationService::class);
         foreach ($allWarehouseIds as $whId) {
@@ -868,7 +1035,11 @@ class VoucherController extends Controller
         $clientId = $order->client_id;
         $month    = substr($order->date, 0, 7);
 
-        // جمع الأصناف والمخازن المتأثرة قبل الحذف
+        // احذف أذون التوجيه المباشر المرتبطة (source_order_id) قبل حذف الورد الأصلي
+        $linkedDispatches = DispatchOrder::where('source_order_id', $order->id)->get();
+        $linkedDispatchIds = $linkedDispatches->pluck('id')->toArray();
+
+        // جمع الأصناف والمخازن المتأثرة قبل الحذف (للتقفيل)
         $order->load('lines');
         $itemIds      = $order->lines->pluck('item_id')->unique()->toArray();
         $warehouseIds = $order->lines->pluck('warehouse_id')->unique()->toArray();
@@ -876,9 +1047,26 @@ class VoucherController extends Controller
         if ($order->type === 'dispatch' && $order->branch_id) {
             $warehouseIds[] = $this->resolveBranchTargetWhId($clientId, $order->branch_id);
         }
+
+        // زود مخازن أذون التوجيه المباشر بردو
+        foreach ($linkedDispatches as $ld) {
+            $ld->load('lines');
+            $itemIds = array_merge($itemIds, $ld->lines->pluck('item_id')->toArray());
+            $ldWhIds = $ld->lines->pluck('warehouse_id')->toArray();
+            if ($ld->warehouse_id) $ldWhIds[] = $ld->warehouse_id;
+            if ($ld->branch_id) $ldWhIds[] = $this->resolveBranchTargetWhId($clientId, $ld->branch_id);
+            $warehouseIds = array_merge($warehouseIds, $ldWhIds);
+        }
         $warehouseIds = array_unique(array_filter($warehouseIds));
 
-        DB::transaction(function () use ($order) {
+        DB::transaction(function () use ($order, $linkedDispatches) {
+            // امسح linked dispatches الأول
+            foreach ($linkedDispatches as $ld) {
+                $this->ledger->reverseOrder($ld->id);
+                $ld->lines()->delete();
+                $ld->delete();
+            }
+            // بعدين امسح الورد الأصلي
             $this->ledger->reverseOrder($order->id);
             $order->lines()->delete();
             $order->delete();

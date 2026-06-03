@@ -18,7 +18,9 @@ class ItemController extends Controller
     public function index(Request $request): JsonResponse
     {
         $clientId = $request->user()->current_client_id;
-        $items = Item::where('client_id', $clientId)->orderBy('sort_order')->orderBy('name')->get();
+        $items = Item::where('client_id', $clientId)
+            ->with('linkedBranch:id,name')
+            ->orderBy('sort_order')->orderBy('name')->get();
         return response()->json($items);
     }
 

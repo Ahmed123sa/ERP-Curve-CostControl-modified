@@ -46,6 +46,20 @@ export default function ItemsPage() {
     enabled: !!currentClient,
   });
 
+  const { data: branches } = useQuery({
+    queryKey: ['branches'],
+    queryFn: () => api.get('/branches').then((r) => r.data),
+  });
+
+  const linkMutation = useMutation({
+    mutationFn: ({ id, linked_branch_id }: { id: string; linked_branch_id: string | null }) =>
+      api.put(`/items/${id}`, { linked_branch_id: linked_branch_id || null }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['items', currentClient?.id] });
+      toast.success('تم تحديث الربط ✓');
+    },
+  });
+
   const createMutation = useMutation({
     mutationFn: (newData: any) => api.post('/items', newData),
     onSuccess: () => {
@@ -108,6 +122,7 @@ export default function ItemsPage() {
       default_warehouse_id: item.default_warehouse_id || '',
       min_stock_level: item.min_stock_level ?? '',
       category: item.category || '',
+      linked_branch_id: item.linked_branch_id || '',
     });
   };
 
@@ -293,14 +308,15 @@ export default function ItemsPage() {
                   <th className="px-3 py-3 font-medium cursor-pointer select-none text-right" onClick={() => toggleSort('category')}>
                     <SortIcon k="category" />التصنيف
                   </th>
+                  <th className="px-3 py-3 font-medium text-right">ربط فرع</th>
                   <th className="px-3 py-3 font-medium text-center">إجراءات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {isLoading ? (
-                  <tr><td colSpan={8} className="px-6 py-16 text-center text-gray-300">جاري التحميل...</td></tr>
+                  <tr><td colSpan={9} className="px-6 py-16 text-center text-gray-300">جاري التحميل...</td></tr>
                 ) : filteredItems.length === 0 ? (
-                  <tr><td colSpan={8} className="px-6 py-16 text-center text-gray-300">لا توجد أصناف مطابقة.</td></tr>
+                  <tr><td colSpan={9} className="px-6 py-16 text-center text-gray-300">لا توجد أصناف مطابقة.</td></tr>
                 ) : filteredItems.flatMap((item: any, idx: number) => {
                   const isEditing = editingId === item.id;
                   const currentWarehouse = warehouses?.find((w: any) => w.id === item.default_warehouse_id);
@@ -308,7 +324,7 @@ export default function ItemsPage() {
                   if (insertId === item.id && insertPos === 'before') {
                     rows.push(
                       <tr key={`insert-${item.id}`} className="bg-indigo-50/70">
-                        <td colSpan={8} className="px-4 py-2.5">
+                        <td colSpan={9} className="px-4 py-2.5">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-[11px] text-indigo-500 font-medium whitespace-nowrap">
                               إضافة قبل "{item.name}":
@@ -383,6 +399,18 @@ export default function ItemsPage() {
                         ) : (<span>{item.category}</span>)}
                       </td>
 
+                      <td className="px-3 py-3">
+                        <select
+                          value={item.linked_branch_id || ''}
+                          onChange={(e) => linkMutation.mutate({ id: item.id, linked_branch_id: e.target.value || null })}
+                          disabled={linkMutation.isPending}
+                          className="border border-gray-200 rounded px-1.5 py-1 text-[11px] w-28 outline-none focus:border-amber-400 cursor-pointer"
+                        >
+                          <option value="">— بدون ربط —</option>
+                          {branches?.map((b: any) => (<option key={b.id} value={b.id}>{b.name}</option>))}
+                        </select>
+                      </td>
+
                       <td className="px-3 py-3 text-center">
                         {isEditing ? (
                           <div className="flex items-center justify-center gap-1.5">
@@ -404,7 +432,7 @@ export default function ItemsPage() {
                   if (insertId === item.id && insertPos === 'after') {
                     rows.push(
                       <tr key={`insert-${item.id}`} className="bg-indigo-50/70">
-                        <td colSpan={8} className="px-4 py-2.5">
+                        <td colSpan={9} className="px-4 py-2.5">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-[11px] text-indigo-500 font-medium whitespace-nowrap">
                               إضافة بعد "{item.name}":
