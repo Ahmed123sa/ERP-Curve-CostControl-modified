@@ -927,22 +927,22 @@ class VoucherController extends Controller
                             );
                         }
                     }
-                }
             }
-        });
 
-        // التوجيه المباشر — لو ورد مخزن مع أصناف مرتبطة بفروع
-        if ($request->type === 'purchase') {
-            // 1. امسح أذون التوزيع القديمة المرتبطة (source_order_id)
-            $oldDispatches = DispatchOrder::where('source_order_id', $order->id)->get();
-            foreach ($oldDispatches as $oldDispatch) {
-                $this->ledger->reverseOrder($oldDispatch->id);
-                $oldDispatch->lines()->delete();
-                $oldDispatch->delete();
+            // التوجيه المباشر — لو ورد مخزن مع أصناف مرتبطة بفروع
+            if ($request->type === 'purchase') {
+                // 1. امسح أذون التوزيع القديمة المرتبطة (source_order_id)
+                $oldDispatches = DispatchOrder::where('source_order_id', $order->id)->get();
+                foreach ($oldDispatches as $oldDispatch) {
+                    $this->ledger->reverseOrder($oldDispatch->id);
+                    $oldDispatch->lines()->delete();
+                    $oldDispatch->delete();
+                }
+                // 2. أنشئ أذون جديدة بالبيانات المعدلة
+                $this->createLinkedDispatches($clientId, $userId, $request->warehouse_id, $request->date, $request->lines, $order->id);
             }
-            // 2. أنشئ أذون جديدة بالبيانات المعدلة
-            $this->createLinkedDispatches($clientId, $userId, $request->warehouse_id, $request->date, $request->lines, $order->id);
         }
+        });
 
         // 4. تحديث التقفيل للأصناف والمخازن المتأثرة (قديمة وجديدة)
         $calc = app(\App\Services\CostCalculationService::class);
@@ -1037,7 +1037,6 @@ class VoucherController extends Controller
 
         // احذف أذون التوجيه المباشر المرتبطة (source_order_id) قبل حذف الورد الأصلي
         $linkedDispatches = DispatchOrder::where('source_order_id', $order->id)->get();
-        $linkedDispatchIds = $linkedDispatches->pluck('id')->toArray();
 
         // جمع الأصناف والمخازن المتأثرة قبل الحذف (للتقفيل)
         $order->load('lines');
@@ -1058,6 +1057,7 @@ class VoucherController extends Controller
             $warehouseIds = array_merge($warehouseIds, $ldWhIds);
         }
         $warehouseIds = array_unique(array_filter($warehouseIds));
+        $itemIds = array_unique($itemIds);
 
         DB::transaction(function () use ($order, $linkedDispatches) {
             // امسح linked dispatches الأول

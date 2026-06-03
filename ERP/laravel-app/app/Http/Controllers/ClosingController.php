@@ -156,15 +156,14 @@ class ClosingController extends Controller
         $whId     = $request->warehouse_id;
 
         // منع إعادة التوليد لشهر مقفول
+        $locked = MonthlyClosing::where('client_id', $clientId)
+            ->where('month', $month)
+            ->where('is_locked', true);
         if ($whId !== 'all') {
-            $locked = MonthlyClosing::where('client_id', $clientId)
-                ->where('warehouse_id', $whId)
-                ->where('month', $month)
-                ->where('is_locked', true)
-                ->exists();
-            if ($locked) {
-                abort(403, 'الشهر مقفول — لا يمكن إعادة توليد التقفيل');
-            }
+            $locked->where('warehouse_id', $whId);
+        }
+        if ($locked->exists()) {
+            abort(403, 'الشهر مقفول — لا يمكن إعادة توليد التقفيل');
         }
 
         try {
