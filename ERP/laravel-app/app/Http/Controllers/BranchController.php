@@ -14,8 +14,11 @@ class BranchController extends Controller
     public function index(Request $request): JsonResponse
     {
         $clientId = $request->user()->current_client_id;
-        $branches = Branch::where('client_id', $clientId)->get();
-        return response()->json($branches);
+        $branches = Branch::where('client_id', $clientId)->get(['id', 'name', 'is_active', 'client_id']);
+        $whBranches = Warehouse::where('type', 'branch')->get(['id', 'name', 'is_active', 'client_id']);
+        // دمج المصدرين مع إزالة التكرار حسب الاسم (Branch له أولوية)
+        $all = $branches->merge($whBranches)->unique('name')->values();
+        return response()->json($all);
     }
 
     public function store(Request $request): JsonResponse
