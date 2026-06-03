@@ -172,8 +172,7 @@ class ProductionPostController extends Controller
         }
 
         foreach ($recipes as $recipe) {
-            $unitCost = $this->calcRecipeCost($recipe);
-            if ($unitCost <= 0) continue;
+            $unitCost = max($this->calcRecipeCost($recipe), 0);
 
             $recipeEntries = $allEntries->where('recipe_id', $recipe->id);
             $sizes = $recipe->sizes ?? [];
