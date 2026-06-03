@@ -155,6 +155,18 @@ class ClosingController extends Controller
         $month    = $request->month;
         $whId     = $request->warehouse_id;
 
+        // منع إعادة التوليد لشهر مقفول
+        if ($whId !== 'all') {
+            $locked = MonthlyClosing::where('client_id', $clientId)
+                ->where('warehouse_id', $whId)
+                ->where('month', $month)
+                ->where('is_locked', true)
+                ->exists();
+            if ($locked) {
+                abort(403, 'الشهر مقفول — لا يمكن إعادة توليد التقفيل');
+            }
+        }
+
         try {
             if ($whId === 'all') {
                 $warehouses = Warehouse::where('client_id', $clientId)->where('is_active', true)->get();
@@ -199,6 +211,17 @@ class ClosingController extends Controller
         ]);
 
         $clientId = $request->user()->current_client_id;
+
+        // منع التعديل على شهر مقفول
+        $locked = MonthlyClosing::where('client_id', $clientId)
+            ->where('warehouse_id', $request->warehouse_id)
+            ->where('month', $request->month)
+            ->where('is_locked', true)
+            ->exists();
+        if ($locked) {
+            abort(403, 'الشهر مقفول — لا يمكن تعديل الجرد');
+        }
+
         $count = 0;
 
         foreach ($request->lines as $line) {
@@ -232,6 +255,17 @@ class ClosingController extends Controller
 
         $clientId = $request->user()->current_client_id;
         $whId     = $request->warehouse_id;
+
+        // منع المزامنة على شهر مقفول
+        $lockedQuery = MonthlyClosing::where('client_id', $clientId)
+            ->where('month', $request->month)
+            ->where('is_locked', true);
+        if ($whId !== 'all') {
+            $lockedQuery->where('warehouse_id', $whId);
+        }
+        if ($lockedQuery->exists()) {
+            abort(403, 'الشهر مقفول — لا يمكن تحميل الجرد النهائي');
+        }
 
         $query = MonthlyClosing::where('client_id', $clientId)
             ->where('month', $request->month)

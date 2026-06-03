@@ -162,8 +162,28 @@ class InventoryUploadController extends Controller
                     );
                 }
             } else {
-                // نوع final -> نحدث الـ physical_count في MonthlyClosing
+                // نوع final -> جرد آخر المدة
+                // 1. إنشاء إذن للتاريخ (Voucher) — بدون StockLedger لأن الجرد مش حركة مخزنية
+                $order = DispatchOrder::create([
+                    'client_id'    => $clientId,
+                    'created_by'   => $userId,
+                    'warehouse_id' => $warehouseId,
+                    'type'         => 'closing',
+                    'date'         => $month . '-01',
+                    'status'       => 'confirmed',
+                    'notes'        => 'رفع إكسيل جرد آخر المدة',
+                ]);
+
                 foreach ($request->items as $itemData) {
+                    $order->lines()->create([
+                        'item_id'      => $itemData['item_id'],
+                        'warehouse_id' => $warehouseId,
+                        'client_id'    => $clientId,
+                        'qty'          => $itemData['qty'],
+                        'unit_cost'    => 0,
+                        'total_cost'   => 0,
+                    ]);
+
                     MonthlyClosing::updateOrCreate(
                         [
                             'client_id'    => $clientId,
@@ -179,7 +199,23 @@ class InventoryUploadController extends Controller
             }
         });
 
-        // auto-generate MonthlyClosing after opening balance upload
+        // auto-sync + regenerate بعد الحفظ خارج الـ transaction
+        if ($type === 'final') {
+            MonthlyClosing::where('client_id', $clientId)
+                ->where('warehouse_id', $warehouseId)
+                ->where('month', $month)
+                ->whereNotNull('physical_count')
+                ->chunkById(100, function ($closings) {
+                    foreach ($closings as $c) {
+                        $c->closing_qty_actual = $c->physical_count;
+                        $c->diff_qty   = round($c->closing_qty_theoretical - $c->closing_qty_actual, 3);
+                        $c->diff_value = round($c->diff_qty * $c->avg_cost, 2);
+                        $c->save();
+                    }
+                });
+            $this->calc->generateMonthlyClosing($clientId, $warehouseId, $month);
+        }
+
         if ($type === 'opening') {
             $this->calc->generateMonthlyClosing($clientId, $warehouseId, $month);
         }

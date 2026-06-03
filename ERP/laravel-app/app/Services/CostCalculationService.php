@@ -125,18 +125,22 @@ class CostCalculationService
         } else {
             // لو الشهر السابق مش مقفّل → أول المدة = صفر (عشان المستخدم ما يشتغلش على بيانات ناقصة)
             $prevMonthStr = $startOfMonth->copy()->subMonth()->format('Y-m');
-            $prevHasClosing = MonthlyClosing::where('client_id', $clientId)
+            $prevClosing = MonthlyClosing::where('client_id', $clientId)
                 ->where('warehouse_id', $warehouseId)
                 ->where('item_id', $itemId)
                 ->where('month', $prevMonthStr)
                 ->where('is_locked', true)
-                ->exists();
-            if ($prevHasClosing) {
-                $openingQtyFromPrev = $this->currentStock($clientId, $warehouseId, $itemId, $prevMonth);
+                ->first();
+            if ($prevClosing) {
+                // نستخدم الرصيد الفعلي (closing_qty_actual) من الشهر السابق
+                // مش الرصيد النظري — عشان الجرد الفعلي هو اللي يحدد أول المدة
+                $openingQty = (float) (
+                    $prevClosing->closing_qty_actual
+                    ?? $prevClosing->closing_qty_theoretical
+                    ?? $this->currentStock($clientId, $warehouseId, $itemId, $prevMonth)
+                );
                 $openingAvgFromPrev = $this->weightedAverageCost($clientId, $warehouseId, $itemId, $prevMonth);
-                $openingValueFromPrev = round($openingQtyFromPrev * $openingAvgFromPrev, 2);
-                $openingQty   = $openingQtyFromPrev;
-                $openingValue = $openingValueFromPrev;
+                $openingValue = round($openingQty * $openingAvgFromPrev, 2);
             } else {
                 $openingQty   = 0;
                 $openingValue = 0;
@@ -289,13 +293,23 @@ class CostCalculationService
                 }
 
                 // لو مفيش أي حركة خالص — نحذف أي تقفيل سابق (عشان لو اتمسح إذن محدثش)
+                // بس لو فيه physical_count محفوظ — نسيبه عشان ما نضيعش الجرد
                 if ($summary['opening_qty'] == 0 && $summary['in_qty'] == 0 && $summary['out_qty'] == 0) {
-                    MonthlyClosing::where('client_id', $clientId)
+                    $hasPhysical = MonthlyClosing::where('client_id', $clientId)
                         ->where('warehouse_id', $warehouseId)
                         ->where('item_id', $item->id)
                         ->where('month', $month)
-                        ->delete();
-                    continue;
+                        ->whereNotNull('physical_count')
+                        ->exists();
+                    if (!$hasPhysical) {
+                        MonthlyClosing::where('client_id', $clientId)
+                            ->where('warehouse_id', $warehouseId)
+                            ->where('item_id', $item->id)
+                            ->where('month', $month)
+                            ->delete();
+                        continue;
+                    }
+                    // لو فيه physical_count — نكمل updateOrCreate عشان نحافظ عليه
                 }
 
                 $closing = MonthlyClosing::updateOrCreate(

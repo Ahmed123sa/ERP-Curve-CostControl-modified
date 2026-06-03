@@ -16,6 +16,7 @@ const TYPE_LABELS: Record<string, string> = {
   production:    'إنتاج',
   transfer:      'تحويل',
   opening:       'أول المدة',
+  closing:       'آخر المدة',
   adjustment:    'تسوية',
   return:        'مرتجع',
 };

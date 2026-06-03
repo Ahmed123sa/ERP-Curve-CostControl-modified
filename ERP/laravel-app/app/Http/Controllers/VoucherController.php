@@ -605,6 +605,10 @@ class VoucherController extends Controller
      */
     public function update(VoucherManualRequest $request, DispatchOrder $order): JsonResponse
     {
+        if ($order->type === 'closing') {
+            abort(403, 'لا يمكن تعديل إذن جرد آخر المدة');
+        }
+
         $clientId = $request->user()->current_client_id;
         $userId   = $request->user()->id;
         $month    = substr($request->date, 0, 7);
@@ -858,6 +862,9 @@ class VoucherController extends Controller
     public function destroy(Request $request, string $id): JsonResponse
     {
         $order = DispatchOrder::withoutGlobalScope('client')->findOrFail($id);
+        if ($order->type === 'closing') {
+            abort(403, 'لا يمكن حذف إذن جرد آخر المدة');
+        }
         $clientId = $order->client_id;
         $month    = substr($order->date, 0, 7);
 

@@ -15,6 +15,7 @@ const TYPE_LABELS: Record<string, string> = {
   production:    'إنتاج',
   transfer:      'تحويل',
   opening:       'أول المدة',
+  closing:       'آخر المدة',
   adjustment:    'تسوية',
   return:        'مرتجع',
 };
@@ -26,6 +27,7 @@ const TYPE_COLORS: Record<string, string> = {
   production:    'bg-purple-50 text-purple-700 border border-purple-200',
   transfer:      'bg-yellow-50 text-yellow-700 border border-yellow-200',
   opening:       'bg-gray-50 text-gray-700 border border-gray-200',
+  closing:       'bg-rose-50 text-rose-700 border border-rose-200',
   adjustment:    'bg-amber-50 text-amber-700 border border-amber-200',
   return:        'bg-teal-50 text-teal-700 border border-teal-200',
 };

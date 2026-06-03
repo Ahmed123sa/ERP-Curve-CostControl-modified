@@ -50,7 +50,7 @@ export default function FinalBalancePage() {
       }));
       setLines(allLines);
     }
-  }, [warehouseId, month, items.length, isLoadingExisting]);
+  }, [warehouseId, month, items.length, isLoadingExisting, existingClosings]);
 
   const updateLine = (idx: number, field: string, value: any) => {
     setLines(lines.map((l, i) => i === idx ? { ...l, [field]: value } : l));
