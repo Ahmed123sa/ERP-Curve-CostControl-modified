@@ -872,10 +872,12 @@ class ComprehensiveExportService
                 $rowData[] = $c ? (float) $c->in_qty : 0;
             }
 
-            // Consumption per branch
+            // Consumption per branch (net internal transfers to match grandSummary)
             foreach ($branches as $br) {
                 $c = $itemClosings->where('warehouse_id', $br->id)->first();
-                $rowData[] = $c ? (float) $c->in_qty : 0;
+                $con = $c ? ((float) $c->internal_in_qty - (float) $c->internal_out_qty) : 0;
+                if ($con < 0) $con = 0;
+                $rowData[] = $con;
             }
 
             // Avg cost

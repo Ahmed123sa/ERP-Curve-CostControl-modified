@@ -1,7 +1,8 @@
 'use client';
-import React, { useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { payrollApi } from '@/lib/payroll/api';
+import { api } from '@/lib/api';
 import { PageHeader } from '@/components/ui/AppShell';
 import toast from 'react-hot-toast';
 
@@ -132,12 +133,37 @@ export default function PayrollMonthlyPage() {
     if (e.key === 'Escape') cancelEdit();
   };
 
-  const handleExportExcel = (payrollId: string) => {
-    const token = localStorage.getItem('erp_token');
-    const link = document.createElement('a');
-    link.href = `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'}/payroll/monthly/${payrollId}/export-excel?token=${token}`;
-    link.click();
-    toast.success('جاري التصدير...');
+  const handleToggleRestDays = (detailId: string, currentVal: number) => {
+    updateCellMut.mutate({ detailId, field: 'rest_days_taken', value: currentVal ? 0 : 1 });
+  };
+
+  const handleExportExcel = async (payrollId: string) => {
+    try {
+      const res = await api.get(`/payroll/monthly/${payrollId}/export-excel`, {
+        responseType: 'blob',
+      });
+      const url = URL.createObjectURL(res.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `مرتبات_${payrollId}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success('جاري التصدير...');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'فشل التصدير');
+    }
+  };
+
+  const handleExportPayslip = async (payrollId: string, employeeId: string) => {
+    try {
+      const res = await api.get(`/payroll/monthly/${payrollId}/payslip/${employeeId}`, {
+        responseType: 'blob',
+      });
+      const url = URL.createObjectURL(res.data);
+      window.open(url, '_blank');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'فشل تحميل الكشف');
+    }
   };
 
   const currentPayroll = payrollDetail?.details ? payrollDetail : payrolls.find((p: any) => p.id === selectedPayroll);
@@ -171,7 +197,7 @@ export default function PayrollMonthlyPage() {
     return (
       <td
         className={`px-1.5 py-1.5 border-b border-gray-100 text-xs text-center whitespace-nowrap ${isEditable ? 'cursor-pointer hover:bg-blue-50 hover:ring-1 hover:ring-blue-300 hover:ring-inset transition-all' : ''} font-semibold ${field === 'net_salary' ? 'text-blue-700 text-sm' : 'text-gray-800'}`}
-        onClick={() => isEditable && startEdit(d.id, field, value)}
+        onClick={(e) => { isEditable && (e.stopPropagation(), startEdit(d.id, field, value)); }}
         title={isEditable ? `تعديل ${label}` : label}
       >
         {format ? format(value) : value}
@@ -289,6 +315,7 @@ export default function PayrollMonthlyPage() {
                     <th className="px-2 py-2 text-center font-medium text-gray-600 text-xs" title="إضافي راحات (أيام)">إضافي راحات (ي)</th>
                     <th className="px-2 py-2 text-center font-medium text-gray-600 text-xs">تطبيق (ي)</th>
                     <th className="px-2 py-2 text-center font-medium text-gray-600 text-xs">غياب (ي)</th>
+                    <th className="px-2 py-2 text-center font-medium text-gray-600 text-xs">راحات</th>
                     <th className="px-2 py-2 text-center font-medium text-gray-600 text-xs">أوفر تايم (س)</th>
                     <th className="px-2 py-2 text-center font-medium text-gray-600 text-xs">خصم غياب</th>
                     <th className="px-2 py-2 text-center font-medium text-gray-600 text-xs">إضافي راحات</th>
@@ -314,6 +341,12 @@ export default function PayrollMonthlyPage() {
                         {renderCell(d, 'rest_day_ot_days', 'إضافي راحات', fmt0)}
                         {renderCell(d, 'double_shift_days', 'تطبيق', fmt0)}
                         {renderCell(d, 'absence_days', 'غياب', fmt0)}
+                        <td className="px-1 py-1.5 text-center">
+                          <button onClick={(e) => { e.stopPropagation(); handleToggleRestDays(d.id, d.rest_days_taken); }}
+                            className={`text-xs px-2 py-1 rounded font-medium transition-colors ${d.rest_days_taken ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                            {d.rest_days_taken ? 'إلغاء' : 'راحات'}
+                          </button>
+                        </td>
                         {renderCell(d, 'overtime_hours', 'أوفر تايم', (v) => (v ?? 0).toFixed(1))}
                         {renderCell(d, 'absence_amount', 'خصم غياب', fmt2)}
                         {renderCell(d, 'rest_day_ot_amount', 'إضافي راحات', fmt2)}
@@ -323,13 +356,13 @@ export default function PayrollMonthlyPage() {
                         {renderCell(d, 'advance_amount', 'سلفة', fmt2)}
                         <td className="px-2 py-1.5 text-xs text-center font-semibold text-red-600">{d.total_deductions.toFixed(2)}</td>
                         <td className="px-2 py-1.5 text-sm text-center font-bold text-blue-700">{d.net_salary.toFixed(2)}</td>
-                        <td className="px-2 py-1.5 text-center">
-                          <a href={`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'}/payroll/monthly/${selectedPayroll}/payslip/${d.employee_id}`} target="_blank" className="text-xs text-blue-600 hover:text-blue-800" onClick={(e) => e.stopPropagation()}>PDF</a>
-                        </td>
+                          <td className="px-2 py-1.5 text-center">
+                            <button onClick={(e) => { e.stopPropagation(); handleExportPayslip(selectedPayroll!, d.employee_id); }} className="text-xs text-blue-600 hover:text-blue-800">PDF</button>
+                          </td>
                       </tr>
                       {expandedEmp === d.employee_id && (
                         <tr className="bg-gray-50">
-                          <td colSpan={19} className="px-4 py-3">
+                          <td colSpan={20} className="px-4 py-3">
                             <div className="max-w-lg" onClick={(e) => e.stopPropagation()}>
                               <h4 className="text-sm font-semibold mb-2">المكافآت — {d.employee?.name}</h4>
                               {bonusItems.map((item, idx) => (
@@ -348,9 +381,19 @@ export default function PayrollMonthlyPage() {
                         </tr>
                       )}
                     </React.Fragment>
-                  ))}
-                </tbody>
-              </table>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-blue-50/70 border-t-2 border-blue-200">
+                    <tr>
+                      <td colSpan={17} className="px-2 py-2 text-xs text-center font-bold text-gray-700">إجمالي الصافي</td>
+                      <td></td>
+                      <td className="px-2 py-2 text-sm text-center font-bold text-blue-800">
+                        {details.reduce((s: number, d: any) => s + (d.net_salary || 0), 0).toFixed(2)}
+                      </td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                </table>
             </div>
           </div>
         )}

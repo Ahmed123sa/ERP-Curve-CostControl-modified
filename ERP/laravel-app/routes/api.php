@@ -93,6 +93,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/closing/unlock', [ClosingController::class, 'unlock']);
         Route::get('/closing/export', [ClosingController::class, 'export']);
         Route::get('/closing/export-pdf', [ClosingController::class, 'exportPdf']);
+        Route::get('/closing/export-location', [ClosingController::class, 'exportLocationExcel']);
         Route::get('/closing/export-cycle', [ClosingController::class, 'exportCycle']);
     });
 

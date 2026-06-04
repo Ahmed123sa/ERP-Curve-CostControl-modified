@@ -46,8 +46,16 @@ class PayrollCalcService
                 $overtimeHours = $records->sum('overtime_minutes') / 60;
                 $doubleShiftDays = $records->where('is_double_shift', true)->count();
 
-                $restDayOTDays = max(4 - $absenceDays, 0);
-                $effectiveAbsence = max($absenceDays - 4, 0);
+                $skipRestDays = $existingDetail?->rest_days_taken ?? false;
+
+                if ($skipRestDays) {
+                    $restDayOTDays = 0;
+                    $effectiveAbsence = 0;
+                } else {
+                    $allowedRestDays = $workDays * 4 / 30;
+                    $restDayOTDays = max(0, (int) round($allowedRestDays - $absenceDays));
+                    $effectiveAbsence = max(0, $absenceDays - (int) round($allowedRestDays));
+                }
 
                 $advanceAmount = 0;
                 if ($employee->financial_employee_id) {
@@ -86,14 +94,20 @@ class PayrollCalcService
                         'double_shift_days' => $doubleShiftDays,
                         'double_shift_amount' => round($doubleShiftAmount, 2),
                         'advance_amount' => round($advanceAmount, 2),
+                        'rest_days_taken' => $existingDetail?->rest_days_taken ?? 0,
                     ]
                 );
 
                 $detail->load('bonusItems');
                 $bonusTotal = $detail->bonusItems->sum('amount');
 
-                $totalDeductions = $absenceAmount + $advanceAmount;
-                $baseAmount = $workDays * $dailyWage;
+                if ($skipRestDays) {
+                    $totalDeductions = $advanceAmount;
+                    $baseAmount = $workDays * $dailyWage;
+                } else {
+                    $totalDeductions = $absenceAmount + $advanceAmount;
+                    $baseAmount = $baseDays * $dailyWage;
+                }
                 $netSalary = round($baseAmount + $overtimeAmount + $restDayOTAmount + $doubleShiftAmount + $bonusTotal - $totalDeductions, 2);
 
                 $detail->update([
@@ -150,8 +164,15 @@ class PayrollCalcService
             $bonusTotal = $detail->bonusItems->sum('amount');
 
             $dailyWage = $detail->daily_wage_snapshot;
-            $baseAmount = $detail->work_days * $dailyWage;
-            $totalDeductions = $detail->absence_amount + $detail->advance_amount;
+
+            if ($detail->rest_days_taken) {
+                $baseAmount = $detail->work_days * $dailyWage;
+                $totalDeductions = $detail->advance_amount;
+            } else {
+                $baseDays = $detail->payroll->salary_base_days ?? 30;
+                $baseAmount = $baseDays * $dailyWage;
+                $totalDeductions = $detail->absence_amount + $detail->advance_amount;
+            }
             $netSalary = round($baseAmount + $detail->overtime_amount + $detail->rest_day_ot_amount
                 + $detail->double_shift_amount + $bonusTotal - $totalDeductions, 2);
 
@@ -172,6 +193,7 @@ class PayrollCalcService
             'work_days', 'absence_days', 'absence_amount',
             'overtime_hours', 'overtime_amount', 'rest_day_ot_days', 'rest_day_ot_amount',
             'double_shift_days', 'double_shift_amount', 'advance_amount', 'bonus_total',
+            'rest_days_taken',
         ];
 
         abort_unless(in_array($field, $allowedFields), 422, 'الحقل غير قابل للتعديل');
@@ -179,29 +201,67 @@ class PayrollCalcService
         return DB::transaction(function () use ($detail, $field, $value) {
             $updates = [$field => $value];
 
-            // Auto-compute derived fields when work_days or absence_days changes
+            // Auto-compute derived fields when work_days, absence_days, or rest_days_taken changes
             if ($field === 'work_days') {
                 $monthDays = (int) date('t', strtotime("{$detail->payroll->year}-{$detail->payroll->month}-01"));
                 $absenceDays = $monthDays - (int) $value;
-                $restDayOTDays = max(4 - $absenceDays, 0);
-                $effectiveAbsence = max($absenceDays - 4, 0);
+
+                if ($detail->rest_days_taken) {
+                    $restDayOTDays = 0;
+                    $effectiveAbsence = 0;
+                } else {
+                    $allowedRestDays = (int) $value * 4 / 30;
+                    $restDayOTDays = max(0, (int) round($allowedRestDays - $absenceDays));
+                    $effectiveAbsence = max(0, $absenceDays - (int) round($allowedRestDays));
+                }
+
                 $updates['absence_days'] = $absenceDays;
                 $updates['rest_day_ot_days'] = $restDayOTDays;
                 $updates['rest_day_ot_amount'] = round($restDayOTDays * $detail->daily_wage_snapshot, 2);
                 $updates['absence_amount'] = round($effectiveAbsence * $detail->daily_wage_snapshot, 2);
             } elseif ($field === 'absence_days') {
-                $restDayOTDays = max(4 - (int) $value, 0);
-                $effectiveAbsence = max((int) $value - 4, 0);
+                if ($detail->rest_days_taken) {
+                    $restDayOTDays = 0;
+                    $effectiveAbsence = 0;
+                } else {
+                    $allowedRestDays = $detail->work_days * 4 / 30;
+                    $restDayOTDays = max(0, (int) round($allowedRestDays - (int)$value));
+                    $effectiveAbsence = max(0, (int) $value - (int) round($allowedRestDays));
+                }
+                $updates['rest_day_ot_days'] = $restDayOTDays;
+                $updates['rest_day_ot_amount'] = round($restDayOTDays * $detail->daily_wage_snapshot, 2);
+                $updates['absence_amount'] = round($effectiveAbsence * $detail->daily_wage_snapshot, 2);
+            } elseif ($field === 'rest_days_taken') {
+                $updates['rest_days_taken'] = (int) $value;
+                $monthDays = (int) date('t', strtotime("{$detail->payroll->year}-{$detail->payroll->month}-01"));
+                $absenceDays = $monthDays - $detail->work_days;
+
+                if ((int) $value) {
+                    $restDayOTDays = 0;
+                    $effectiveAbsence = 0;
+                } else {
+                    $allowedRestDays = $detail->work_days * 4 / 30;
+                    $restDayOTDays = max(0, (int) round($allowedRestDays - $absenceDays));
+                    $effectiveAbsence = max(0, $absenceDays - (int) round($allowedRestDays));
+                }
+
                 $updates['rest_day_ot_days'] = $restDayOTDays;
                 $updates['rest_day_ot_amount'] = round($restDayOTDays * $detail->daily_wage_snapshot, 2);
                 $updates['absence_amount'] = round($effectiveAbsence * $detail->daily_wage_snapshot, 2);
             }
 
             $detail->update($updates);
+            $detail->refresh();
 
             // Recalculate totals
-            $totalDeductions = $detail->absence_amount + $detail->advance_amount;
-            $baseAmount = $detail->work_days * $detail->daily_wage_snapshot;
+            if ($detail->rest_days_taken) {
+                $totalDeductions = $detail->advance_amount;
+                $baseAmount = $detail->work_days * $detail->daily_wage_snapshot;
+            } else {
+                $totalDeductions = $detail->absence_amount + $detail->advance_amount;
+                $baseDays = $detail->payroll->salary_base_days ?? 30;
+                $baseAmount = $baseDays * $detail->daily_wage_snapshot;
+            }
             $netSalary = round($baseAmount + $detail->overtime_amount + $detail->rest_day_ot_amount
                 + $detail->double_shift_amount + $detail->bonus_total - $totalDeductions, 2);
 

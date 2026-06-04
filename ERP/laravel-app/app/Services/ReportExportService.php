@@ -86,10 +86,11 @@ class ReportExportService
                 $totalReceipts += $in;
             }
 
-            // Consumption per branch
+            // Consumption per branch (net internal transfers to match grandSummary)
             foreach ($branches as $br) {
                 $c = $itemClosings->where('warehouse_id', $br->id)->first();
-                $con = $c ? (float) $c->in_qty : 0;
+                $con = $c ? ((float) $c->internal_in_qty - (float) $c->internal_out_qty) : 0;
+                if ($con < 0) $con = 0;
                 $row[] = $con;
                 $totalConsumption += $con;
             }
@@ -365,6 +366,12 @@ class ReportExportService
         $inIdx      = 3 + $daysInMonth;            // إجمالي الوارد
         $closingIdx = $inIdx + 2;                   // آخر المدة
         $openingIdx = 2;                            // أول المدة
+        $valueOpeningIdx   = $isBranch ? $closingIdx + 2 : $closingIdx + 3; // قيمة أول المدة
+        $valuePurchasesIdx = $isBranch ? $closingIdx + 3 : $closingIdx + 4; // قيمة المشتريات
+        $valueClosingIdx   = $isBranch ? $closingIdx + 4 : $closingIdx + 5; // قيمة آخر المدة
+        $valueOpeningCol   = Coordinate::stringFromColumnIndex($valueOpeningIdx + 1);
+        $valuePurchasesCol = Coordinate::stringFromColumnIndex($valuePurchasesIdx + 1);
+        $valueClosingCol   = Coordinate::stringFromColumnIndex($valueClosingIdx + 1);
         $openingValCol = Coordinate::stringFromColumnIndex($openingIdx + 1);
         $inColLetter   = Coordinate::stringFromColumnIndex($inIdx + 1);
         $closingColLetter = Coordinate::stringFromColumnIndex($closingIdx + 1);
@@ -469,12 +476,6 @@ class ReportExportService
 
         // ── Summary rows ──────────────────────────────
         $sumRowStart = $lastDataRow + 2;
-        if ($isBranch) {
-            $dispatchIdx = null;
-        } else {
-            $dispatchIdx = $closingIdx + 1; // منصرف فروع
-            $dispatchColLetter = Coordinate::stringFromColumnIndex($dispatchIdx + 1);
-        }
 
         $summaryLabelStyle = [
             'font' => ['bold' => true, 'size' => 10, 'color' => ['argb' => 'FF1e3a5f']],
@@ -488,27 +489,22 @@ class ReportExportService
         $dataFirstRow = $dataStart; // row index in Excel for first data row (header row is $dataStart, data starts at $dataStart+1)
         $dataFirstDataRow = $dataStart + 1;
 
-        // Compute received qty/val in PHP (can't easily formula these)
-        $totReceivedQty = 0; $totReceivedVal = 0;
+        // Compute received value in PHP
+        $totReceivedVal = 0;
         foreach ($rows as $ri => $row) {
             if ($ri === 0) continue;
-            $closing = (float) ($row[$closingIdx] ?? 0);
-            $rQty = (float) ($row[2] ?? 0) + (float) ($row[$inIdx] ?? 0) - $closing;
-            $totReceivedQty += $rQty;
-            $totReceivedVal += $rQty * (float) ($row[$inIdx + 1] ?? 0);
+            $openingVal  = (float) ($row[$valueOpeningIdx] ?? 0);
+            $purchasesVal = (float) ($row[$valuePurchasesIdx] ?? 0);
+            $closingVal  = (float) ($row[$valueClosingIdx] ?? 0);
+            $totReceivedVal += $openingVal + $purchasesVal - $closingVal;
         }
 
-        // Summary: first 3-4 rows use =SUM formulas, last 2 use PHP values
         $summaryData = [
-            ['إجمالي أول المدة', "=SUM({$openingValCol}{$dataFirstDataRow}:{$openingValCol}{$lastDataRow})"],
-            ['إجمالي المشتريات', "=SUM({$inColLetter}{$dataFirstDataRow}:{$inColLetter}{$lastDataRow})"],
-            ['إجمالي آخر المدة', "=SUM({$closingColLetter}{$dataFirstDataRow}:{$closingColLetter}{$lastDataRow})"],
+            ['إجمالي قيمة أول المدة', "=SUM({$valueOpeningCol}{$dataFirstDataRow}:{$valueOpeningCol}{$lastDataRow})"],
+            ['إجمالي قيمة المشتريات', "=SUM({$valuePurchasesCol}{$dataFirstDataRow}:{$valuePurchasesCol}{$lastDataRow})"],
+            ['إجمالي قيمة آخر المدة', "=SUM({$valueClosingCol}{$dataFirstDataRow}:{$valueClosingCol}{$lastDataRow})"],
+            ['إجمالي قيمة المستلم الفعلي', round($totReceivedVal, 2)],
         ];
-        if (!$isBranch) {
-            $summaryData[] = ['إجمالي منصرف فروع', "=SUM({$dispatchColLetter}{$dataFirstDataRow}:{$dispatchColLetter}{$lastDataRow})"];
-        }
-        $summaryData[] = ['قيمة المستلم الفعلي (كمية)', round($totReceivedQty, 3)];
-        $summaryData[] = ['قيمة المستلم الفعلي (قيمة)', round($totReceivedVal, 2)];
 
         foreach ($summaryData as $si => $sRow) {
             $r = $sumRowStart + $si;

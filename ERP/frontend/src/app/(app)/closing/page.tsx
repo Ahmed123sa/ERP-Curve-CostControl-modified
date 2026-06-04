@@ -276,7 +276,10 @@ export default function ClosingPage() {
                   >🔒 إقفال الشهر</button>
                 )}
                 <button
-                  onClick={() => downloadExport('single-xls', `${api.defaults.baseURL}/closing/export?warehouse_id=${warehouseId}&month=${month}`, `تقفيل_${month}.xlsx`)}
+                  onClick={() => {
+                    const whName = (warehouses as any[]).find((w: any) => w.id === warehouseId)?.name || '';
+                    downloadExport('single-xls', `${api.defaults.baseURL}/closing/export-location?warehouse_id=${warehouseId}&month=${month}`, `تقفيل_${month}_${whName}.xlsx`);
+                  }}
                   disabled={exporting !== null}
                   className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700 disabled:opacity-50"
                 >{exporting === 'single-xls' ? '⏳...' : 'إكسيل'}</button>

@@ -684,6 +684,21 @@ class ClosingController extends Controller
         );
     }
 
+    public function exportLocationExcel(Request $request)
+    {
+        $clientId   = $request->user()->current_client_id;
+        $warehouseId = $request->warehouse_id;
+        $month      = $request->month ?? now()->format('Y-m');
+
+        if (!$warehouseId) {
+            return response()->json(['message' => 'warehouse_id مطلوب'], 422);
+        }
+
+        return app(\App\Services\ReportExportService::class)->exportLocationExcel(
+            $clientId, $warehouseId, $month
+        );
+    }
+
     public function exportCycle(Request $request)
     {
         $clientId = $request->user()->current_client_id;
