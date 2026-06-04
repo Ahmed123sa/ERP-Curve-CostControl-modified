@@ -135,6 +135,7 @@ class AttendanceController extends Controller
         $presentDays = 0;
         $doubleShiftDays = 0;
         $overtimeDays = 0;
+        $shortageDays = 0;
 
         $row = 5;
         $firstDataRow = $row;
@@ -149,8 +150,7 @@ class AttendanceController extends Controller
 
             $record = $recordMap[$day] ?? null;
             if ($record) {
-                $overtimeH = $record['overtime_minutes'] / 60;
-                $overShiftH = max($record['total_hours'] - $shiftHours, 0);
+                $netDiffH = $record['overtime_minutes'] / 60;
                 $isDoubleShift = $record['is_double_shift'];
 
                 $sheet->setCellValue('D' . $row, $record['shift_start'] ?? '');
@@ -162,12 +162,16 @@ class AttendanceController extends Controller
                     $sheet->getStyle('G' . $row)->getFont()->getColor()->setARGB('FF5B2C6F');
                     $sheet->setCellValue('H' . $row, '—');
                     $doubleShiftDays++;
-                } elseif ($overShiftH > 0) {
+                } elseif ($netDiffH > 0) {
                     $sheet->setCellValue('G' . $row, 'إضافي');
                     $sheet->getStyle('G' . $row)->getFont()->getColor()->setARGB('FFD4A017');
-                    $sheet->setCellValueExplicit('H' . $row, round($overtimeH, 2), DataType::TYPE_NUMERIC);
+                    $sheet->setCellValueExplicit('H' . $row, round($netDiffH, 2), DataType::TYPE_NUMERIC);
                     $overtimeDays++;
-                    $overtimeAccum += $overtimeH;
+                } elseif ($netDiffH < 0) {
+                    $sheet->setCellValue('G' . $row, 'عجز');
+                    $sheet->getStyle('G' . $row)->getFont()->getColor()->setARGB('FFE74C3C');
+                    $sheet->setCellValueExplicit('H' . $row, round($netDiffH, 2), DataType::TYPE_NUMERIC);
+                    $shortageDays++;
                 } else {
                     $sheet->setCellValue('G' . $row, 'عادي');
                     $sheet->getStyle('G' . $row)->getFont()->getColor()->setARGB('FF27AE60');
@@ -176,6 +180,7 @@ class AttendanceController extends Controller
 
                 $totalHours += $record['total_hours'];
                 $presentDays++;
+                $overtimeAccum += $netDiffH;
             } else {
                 $sheet->setCellValue('F' . $row, '—');
                 $sheet->setCellValue('G' . $row, '—');
@@ -211,7 +216,7 @@ class AttendanceController extends Controller
 
         $r4 = $summaryStart + 3;
         $sheet->mergeCells("A{$r4}:D{$r4}");
-        $sheet->setCellValue("A{$r4}", 'أوفر تايم (ساعات)');
+        $sheet->setCellValue("A{$r4}", 'صافي الفرق (ساعات)');
         $sheet->getStyle("A{$r4}")->getFont()->setBold(true);
         $sheet->setCellValue("F{$r4}", round($overtimeAccum, 2));
 

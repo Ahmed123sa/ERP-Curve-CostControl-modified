@@ -155,7 +155,7 @@ export default function PayrollMonthlyPage() {
           <input
             type="number"
             step="0.01"
-            min="0"
+            min={['overtime_hours', 'overtime_amount'].includes(field) ? undefined : '0'}
             className="w-full border border-blue-400 rounded px-1.5 py-1 text-xs text-center font-medium focus:outline-none focus:ring-2 focus:ring-blue-300"
             value={editValue}
             onChange={(e) => setEditValue(e.target.value)}

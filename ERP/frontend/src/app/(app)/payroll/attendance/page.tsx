@@ -238,25 +238,26 @@ export default function PayrollAttendancePage() {
   const getShiftType = (record: any, shiftHours: number) => {
     if (!record) return null;
     const totalHours = record.total_hours;
-    const overtime = Math.max(totalHours - shiftHours, 0);
+    const diff = totalHours - shiftHours;
     if (record.is_double_shift) return { type: 'تطبيق', color: 'bg-indigo-100 text-indigo-700' };
-    if (overtime > 0) return { type: 'إضافي', color: 'bg-amber-50 text-amber-700' };
+    if (diff > 0) return { type: 'إضافي', color: 'bg-amber-50 text-amber-700' };
+    if (diff < 0) return { type: 'عجز', color: 'bg-red-50 text-red-700' };
     if (totalHours > 0) return { type: 'عادي', color: 'bg-green-50 text-green-700' };
     return null;
   };
 
   const summary = useMemo(() => {
     const shiftHours = selectedEmployee?.shift_hours ?? 9;
-    let totalPresent = 0, totalHours = 0, totalOvertimeMins = 0, doubleShiftCount = 0;
+    let totalPresent = 0, totalHours = 0, netDiffMins = 0, doubleShiftCount = 0;
     records.forEach((r: any) => {
       if (r.total_hours > 0) totalPresent++;
       totalHours += r.total_hours;
-      totalOvertimeMins += r.overtime_minutes;
       if (r.is_double_shift) doubleShiftCount++;
+      else netDiffMins += (r.total_hours - shiftHours) * 60;
     });
-    const overtimeHours = totalOvertimeMins / 60;
+    const overtimeHours = netDiffMins / 60;
     const restDayOT = Math.max(4 - (daysInMonth - totalPresent), 0);
-    return { totalPresent, totalHours, totalOvertimeMins, overtimeHours, doubleShiftCount, restDayOT };
+    return { totalPresent, totalHours, netDiffMins, overtimeHours, doubleShiftCount, restDayOT };
   }, [records, daysInMonth, selectedEmployee]);
 
   const handleExport = async () => {
@@ -401,8 +402,8 @@ export default function PayrollAttendancePage() {
                   <div className="text-sm font-bold text-gray-700">{summary.totalHours.toFixed(1)}</div>
                 </div>
                 <div className="bg-white/70 rounded-lg px-2 py-1.5">
-                  <div className="text-[10px] text-gray-400">أوفر تايم (س)</div>
-                  <div className="text-sm font-bold text-blue-700">{summary.overtimeHours.toFixed(1)}</div>
+                  <div className="text-[10px] text-gray-400">صافي الفرق (س)</div>
+                  <div className={`text-sm font-bold ${summary.overtimeHours >= 0 ? 'text-blue-700' : 'text-red-600'}`}>{summary.overtimeHours.toFixed(1)}</div>
                 </div>
                 <div className="bg-white/70 rounded-lg px-2 py-1.5">
                   <div className="text-[10px] text-gray-400">تطبيق</div>
@@ -506,8 +507,8 @@ export default function PayrollAttendancePage() {
                               <span className="text-[10px] text-gray-300">—</span>
                             )}
                           </td>
-                          <td className={`px-3 py-2 text-center text-xs font-semibold ${record?.is_double_shift ? 'text-indigo-600' : record?.overtime_minutes > 0 ? 'text-blue-600' : 'text-gray-300'}`}>
-                            {record?.is_double_shift ? 'تطبيق' : record?.overtime_minutes > 0 ? (record.overtime_minutes / 60).toFixed(1) : '—'}
+                          <td className={`px-3 py-2 text-center text-xs font-semibold ${!record ? 'text-gray-300' : record.is_double_shift ? 'text-indigo-600' : record.total_hours - shiftHours > 0 ? 'text-blue-600' : record.total_hours - shiftHours < 0 ? 'text-red-600' : 'text-gray-300'}`}>
+                            {!record ? '—' : record.is_double_shift ? 'تطبيق' : (() => { const d = record.total_hours - shiftHours; return d !== 0 ? d.toFixed(1) : '—'; })()}
                           </td>
                         </tr>
                       );
@@ -552,7 +553,7 @@ export default function PayrollAttendancePage() {
               </div>
               <div className="flex gap-3 text-xs text-gray-500 bg-gray-50 rounded-lg p-2">
                 <span>إجمالي: <strong className="text-blue-700">{computeHours(shiftStart, shiftEnd).toFixed(2)} س</strong></span>
-                <span>أوفر تايم: <strong className="text-green-700">{Math.max(0, computeHours(shiftStart, shiftEnd) - (selectedEmployee.shift_hours ?? 9)).toFixed(2)} س</strong></span>
+                <span>الفرق: <strong className={computeHours(shiftStart, shiftEnd) - (selectedEmployee.shift_hours ?? 9) >= 0 ? 'text-green-700' : 'text-red-700'}>{(computeHours(shiftStart, shiftEnd) - (selectedEmployee.shift_hours ?? 9)).toFixed(2)} س</strong></span>
               </div>
             </div>
             <div className="flex gap-2 mt-5">
