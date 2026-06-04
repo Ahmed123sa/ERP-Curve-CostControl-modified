@@ -90,6 +90,7 @@ class ReportController extends Controller
                     'consumption'  => $c ? (float)$c->consumption_qty : 0,
                     'theoretical'  => $c ? (float)$c->closing_qty_theoretical : 0,
                     'actual'       => $c ? (float)$c->closing_qty_actual : null,
+                    'closing_id'   => $c ? $c->id : null,
                 ];
 
                 $row['locations'][$loc->id] = $data;
@@ -118,16 +119,26 @@ class ReportController extends Controller
             // المعادلة: أول المدد + مشتريات المخازن - منصرف الفروع - استهلاك المخازن
             $row['totals']['theoretical'] = round($row['totals']['opening_qty'] + $row['totals']['purchases_qty'] - $row['totals']['dispatch_qty'] - $row['totals']['consumption_qty'], 3);
             
-            // الجرد الفعلي الإجمالي (يتم تخزينه في أول سجل متاح للصنف)
-            $c = $itemClosings->where('warehouse_id', $locations->firstWhere('type', 'main')->id ?? '')->first() 
-                 ?? $itemClosings->first();
-            
-            $row['totals']['actual'] = $c ? (float)$c->closing_qty_actual : null;
-            $row['totals']['closing_id'] = $c ? $c->id : null;
-            
-            // الفرق = الفعلي - النظري
-            $row['totals']['diff'] = $row['totals']['actual'] !== null 
-                ? round($row['totals']['actual'] - $row['totals']['theoretical'], 3)
+            // الجرد الفعلي الإجمالي = مجموع الأرصدة الفعلية للمخازن (main + sub) فقط
+            $totalActual = 0;
+            $hasActual = false;
+            $closingId = null;
+            foreach ($locations as $loc) {
+                if (!in_array($loc->type, ['main', 'sub'])) continue;
+                $locData = $row['locations'][$loc->id] ?? [];
+                if ($locData['actual'] !== null) {
+                    $totalActual += $locData['actual'];
+                    $hasActual = true;
+                    if ($closingId === null) $closingId = $locData['closing_id'] ?? null;
+                }
+            }
+
+            $row['totals']['actual'] = $hasActual ? round($totalActual, 3) : null;
+            $row['totals']['closing_id'] = $closingId;
+
+            // الفرق = مجموع الفعلي للمخازن - النظري
+            $row['totals']['diff'] = $hasActual
+                ? round($totalActual - $row['totals']['theoretical'], 3)
                 : 0;
             
             $matrix[] = $row;

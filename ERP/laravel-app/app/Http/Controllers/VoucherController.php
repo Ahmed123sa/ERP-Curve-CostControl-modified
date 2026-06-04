@@ -309,6 +309,11 @@ class VoucherController extends Controller
                     }
                 }
 
+                // التوجيه المباشر — لو وارد مخزن وفيه أصناف مرتبطة بفروع
+                if ($voucherData['type'] === 'purchase' && $warehouseId) {
+                    $this->createLinkedDispatches($clientId, $userId, $warehouseId, $orderDate, $voucherData['lines'], $order->id);
+                }
+
                 $saved[] = $order->id;
             }
         });
@@ -939,7 +944,7 @@ class VoucherController extends Controller
                     $oldDispatch->delete();
                 }
                 // 2. أنشئ أذون جديدة بالبيانات المعدلة
-                $this->createLinkedDispatches($clientId, $userId, $request->warehouse_id, $request->date, $request->lines, $order->id);
+                $this->createLinkedDispatches($clientId, $userId, $request->warehouse_id ?? '', $request->date, $request->lines, $order->id);
             }
         }
         });

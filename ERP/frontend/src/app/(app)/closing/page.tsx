@@ -19,6 +19,7 @@ export default function ClosingPage() {
   const [popoverTarget, setPopoverTarget] = useState<any>(null);
   const [cellOrdersCache, setCellOrdersCache] = useState<Record<string, any[]>>({});
   const { currentClient } = useAuthStore();
+  const [exporting, setExporting] = useState<string | null>(null);
 
   // 1. بيانات الـ Matrix
   const { data: matrixData, isLoading: matrixLoading } = useQuery({
@@ -162,7 +163,8 @@ export default function ClosingPage() {
   const subWarehouses = locations.filter((l: any) => l.type === 'sub');
   const branches = locations.filter((l: any) => l.type === 'branch');
 
-  const downloadExport = (url: string, filename: string) => {
+  const downloadExport = (exportKey: string, url: string, filename: string) => {
+    setExporting(exportKey);
     const token = localStorage.getItem('erp_token');
     fetch(url, { headers: { Authorization: `Bearer ${token}` } })
       .then((res) => { if (!res.ok) throw new Error(); return res.blob(); })
@@ -174,7 +176,8 @@ export default function ClosingPage() {
         URL.revokeObjectURL(link.href);
         toast.success('تم التصدير ✓');
       })
-      .catch(() => toast.error('خطأ في التصدير'));
+      .catch(() => toast.error('خطأ في التصدير'))
+      .finally(() => setExporting(null));
   };
 
   return (
@@ -206,6 +209,15 @@ export default function ClosingPage() {
               <span>{generateMutation.isPending ? 'جاري الحساب...' : 'تحديث الحسابات ⚙️'}</span>
             </button>
 
+            <button
+              onClick={() => downloadExport('cycle', `${api.defaults.baseURL}/closing/export-cycle?month=${month}`, `الدورة_الكاملة_${month}.xlsx`)}
+              disabled={exporting !== null}
+              className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 disabled:opacity-50 flex items-center gap-2"
+              title="تصدير الدورة الكاملة (إنتاج + مخازن + فروع + تقفيل)"
+            >
+              {exporting === 'cycle' ? '⏳ جاري التصدير...' : <span>تصدير الدورة الكاملة 📊</span>}
+            </button>
+
             {viewType === 'matrix' && (
               <>
                 <button
@@ -216,13 +228,15 @@ export default function ClosingPage() {
                   <span>تحميل الجرد النهائي 📥</span>
                 </button>
                 <button
-                  onClick={() => downloadExport(`${api.defaults.baseURL}/reports/grand-summary/export?month=${month}`, `مصفوفة_خامات_${month}.xlsx`)}
-                  className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700"
-                >إكسيل</button>
+                  onClick={() => downloadExport('matrix-xls', `${api.defaults.baseURL}/reports/grand-summary/export?month=${month}`, `مصفوفة_خامات_${month}.xlsx`)}
+                  disabled={exporting !== null}
+                  className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700 disabled:opacity-50"
+                >{exporting === 'matrix-xls' ? '⏳...' : 'إكسيل'}</button>
                 <button
-                  onClick={() => downloadExport(`${api.defaults.baseURL}/reports/grand-summary/export-pdf?month=${month}`, `مصفوفة_خامات_${month}.pdf`)}
-                  className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700"
-                >PDF</button>
+                  onClick={() => downloadExport('matrix-pdf', `${api.defaults.baseURL}/reports/grand-summary/export-pdf?month=${month}`, `مصفوفة_خامات_${month}.pdf`)}
+                  disabled={exporting !== null}
+                  className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 disabled:opacity-50"
+                >{exporting === 'matrix-pdf' ? '⏳...' : 'PDF'}</button>
               </>
             )}
             {viewType === 'single' && warehouseId && (
@@ -262,13 +276,15 @@ export default function ClosingPage() {
                   >🔒 إقفال الشهر</button>
                 )}
                 <button
-                  onClick={() => downloadExport(`${api.defaults.baseURL}/closing/export?warehouse_id=${warehouseId}&month=${month}`, `تقفيل_${month}.xlsx`)}
-                  className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700"
-                >إكسيل</button>
+                  onClick={() => downloadExport('single-xls', `${api.defaults.baseURL}/closing/export?warehouse_id=${warehouseId}&month=${month}`, `تقفيل_${month}.xlsx`)}
+                  disabled={exporting !== null}
+                  className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700 disabled:opacity-50"
+                >{exporting === 'single-xls' ? '⏳...' : 'إكسيل'}</button>
                 <button
-                  onClick={() => downloadExport(`${api.defaults.baseURL}/closing/export-pdf?warehouse_id=${warehouseId}&month=${month}`, `تقفيل_${month}.pdf`)}
-                  className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700"
-                >PDF</button>
+                  onClick={() => downloadExport('single-pdf', `${api.defaults.baseURL}/closing/export-pdf?warehouse_id=${warehouseId}&month=${month}`, `تقفيل_${month}.pdf`)}
+                  disabled={exporting !== null}
+                  className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 disabled:opacity-50"
+                >{exporting === 'single-pdf' ? '⏳...' : 'PDF'}</button>
               </>
             )}
           </div>

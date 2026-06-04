@@ -669,11 +669,10 @@ class ClosingController extends Controller
 
     public function export(Request $request)
     {
-        $clientId    = $request->user()->current_client_id;
-        $warehouseId = $request->warehouse_id;
-        $month       = $request->month;
-        return app(\App\Services\ReportExportService::class)->exportLocationExcel(
-            $clientId, $warehouseId, $month
+        $clientId = $request->user()->current_client_id;
+        $month    = $request->month ?? now()->format('Y-m');
+        return app(\App\Services\ComprehensiveExportService::class)->exportClosingMatrix(
+            $clientId, $month
         );
     }
 
@@ -683,5 +682,12 @@ class ClosingController extends Controller
         return app(\App\Services\ReportExportService::class)->exportLocationPdf(
             $clientId, $request->warehouse_id, $request->month
         );
+    }
+
+    public function exportCycle(Request $request)
+    {
+        $clientId = $request->user()->current_client_id;
+        $month    = $request->month ?? now()->format('Y-m');
+        return app(\App\Services\ComprehensiveExportService::class)->export($clientId, $month);
     }
 }

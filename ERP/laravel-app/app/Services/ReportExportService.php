@@ -22,62 +22,132 @@ class ReportExportService
     public function matrixRows(string $clientId, string $month): array
     {
         $items = Item::where('client_id', $clientId)->where('is_active', true)->orderBy('sort_order')->orderBy('name')->get(['id', 'name', 'unit']);
-        $locations = Warehouse::where('client_id', $clientId)->where('is_active', true)->get(['id', 'name', 'type'])
-            ->groupBy(fn($w) => $w->name . '|' . $w->type)
-            ->map(fn($g) => $g->sortByDesc(fn($w) => MonthlyClosing::where('month', $month)->where('warehouse_id', $w->id)->count())->first())
-            ->values();
+        $warehouses = Warehouse::where('client_id', $clientId)->where('is_active', true)->get();
+        $mainSub = $warehouses->whereIn('type', ['main', 'sub'])->values();
+        $branches = $warehouses->where('type', 'branch')->values();
+        $mainWh = $warehouses->where('type', 'main')->first();
         $closings = MonthlyClosing::where('client_id', $clientId)->where('month', $month)->get()->groupBy('item_id');
 
-        $headers = ['الصنف', 'الوحدة'];
-        foreach ($locations as $loc) {
-            $headers[] = $loc->name . ' - أول';
-            $headers[] = $loc->name . ' - وارد';
+        $openingCount = count($mainSub);
+        $receiptCount = count($mainSub);
+        $consumptionCount = count($branches);
+        $openingStart = 2; // after الصف and الوحدة
+        $receiptStart = $openingStart + $openingCount;
+        $consumptionStart = $receiptStart + $receiptCount;
+        $theoreticalIdx = $consumptionStart + $consumptionCount;
+        $actualCols = [];
+        for ($i = 0; $i < $openingCount; $i++) {
+            $actualCols[] = $theoreticalIdx + 1 + $i;
         }
-        $headers[] = 'إجمالي منصرف';
-        $headers[] = 'نظري';
-        $headers[] = 'فعلي';
-        $headers[] = 'الفرق';
+        $diffIdx = end($actualCols) + 1;
+        $priceIdx = $diffIdx + 1;
+        $valueIdx = $priceIdx + 1;
+
+        $headers = ['الصنف', 'الوحدة'];
+        foreach ($mainSub as $wh) {
+            $headers[] = "أول مدة {$wh->name}";
+        }
+        foreach ($mainSub as $wh) {
+            $headers[] = "وارد {$wh->name}";
+        }
+        foreach ($branches as $br) {
+            $headers[] = "منصرف {$br->name}";
+        }
+        $headers[] = 'اخر المده';
+        foreach ($mainSub as $wh) {
+            $headers[] = "رصيد فعلي {$wh->name}";
+        }
+        $headers[] = 'فرق';
+        $headers[] = 'سعر';
+        $headers[] = 'قيمة';
 
         $rows = [$headers];
         foreach ($items as $item) {
             $itemClosings = $closings->get($item->id, collect());
             $row = [$item->name, $item->unit];
-            $totalOpening = 0; $totalIn = 0; $totalDispatch = 0; $totalActual = null;
-            foreach ($locations as $loc) {
-                $c = $itemClosings->where('warehouse_id', $loc->id)->first();
-                $op = $c ? (float)$c->opening_qty : 0;
-                $in = $c ? (float)$c->in_qty : 0;
+
+            $totalOpening = 0;
+            $totalReceipts = 0;
+            $totalConsumption = 0;
+
+            // Openings for warehouses only
+            foreach ($mainSub as $wh) {
+                $c = $itemClosings->where('warehouse_id', $wh->id)->first();
+                $op = $c ? (float) $c->opening_qty : 0;
                 $row[] = $op;
-                $row[] = $in;
-                if ($loc->type === 'main' || $loc->type === 'sub') {
-                    $totalOpening += $op;
-                    $totalIn += $in;
-                    $totalDispatch += $c ? (float)$c->internal_out_qty : 0;
-                }
-                if ($c && $c->closing_qty_actual !== null) $totalActual = ($totalActual ?? 0) + (float)$c->closing_qty_actual;
+                $totalOpening += $op;
             }
-            $theoretical = round($totalOpening + $totalIn - $totalDispatch, 3);
-            $diff = $totalActual !== null ? $theoretical - $totalActual : null;
-            $row[] = $totalDispatch;
+
+            // Receipts for warehouses
+            foreach ($mainSub as $wh) {
+                $c = $itemClosings->where('warehouse_id', $wh->id)->first();
+                $in = $c ? (float) $c->in_qty : 0;
+                $row[] = $in;
+                $totalReceipts += $in;
+            }
+
+            // Consumption per branch
+            foreach ($branches as $br) {
+                $c = $itemClosings->where('warehouse_id', $br->id)->first();
+                $con = $c ? (float) $c->in_qty : 0;
+                $row[] = $con;
+                $totalConsumption += $con;
+            }
+
+            // Price
+            $avgCost = 0;
+            if ($mainWh) {
+                $mc = $itemClosings->where('warehouse_id', $mainWh->id)->first();
+                if ($mc) $avgCost = (float) $mc->avg_cost;
+            }
+            if ($avgCost <= 0) {
+                foreach ($mainSub as $wh) {
+                    $c = $itemClosings->where('warehouse_id', $wh->id)->first();
+                    if ($c && (float) $c->avg_cost > 0) { $avgCost = (float) $c->avg_cost; break; }
+                }
+            }
+            $price = $avgCost > 0 ? $avgCost : (float) ($item->default_cost ?? 0);
+
+            // Pre-compute values for PDF (Excel will replace with formulas)
+            $theoretical = round($totalOpening + $totalReceipts - $totalConsumption, 3);
+
             $row[] = $theoretical;
-            $row[] = $totalActual ?? '—';
-            $row[] = $diff !== null ? $diff : '—';
+
+            // Actual per warehouse
+            $totalActual = 0;
+            foreach ($mainSub as $wh) {
+                $c = $itemClosings->where('warehouse_id', $wh->id)->first();
+                if ($c && $c->closing_qty_actual !== null) {
+                    $actual = (float) $c->closing_qty_actual;
+                    $row[] = $actual;
+                    $totalActual += $actual;
+                } else {
+                    $row[] = '';
+                }
+            }
+
+            // Diff = SUM(actuals) - theoretical
+            $diff = $totalActual > 0 ? round($totalActual - $theoretical, 3) : '';
+            $row[] = $diff;
+
+            $row[] = $price > 0 ? round($price, 3) : 0;
+            $row[] = round($price * $theoretical, 2);
+
             $rows[] = $row;
         }
-        return [$rows, $locations];
+
+        $meta = compact(
+            'mainSub', 'branches', 'openingStart', 'openingCount', 'receiptCount',
+            'consumptionStart', 'consumptionCount', 'theoreticalIdx', 'actualCols', 'diffIdx',
+            'priceIdx', 'valueIdx'
+        );
+        return [$rows, $meta];
     }
 
     public function exportMatrixExcel($clientId, $month)
     {
-        [$rows, $locations] = $this->matrixRows($clientId, $month);
+        [$rows, $meta] = $this->matrixRows($clientId, $month);
         $colCount = count($rows[0] ?? []);
-        $locCount = count($locations);
-        // Columns: name(1), unit(2), then 2 cols per location: opening, purchases
-        // Last 4: total_dispatch, theoretical, actual, diff
-        // Formula for الفرق (last col): =IF(actual_col>0,theoretical_col-actual_col,"")
-        $formulaCol = $colCount; // diff is the last column
-        $actualCol  = $colCount - 1;
-        $theoreticalCol = $colCount - 2;
 
         ini_set('memory_limit', '512M');
         set_time_limit(300);
@@ -91,17 +161,50 @@ class ReportExportService
         $sheet->getRowDimension(1)->setRowHeight(30);
         $dataStart = 2;
 
+        // Column indices (1-based for Excel)
+        $excelFormulaCols = [];
+        $openingEnd = $meta['openingStart'] + $meta['openingCount'] - 1;
+        $receiptEnd = $meta['openingStart'] + $meta['openingCount'] + $meta['receiptCount'] - 1;
+        $consumptionEnd = $meta['consumptionStart'] + $meta['consumptionCount'] - 1;
+
         foreach ($rows as $ri => $row) {
             foreach ($row as $ci => $val) {
                 $cellRef = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($ci + 1) . ($ri + $dataStart);
-                if ($ri > 0 && $ci + 1 === $formulaCol) {
-                    // الفرق column = formula
-                    $aRef = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($actualCol) . ($ri + $dataStart);
-                    $tRef = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($theoreticalCol) . ($ri + $dataStart);
-                    $sheet->setCellValue($cellRef, "=IF({$aRef}>0,{$tRef}-{$aRef},\"\")");
-                } else {
-                    $sheet->setCellValue($cellRef, $val);
+                if ($ri > 0) {
+                    $excelRow = $ri + $dataStart;
+
+                    // اخر المده = SUM(openings + receipts) - SUM(consumption)
+                    if ($ci === $meta['theoreticalIdx']) {
+                        $firstInflow = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($meta['openingStart'] + 1);
+                        $lastInflow = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($receiptEnd + 1);
+                        $firstOutflow = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($meta['consumptionStart'] + 1);
+                        $lastOutflow = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($consumptionEnd + 1);
+                        $formula = "=SUM({$firstInflow}{$excelRow}:{$lastInflow}{$excelRow})";
+                        if ($meta['consumptionCount'] > 0) {
+                            $formula .= "-SUM({$firstOutflow}{$excelRow}:{$lastOutflow}{$excelRow})";
+                        }
+                        $sheet->setCellValue($cellRef, $formula);
+                        continue;
+                    }
+
+                    // فرق = IF(SUM(actuals)>0, SUM(actuals)-theoretical, "")
+                    if ($ci === $meta['diffIdx']) {
+                        $firstActualRef = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($meta['actualCols'][0] + 1) . $excelRow;
+                        $lastActualRef = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(end($meta['actualCols']) + 1) . $excelRow;
+                        $theoRef = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($meta['theoreticalIdx'] + 1) . $excelRow;
+                        $sheet->setCellValue($cellRef, "=IF(SUM({$firstActualRef}:{$lastActualRef})>0,SUM({$firstActualRef}:{$lastActualRef})-{$theoRef},\"\")");
+                        continue;
+                    }
+
+                    // قيمة = price * theoretical
+                    if ($ci === $meta['valueIdx']) {
+                        $priceRef = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($meta['priceIdx'] + 1) . $excelRow;
+                        $theoRef = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($meta['theoreticalIdx'] + 1) . $excelRow;
+                        $sheet->setCellValue($cellRef, "={$priceRef}*{$theoRef}");
+                        continue;
+                    }
                 }
+                $sheet->setCellValue($cellRef, $val);
             }
         }
 
@@ -112,6 +215,7 @@ class ReportExportService
         $sheet->getStyle('A' . $footerRow)->getFont()->setItalic(true)->setSize(9)->getColor()->setARGB('FF999999');
 
         $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+        $writer->setPreCalculateFormulas(false);
         return response()->streamDownload(function () use ($writer) {
             $writer->save('php://output');
         }, "مصفوفة_خامات_{$month}.xlsx", ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
@@ -119,7 +223,7 @@ class ReportExportService
 
     public function exportMatrixPdf($clientId, $month)
     {
-        [$rows, $locations] = $this->matrixRows($clientId, $month);
+        [$rows] = $this->matrixRows($clientId, $month);
         $html = $this->buildHtmlTable('مصفوفة الخامات', $month, $rows);
         return $this->streamPdf($html, "مصفوفة_خامات_{$month}.pdf");
     }
@@ -428,6 +532,7 @@ class ReportExportService
         $sheet->getStyle('A' . $footerRow)->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER);
 
         $writer = new Xlsx($spreadsheet);
+        $writer->setPreCalculateFormulas(false);
         return response()->streamDownload(function () use ($writer) {
             $writer->save('php://output');
         }, "تقفيل_{$month}_{$wh->name}.xlsx", ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
@@ -683,6 +788,7 @@ class ReportExportService
         $sheet->setCellValue('A' . $footerRow, 'تم التصدير بواسطة Curve Cost Control System - Ahmed Ali');
         $sheet->getStyle('A' . $footerRow)->getFont()->setItalic(true)->setSize(9)->getColor()->setARGB('FF999999');
         $writer = new Xlsx($spreadsheet);
+        $writer->setPreCalculateFormulas(false);
         return response()->streamDownload(function () use ($writer) {
             $writer->save('php://output');
         }, $filename, ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
