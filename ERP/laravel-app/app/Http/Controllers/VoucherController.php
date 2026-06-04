@@ -428,15 +428,21 @@ class VoucherController extends Controller
         $warehouseId = $request->warehouse_id ?: null;
         $branchId    = $request->branch_id ?: null;
 
-        // لو إذن صرف من غير مخزن — نستنج المخزن المصدر من الصنف الأول
-        if ($request->type === 'dispatch' && !$warehouseId) {
-            $firstLine = $request->lines[0] ?? null;
-            if ($firstLine && !empty($firstLine['item_id'])) {
-                $item = Item::where('id', $firstLine['item_id'])->where('client_id', $clientId)->first();
-                $warehouseId = $item?->default_warehouse_id;
-            }
+        // لو إذن صرف — نضمن المخزن المصدر مش يكون فرع
+        if ($request->type === 'dispatch') {
             if (!$warehouseId) {
-                $warehouseId = Warehouse::where('client_id', $clientId)->where('type', 'main')->first()?->id;
+                $firstLine = $request->lines[0] ?? null;
+                if ($firstLine && !empty($firstLine['item_id'])) {
+                    $item = Item::where('id', $firstLine['item_id'])->where('client_id', $clientId)->first();
+                    $warehouseId = $item?->default_warehouse_id;
+                }
+                if (!$warehouseId) {
+                    $warehouseId = Warehouse::where('client_id', $clientId)->where('type', 'main')->first()?->id;
+                }
+            } elseif (Warehouse::where('id', $warehouseId)->where('type', 'branch')->exists()) {
+                $warehouseId = Warehouse::where('client_id', $clientId)
+                    ->where('type', 'main')
+                    ->first()?->id;
             }
         }
 
@@ -790,7 +796,19 @@ class VoucherController extends Controller
         }
         $allWarehouseIds = array_unique(array_filter(array_merge($oldWarehouseIds, $newWarehouseIds)));
 
-        DB::transaction(function () use ($request, $clientId, $userId, $order) {
+        // Resolve source warehouse fallback for dispatch lines without explicit warehouse_id
+        // If the order's warehouse is a branch, use the main warehouse as fallback
+        $dispatchLineWhFallback = $request->warehouse_id;
+        if ($request->type === 'dispatch' && $dispatchLineWhFallback) {
+            $wh = Warehouse::find($dispatchLineWhFallback);
+            if ($wh && $wh->type === 'branch') {
+                $dispatchLineWhFallback = Warehouse::where('client_id', $clientId)
+                    ->where('type', 'main')
+                    ->first()?->id;
+            }
+        }
+
+        DB::transaction(function () use ($request, $clientId, $userId, $order, $dispatchLineWhFallback) {
             // 1. عكس الحركات القديمة وحذف السطور القديمة
             $this->ledger->reverseOrder($order->id);
             $order->lines()->delete();
@@ -815,10 +833,12 @@ class VoucherController extends Controller
                 }
                 $unitCost = $qty != 0 && $cost > 0 ? round(abs($cost / $qty), 4) : 0;
 
+                $lineWhId = $line['warehouse_id'] ?? $dispatchLineWhFallback;
+
                 DispatchLine::create([
                     'order_id'     => $order->id,
                     'item_id'      => $line['item_id'],
-                    'warehouse_id' => $line['warehouse_id'] ?? $request->warehouse_id,
+                    'warehouse_id' => $lineWhId,
                     'qty'          => $qty,
                     'total_cost'   => $cost,
                     'unit_cost'    => $unitCost,
@@ -829,7 +849,7 @@ class VoucherController extends Controller
                     $baseMovement = in_array($request->type, ['purchase', 'opening', 'adjustment', 'return']) ? 'in' : 'out';
                     $this->ledger->post(
                         clientId:     $clientId,
-                        whId:         $line['warehouse_id'] ?? $request->warehouse_id,
+                        whId:         $lineWhId,
                         itemId:       $line['item_id'],
                         date:         $request->date,
                         movementType: $baseMovement,
@@ -878,7 +898,7 @@ class VoucherController extends Controller
                         $movementType = $baseMovement === 'in' ? 'out' : 'in';
                         $this->ledger->post(
                             clientId:     $clientId,
-                            whId:         $line['warehouse_id'] ?? $request->warehouse_id,
+                            whId:         $lineWhId,
                             itemId:       $line['item_id'],
                             date:         $request->date,
                             movementType: $movementType,
@@ -897,7 +917,7 @@ class VoucherController extends Controller
                     if ($item) {
                         $oldCost = $item->default_cost;
                         $calc = app(\App\Services\CostCalculationService::class);
-                        $whId = $line['warehouse_id'] ?? $request->warehouse_id;
+                        $whId = $lineWhId;
                         $avgCost = $whId ? $calc->weightedAverageCost($clientId, $whId, $item->id) : 0;
                         $newCost = $avgCost > 0 ? $avgCost : $unitCost;
                         $item->default_cost = $newCost;
