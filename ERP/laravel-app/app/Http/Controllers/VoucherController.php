@@ -446,7 +446,19 @@ class VoucherController extends Controller
             }
         }
 
-        $order = DB::transaction(function () use ($request, $clientId, $userId, $warehouseId, $branchId) {
+        // Resolve branch dispatch context for manual() — same logic as update()
+        $dispatchBranchId = $branchId;
+        if (!$dispatchBranchId && $warehouseId) {
+            $wh = Warehouse::find($warehouseId);
+            if ($wh && $wh->type === 'branch') {
+                $dispatchBranchId = $warehouseId;
+            }
+        }
+        $isBranchDispatch = $request->type === 'dispatch' && $dispatchBranchId;
+        $dispatchBranchLoc = $isBranchDispatch ? ['type' => 'branch', 'id' => $dispatchBranchId] : null;
+        $branchTargetWhId = $isBranchDispatch ? $this->resolveBranchTargetWhId($clientId, $dispatchBranchId) : null;
+
+        $order = DB::transaction(function () use ($request, $clientId, $userId, $warehouseId, $branchId, $dispatchBranchLoc, $branchTargetWhId) {
             // للأرصدة الافتتاحية — حذف القديم بالكامل (أمر + خطوط + كشف حساب) قبل إنشاء الجديد
             if ($request->type === 'opening') {
                 $monthPrefix = substr($request->date, 0, 7);
@@ -490,7 +502,12 @@ class VoucherController extends Controller
                 }
                 $unitCost = $qty != 0 && $cost > 0 ? round(abs($cost / $qty), 4) : 0;
 
-                $lineWhId = ($line['warehouse_id'] ?? null) ?: $warehouseId;
+                if ($request->type === 'dispatch' && $dispatchBranchLoc) {
+                    $lineWhId = $this->resolveWarehouseId($clientId, $dispatchBranchLoc, $line['item_id'])
+                        ?? $warehouseId;
+                } else {
+                    $lineWhId = ($line['warehouse_id'] ?? null) ?: $warehouseId;
+                }
 
                 DispatchLine::create([
                     'order_id'     => $order->id,
@@ -519,11 +536,10 @@ class VoucherController extends Controller
                         voucherType:  $request->type
                     );
 
-                    if ($request->type === 'dispatch' && $branchId) {
-                        $targetWhId = $this->resolveBranchTargetWhId($clientId, $branchId);
+                    if ($request->type === 'dispatch' && $branchTargetWhId && $branchTargetWhId !== $lineWhId) {
                         $this->ledger->post(
                             clientId:     $clientId,
-                            whId:         $targetWhId,
+                            whId:         $branchTargetWhId,
                             itemId:       $line['item_id'],
                             date:         $request->date,
                             movementType: 'in',
@@ -537,11 +553,10 @@ class VoucherController extends Controller
                     }
                 } else {
                     // سالب — للـ dispatch فقط: طرح من الفرع بدون لمس المخزن
-                    if ($request->type === 'dispatch' && $branchId) {
-                        $targetWhId = $this->resolveBranchTargetWhId($clientId, $branchId);
+                    if ($request->type === 'dispatch' && $branchTargetWhId) {
                         $this->ledger->post(
                             clientId:     $clientId,
-                            whId:         $targetWhId,
+                            whId:         $branchTargetWhId,
                             itemId:       $line['item_id'],
                             date:         $request->date,
                             movementType: 'out',
@@ -796,8 +811,34 @@ class VoucherController extends Controller
         }
         $allWarehouseIds = array_unique(array_filter(array_merge($oldWarehouseIds, $newWarehouseIds)));
 
-        // Resolve source warehouse fallback for dispatch lines without explicit warehouse_id
-        // If the order's warehouse is a branch, use the main warehouse as fallback
+        // Resolve branch dispatch context — determine target branch warehouse and source fallback
+        $dispatchBranchId = $request->branch_id;
+        if (!$dispatchBranchId && $request->warehouse_id) {
+            $wh = Warehouse::find($request->warehouse_id);
+            if ($wh && $wh->type === 'branch') {
+                $dispatchBranchId = $request->warehouse_id;
+            }
+        }
+        if (!$dispatchBranchId && $order->type === 'dispatch' && $order->branch_id) {
+            $dispatchBranchId = $order->branch_id;
+        }
+        if (!$dispatchBranchId && $order->type === 'dispatch' && $order->warehouse_id) {
+            $wh = Warehouse::find($order->warehouse_id);
+            if ($wh && $wh->type === 'branch') {
+                $dispatchBranchId = $order->warehouse_id;
+            }
+        }
+
+        $isBranchDispatch = $request->type === 'dispatch' && $dispatchBranchId;
+        $branchDispatchLoc = $isBranchDispatch ? ['type' => 'branch', 'id' => $dispatchBranchId] : null;
+
+        // Target branch warehouse for the 'in' movement
+        $branchTargetWhId = null;
+        if ($isBranchDispatch) {
+            $branchTargetWhId = $this->resolveBranchTargetWhId($clientId, $dispatchBranchId);
+        }
+
+        // Fallback for lines without resolved source warehouse
         $dispatchLineWhFallback = $request->warehouse_id;
         if ($request->type === 'dispatch' && $dispatchLineWhFallback) {
             $wh = Warehouse::find($dispatchLineWhFallback);
@@ -808,7 +849,19 @@ class VoucherController extends Controller
             }
         }
 
-        DB::transaction(function () use ($request, $clientId, $userId, $order, $dispatchLineWhFallback) {
+        // ضمان شمول كل المخازن المحتملة في إعادة التقفيل
+        if ($branchTargetWhId) {
+            $allWarehouseIds[] = $branchTargetWhId;
+        }
+        foreach ($allItemIds as $itemId) {
+            $item = Item::find($itemId);
+            if ($item && $item->default_warehouse_id) {
+                $allWarehouseIds[] = $item->default_warehouse_id;
+            }
+        }
+        $allWarehouseIds = array_unique(array_filter($allWarehouseIds));
+
+        DB::transaction(function () use ($request, $clientId, $userId, $order, $dispatchLineWhFallback, $branchDispatchLoc, $branchTargetWhId) {
             // 1. عكس الحركات القديمة وحذف السطور القديمة
             $this->ledger->reverseOrder($order->id);
             $order->lines()->delete();
@@ -833,7 +886,12 @@ class VoucherController extends Controller
                 }
                 $unitCost = $qty != 0 && $cost > 0 ? round(abs($cost / $qty), 4) : 0;
 
-                $lineWhId = ($line['warehouse_id'] ?? null) ?: $dispatchLineWhFallback;
+                if ($request->type === 'dispatch' && $branchDispatchLoc) {
+                    $lineWhId = $this->resolveWarehouseId($clientId, $branchDispatchLoc, $line['item_id'])
+                        ?? $dispatchLineWhFallback;
+                } else {
+                    $lineWhId = ($line['warehouse_id'] ?? null) ?: $dispatchLineWhFallback;
+                }
 
                 DispatchLine::create([
                     'order_id'     => $order->id,
@@ -861,11 +919,10 @@ class VoucherController extends Controller
                         voucherType:  $request->type
                     );
 
-                    if ($request->type === 'dispatch' && !empty($request->branch_id)) {
-                        $targetWhId = $this->resolveBranchTargetWhId($clientId, $request->branch_id);
+                    if ($request->type === 'dispatch' && $branchTargetWhId && $branchTargetWhId !== $lineWhId) {
                         $this->ledger->post(
                             clientId:     $clientId,
-                            whId:         $targetWhId,
+                            whId:         $branchTargetWhId,
                             itemId:       $line['item_id'],
                             date:         $request->date,
                             movementType: 'in',
@@ -878,11 +935,10 @@ class VoucherController extends Controller
                         );
                     }
                 } else {
-                    if ($request->type === 'dispatch' && !empty($request->branch_id)) {
-                        $targetWhId = $this->resolveBranchTargetWhId($clientId, $request->branch_id);
+                    if ($request->type === 'dispatch' && $branchTargetWhId) {
                         $this->ledger->post(
                             clientId:     $clientId,
-                            whId:         $targetWhId,
+                            whId:         $branchTargetWhId,
                             itemId:       $line['item_id'],
                             date:         $request->date,
                             movementType: 'out',
