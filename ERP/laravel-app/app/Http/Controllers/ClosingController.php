@@ -26,6 +26,7 @@ class ClosingController extends Controller
         $clientId    = $request->user()->current_client_id;
         $warehouseId = $request->warehouse_id;
         $month       = $request->month ?? now()->format('Y-m');
+        $isBranch    = Warehouse::where('id', $warehouseId)->value('type') === 'branch';
 
         $closings = MonthlyClosing::where('client_id', $clientId)
             ->where('warehouse_id', $warehouseId)
@@ -39,15 +40,24 @@ class ClosingController extends Controller
             ->orderByRaw('COALESCE(sort_order, 999999), name')
             ->get(['id', 'name', 'unit', 'default_cost']);
 
-        $rows = $items->map(function ($item) use ($closings) {
+        $rows = $items->map(function ($item) use ($closings, $isBranch) {
             $r = $closings->get($item->id);
 
-            $avgCost = 0;
-            if ($r && $r->avg_cost > 0) {
-                $avgCost = (float) $r->avg_cost;
-            }
-            if ($avgCost <= 0) {
+            if ($isBranch) {
+                // الفروع: default_cost له الأولوية — السعر من صفحة الأصناف
                 $avgCost = (float) ($item->default_cost ?? 0);
+                if ($avgCost <= 0 && $r && $r->avg_cost > 0) {
+                    $avgCost = (float) $r->avg_cost;
+                }
+            } else {
+                // المخازن: الوزن المرجح من الحركـات الفعلية
+                $avgCost = 0;
+                if ($r && $r->avg_cost > 0) {
+                    $avgCost = (float) $r->avg_cost;
+                }
+                if ($avgCost <= 0) {
+                    $avgCost = (float) ($item->default_cost ?? 0);
+                }
             }
 
             $openingQty = (float) ($r->opening_qty ?? 0);

@@ -1,5 +1,5 @@
 'use client';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
@@ -47,6 +47,7 @@ export default function VoucherHistoryPage() {
   const dateFrom = searchParams.get('date_from') ?? '';
   const dateTo   = searchParams.get('date_to') ?? '';
   const type     = searchParams.get('type') ?? '';
+  const page     = parseInt(searchParams.get('page') ?? '1', 10);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
@@ -69,13 +70,14 @@ export default function VoucherHistoryPage() {
         date_from: `${m}-01`,
         date_to: `${m}-${String(lastDay).padStart(2, '0')}`,
         type: '',
+        page: '',
       });
     } else {
-      updateUrl({ month: '', date_from: '', date_to: '', type: '' });
+      updateUrl({ month: '', date_from: '', date_to: '', type: '', page: '' });
     }
   };
 
-  const filters = { date_from: dateFrom, date_to: dateTo, type };
+  const filters = { date_from: dateFrom, date_to: dateTo, type, page };
   const showTable = !!month || !!dateFrom || !!dateTo;
 
   const { data: vouchers, isLoading } = useQuery({
@@ -84,8 +86,10 @@ export default function VoucherHistoryPage() {
     enabled: showTable,
   });
 
-  const list  = vouchers?.data ?? [];
-  const total = vouchers?.total ?? 0;
+  const list       = vouchers?.data ?? [];
+  const total      = vouchers?.total ?? 0;
+  const currentPage = vouchers?.current_page ?? 1;
+  const lastPage   = vouchers?.last_page ?? 1;
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/vouchers/${id}`),
@@ -162,7 +166,7 @@ export default function VoucherHistoryPage() {
     <>
       <PageHeader
         title="سجل الحركات"
-        subtitle={showTable ? `${total} إذن مسجل` : 'اختر الشهر أولاً لعرض الحركات'}
+        subtitle={showTable ? `صفحة ${currentPage} من ${lastPage} — ${total} إذن` : 'اختر الشهر أولاً لعرض الحركات'}
         actions={
           showTable && hasSelected && (
             <button
@@ -230,7 +234,7 @@ export default function VoucherHistoryPage() {
                   <input
                     type="date"
                     value={dateFrom}
-                    onChange={(e) => { setSelected(new Set()); updateUrl({ date_from: e.target.value }); }}
+                    onChange={(e) => { setSelected(new Set()); updateUrl({ date_from: e.target.value, page: '' }); }}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                   />
                 </div>
@@ -239,7 +243,7 @@ export default function VoucherHistoryPage() {
                   <input
                     type="date"
                     value={dateTo}
-                    onChange={(e) => { setSelected(new Set()); updateUrl({ date_to: e.target.value }); }}
+                    onChange={(e) => { setSelected(new Set()); updateUrl({ date_to: e.target.value, page: '' }); }}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                   />
                 </div>
@@ -247,7 +251,7 @@ export default function VoucherHistoryPage() {
                   <label className="text-[10px] text-gray-400 block mb-1">نوع الإذن</label>
                   <select
                     value={type}
-                    onChange={(e) => { setSelected(new Set()); updateUrl({ type: e.target.value }); }}
+                    onChange={(e) => { setSelected(new Set()); updateUrl({ type: e.target.value, page: '' }); }}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
                   >
                     <option value="">كل الأنواع</option>
@@ -262,9 +266,9 @@ export default function VoucherHistoryPage() {
                     if (month) {
                       const [y, mon] = month.split('-');
                       const lastDay = new Date(+y, +mon, 0).getDate();
-                      updateUrl({ date_from: `${month}-01`, date_to: `${month}-${String(lastDay).padStart(2, '0')}`, type: '' });
+                      updateUrl({ date_from: `${month}-01`, date_to: `${month}-${String(lastDay).padStart(2, '0')}`, type: '', page: '' });
                     } else {
-                      updateUrl({ date_from: '', date_to: '', type: '' });
+                      updateUrl({ date_from: '', date_to: '', type: '', page: '' });
                     }
                   }}
                   className="py-2 px-4 bg-gray-50 text-gray-500 rounded-lg text-sm hover:bg-gray-100 border border-gray-200 transition-colors"
@@ -393,6 +397,47 @@ export default function VoucherHistoryPage() {
                   ))}
                 </tbody>
               </table>
+              {/* Pagination */}
+              {lastPage > 1 && (
+                <div className="flex items-center justify-between px-4 py-3 bg-white border-t border-gray-100">
+                  <div className="text-xs text-gray-400">
+                    صفحة {currentPage} من {lastPage} ({total} إذن)
+                  </div>
+                  <div className="flex gap-1 items-center">
+                    <button
+                      onClick={() => updateUrl({ page: String(currentPage - 1) })}
+                      disabled={currentPage <= 1}
+                      className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+                    >
+                      → السابق
+                    </button>
+                    {Array.from({ length: lastPage }, (_, i) => i + 1)
+                      .filter(p => Math.abs(p - currentPage) <= 2 || p === 1 || p === lastPage)
+                      .map((p, idx, arr) => (
+                        <Fragment key={p}>
+                          {idx > 0 && arr[idx - 1] !== p - 1 && <span className="px-1 text-gray-300">...</span>}
+                          <button
+                            onClick={() => updateUrl({ page: String(p) })}
+                            className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+                              p === currentPage
+                                ? 'bg-blue-600 text-white border-blue-600'
+                                : 'border-gray-200 hover:bg-gray-50 text-gray-600'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        </Fragment>
+                      ))}
+                    <button
+                      onClick={() => updateUrl({ page: String(currentPage + 1) })}
+                      disabled={currentPage >= lastPage}
+                      className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-gray-50 transition-colors"
+                    >
+                      التالي ←
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </>
         ) : (

@@ -14,6 +14,7 @@ use App\Models\ActivityLog;
 use App\Models\DispatchOrder;
 use App\Models\DispatchLine;
 use App\Models\Warehouse;
+use App\Models\Branch;
 use App\Models\BranchWarehouseSource;
 use App\Models\Item;
 use App\Models\MonthlyClosing;
@@ -454,6 +455,16 @@ class VoucherController extends Controller
                 $dispatchBranchId = $warehouseId;
             }
         }
+        // Resolve Warehouse ID → Branch ID so BranchWarehouseSource lookups work
+        if ($dispatchBranchId) {
+            $detectedWh = Warehouse::find($dispatchBranchId);
+            if ($detectedWh && $detectedWh->type === 'branch') {
+                $branchForWh = Branch::where('name', $detectedWh->name)->first();
+                if ($branchForWh) {
+                    $dispatchBranchId = $branchForWh->id;
+                }
+            }
+        }
         $isBranchDispatch = $request->type === 'dispatch' && $dispatchBranchId;
         $dispatchBranchLoc = $isBranchDispatch ? ['type' => 'branch', 'id' => $dispatchBranchId] : null;
         $branchTargetWhId = $isBranchDispatch ? $this->resolveBranchTargetWhId($clientId, $dispatchBranchId) : null;
@@ -829,6 +840,17 @@ class VoucherController extends Controller
             }
         }
 
+        // Resolve Warehouse ID → Branch ID so BranchWarehouseSource lookups work
+        if ($dispatchBranchId) {
+            $detectedWh = Warehouse::find($dispatchBranchId);
+            if ($detectedWh && $detectedWh->type === 'branch') {
+                $branchForWh = Branch::where('name', $detectedWh->name)->first();
+                if ($branchForWh) {
+                    $dispatchBranchId = $branchForWh->id;
+                }
+            }
+        }
+
         $isBranchDispatch = $request->type === 'dispatch' && $dispatchBranchId;
         $branchDispatchLoc = $isBranchDispatch ? ['type' => 'branch', 'id' => $dispatchBranchId] : null;
 
@@ -836,6 +858,28 @@ class VoucherController extends Controller
         $branchTargetWhId = null;
         if ($isBranchDispatch) {
             $branchTargetWhId = $this->resolveBranchTargetWhId($clientId, $dispatchBranchId);
+        }
+
+        // Recovery from old stock_ledger if header-based branch detection failed
+        // Handles orders saved before branch_id preservation was added to manual()
+        if ($request->type === 'dispatch' && !$isBranchDispatch && $order->type === 'dispatch') {
+            $oldLedgerIn = StockLedger::where('ref_type', 'dispatch_order')
+                ->where('ref_id', $order->id)
+                ->where('movement_type', 'in')
+                ->where('voucher_type', 'dispatch')
+                ->first();
+            if ($oldLedgerIn) {
+                $recoveredWhId = $oldLedgerIn->warehouse_id;
+                $wh = Warehouse::find($recoveredWhId);
+                if ($wh) {
+                    $branch = Branch::where('name', $wh->name)->first();
+                    $recoveredBranchId = $branch ? $branch->id : $recoveredWhId;
+                    $dispatchBranchId = $recoveredBranchId;
+                    $isBranchDispatch = true;
+                    $branchDispatchLoc = ['type' => 'branch', 'id' => $dispatchBranchId];
+                    $branchTargetWhId = $this->resolveBranchTargetWhId($clientId, $dispatchBranchId);
+                }
+            }
         }
 
         // Fallback for lines without resolved source warehouse
@@ -853,6 +897,9 @@ class VoucherController extends Controller
         if ($branchTargetWhId) {
             $allWarehouseIds[] = $branchTargetWhId;
         }
+        if (isset($recoveredWhId) && $recoveredWhId) {
+            $allWarehouseIds[] = $recoveredWhId;
+        }
         foreach ($allItemIds as $itemId) {
             $item = Item::find($itemId);
             if ($item && $item->default_warehouse_id) {
@@ -861,7 +908,7 @@ class VoucherController extends Controller
         }
         $allWarehouseIds = array_unique(array_filter($allWarehouseIds));
 
-        DB::transaction(function () use ($request, $clientId, $userId, $order, $dispatchLineWhFallback, $branchDispatchLoc, $branchTargetWhId) {
+        DB::transaction(function () use ($request, $clientId, $userId, $order, $dispatchLineWhFallback, $branchDispatchLoc, $branchTargetWhId, $dispatchBranchId) {
             // 1. عكس الحركات القديمة وحذف السطور القديمة
             $this->ledger->reverseOrder($order->id);
             $order->lines()->delete();
@@ -873,6 +920,11 @@ class VoucherController extends Controller
                 'warehouse_id' => $request->warehouse_id ?: null,
                 'branch_id'    => $request->branch_id ?: null,
             ]);
+
+            // Preserve detected branch context so future edits recover correctly
+            if ($request->type === 'dispatch' && $branchTargetWhId && !$order->branch_id) {
+                $order->update(['branch_id' => $dispatchBranchId]);
+            }
 
             // 3. إعادة إنشاء السطور والحركات (نفس منطق manual)
             foreach ($request->lines as $line) {
@@ -886,9 +938,29 @@ class VoucherController extends Controller
                 }
                 $unitCost = $qty != 0 && $cost > 0 ? round(abs($cost / $qty), 4) : 0;
 
-                if ($request->type === 'dispatch' && $branchDispatchLoc) {
-                    $lineWhId = $this->resolveWarehouseId($clientId, $branchDispatchLoc, $line['item_id'])
-                        ?? $dispatchLineWhFallback;
+                if ($request->type === 'dispatch') {
+                    if ($branchDispatchLoc) {
+                        $lineWhId = $this->resolveWarehouseId($clientId, $branchDispatchLoc, $line['item_id'])
+                            ?? $dispatchLineWhFallback;
+                    } else {
+                        // Resolve source using item properties when no branch context
+                        $item = Item::find($line['item_id']);
+                        $lineWhId = null;
+                        if ($item && $item->default_warehouse_id) {
+                            $lineWhId = $item->default_warehouse_id;
+                        }
+                        if (!$lineWhId && $item) {
+                            $swh = Warehouse::where('client_id', $clientId)
+                                ->where('type', 'sub')
+                                ->where(function($q) use ($item) {
+                                    $q->where('name', 'like', '%' . $item->name . '%')
+                                      ->orWhereRaw('? like concat("%", name, "%")', [$item->name]);
+                                })
+                                ->first();
+                            if ($swh) $lineWhId = $swh->id;
+                        }
+                        $lineWhId = $lineWhId ?: $dispatchLineWhFallback;
+                    }
                 } else {
                     $lineWhId = ($line['warehouse_id'] ?? null) ?: $dispatchLineWhFallback;
                 }
