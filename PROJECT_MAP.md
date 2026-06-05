@@ -474,3 +474,21 @@ Older copy. Do NOT modify. Changes go into `ERP/laravel-app/`.
 - **Root cause**: `currentStock()` returns `SUM(in_qty) - SUM(out_qty)`. When out exceeds in (no opening balance entered, or data entry gap), the result is negative. `itemMonthSummary()` then stores negative `opening_qty` in `monthly_closings`, and the dashboard shows negative `أول المدة` totals.
 - **Fix**: Added `max(0, ...)` wrapper: `return round(max(0, (float) $result), 3)`. This clamps the stock balance to 0 — negative physical stock is a data error, not a valid business state. Also indirectly protects `itemMonthSummary()` fallback path where `opening_qty = currentStock(...)`.
 - **Impact**: Dashboard opening values never show negative. Closings generated after this fix will store non-negative `opening_qty`. Existing negative data in `monthly_closings` needs regeneration (run "تحديث الحسابات" for the affected month). No impact on other modules.
+
+## Surgical Fixes Applied (2026-06-04 — Dispatch Warehouse Resolution + Branch Movement Fix)
+
+### 27. `VoucherController::update()` + `manual()` — Per-line warehouse resolution via `resolveWarehouseId()` for dispatch orders
+- **Files**: `ERP/laravel-app/app/Http/Controllers/VoucherController.php` (`manual()` lines 459-556, `update()` lines 814-968)
+- **Root cause**: 
+  - When editing a dispatch order via `update()` or creating one via `manual()`, the source warehouse for each line was determined by the frontend's `warehouse_id` value (or a simple fallback). This bypassed `resolveWarehouseId()` which correctly resolves the source warehouse per item using: `default_warehouse_id` → keyword matching → branch default → main warehouse.
+  - Items with `default_warehouse_id = مستر شريمب` (or other sub-warehouses) were incorrectly 'out'-ed from the main warehouse instead of their proper warehouse.
+  - The branch target warehouse ('in' movement) was only posted when `$request->branch_id` was non-empty. If the order was previously edited and lost its `branch_id` (but still had `warehouse_id` as a branch-type warehouse), the branch 'in' movement was permanently lost after every `update()` call.
+  - `$allWarehouseIds` (used for closing regeneration) did not include items' `default_warehouse_id` or the resolved branch target warehouse, so the closing for those warehouses was never updated.
+- **Fix**:
+  1. Added `resolveWarehouseId()` call per line in both `manual()` and `update()` for dispatch orders — same logic as `confirm()` (import). Source warehouse for each line is now resolved using item's `default_warehouse_id`, keyword matching, or main warehouse fallback.
+  2. `branchTargetWhId` is resolved BEFORE the transaction by checking: (a) `$request->branch_id`, (b) `$request->warehouse_id` if it's a branch-type warehouse, (c) old `$order->branch_id`, (d) old `$order->warehouse_id` if branch-type. Used in both positive and negative qty branch posting conditions, replacing the old `!empty($request->branch_id)` check. Added `$branchTargetWhId !== $lineWhId` guard to prevent self-targeting.
+  3. Added `$branchTargetWhId` and all items' `default_warehouse_id` to `$allWarehouseIds` before closing regeneration, ensuring ALL affected warehouses get their closing recalculated.
+- **Impact**:
+  - **Future saves**: Items dispatched to branches use their correct source warehouse (`default_warehouse_id`). Branch 'in' movements are always preserved. Closing regenerated for all affected warehouses.
+  - **Existing corrections**: User must open each dispatch order previously saved with wrong data and click "حفظ". The `update()` method reverses old wrong entries and recreates them correctly.
+  - **No regression**: Non-dispatch voucher types and non-branch dispatches unchanged (use the existing `else` path).
