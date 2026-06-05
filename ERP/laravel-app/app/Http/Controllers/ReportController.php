@@ -530,4 +530,164 @@ class ReportController extends Controller
             'items'         => $grid,
         ]);
     }
+
+    /**
+     * تقرير الفروق والهدر — مخزن واحد
+     */
+    public function diffs(Request $request): JsonResponse
+    {
+        $clientId    = $request->user()->current_client_id;
+        $warehouseId = $request->warehouse_id;
+        $month       = $request->month ?? now()->format('Y-m');
+
+        if (!$warehouseId) {
+            return response()->json(['message' => 'يرجى اختيار المخزن'], 422);
+        }
+
+        $wh = Warehouse::findOrFail($warehouseId);
+
+        $closings = MonthlyClosing::where('client_id', $clientId)
+            ->where('warehouse_id', $warehouseId)
+            ->where('month', $month)
+            ->get()
+            ->keyBy('item_id');
+
+        $items = Item::where('client_id', $clientId)
+            ->where('is_active', true)
+            ->orderBy('sort_order')
+            ->orderBy('name')
+            ->get(['id', 'name', 'unit', 'default_cost']);
+
+        $rows = $items->map(function ($item) use ($closings, $wh) {
+            $c  = $closings->get($item->id);
+
+            return [
+                'item_id'              => $item->id,
+                'item_name'            => $item->name,
+                'unit'                 => $item->unit,
+                'opening_qty'          => (float) ($c->opening_qty ?? 0),
+                'in_qty'               => (float) ($c->in_qty ?? 0),
+                'internal_out_qty'     => (float) ($c->internal_out_qty ?? 0),
+                'consumption_qty'      => (float) ($c->consumption_qty ?? 0),
+                'closing_theoretical'  => (float) ($c->closing_qty_theoretical ?? 0),
+                'closing_actual'       => $c->closing_qty_actual !== null ? (float) $c->closing_qty_actual : null,
+                'diff_qty'             => (float) ($c->diff_qty ?? 0),
+                'avg_cost'             => (float) ($c->avg_cost ?? 0),
+                'diff_value'           => (float) ($c->diff_value ?? 0),
+            ];
+        })->values();
+
+        return response()->json([
+            'warehouse_name' => $wh->name,
+            'month'          => $month,
+            'data'           => $rows,
+        ]);
+    }
+
+    /**
+     * تصدير تقرير الفروق والهدر إلى Excel
+     */
+    public function exportDiffs(Request $request)
+    {
+        $clientId    = $request->user()->current_client_id;
+        $warehouseId = $request->warehouse_id;
+        $month       = $request->month ?? now()->format('Y-m');
+
+        if (!$warehouseId) {
+            return response()->json(['message' => 'يرجى اختيار المخزن'], 422);
+        }
+
+        $wh = Warehouse::findOrFail($warehouseId);
+
+        $closings = MonthlyClosing::where('client_id', $clientId)
+            ->where('warehouse_id', $warehouseId)
+            ->where('month', $month)
+            ->get()
+            ->keyBy('item_id');
+
+        $items = Item::where('client_id', $clientId)
+            ->where('is_active', true)
+            ->orderBy('sort_order')
+            ->orderBy('name')
+            ->get(['id', 'name', 'unit']);
+
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet()->setRightToLeft(true);
+
+        // صف العنوان
+        $sheet->mergeCells('A1:J1');
+        $sheet->setCellValue('A1', "مخزن {$wh->name} شهر {$month}");
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14)->getColor()->setARGB('FF1e3a5f');
+        $sheet->getRowDimension(1)->setRowHeight(30);
+
+        // الهيدر
+        $headers = ['الصنف', 'الوحدة', 'أول المدة', 'وارد مخزن', 'منصرف فروع',
+                     'آخر مدة', 'آخر فعلي', 'هوالك-مسحوبات', 'فرق'];
+        $colLetters = range('B', 'J');
+        $sheet->setCellValue('A2', '#');
+        foreach ($headers as $i => $h) {
+            $sheet->setCellValue($colLetters[$i] . '2', $h);
+        }
+        $headerStyle = [
+            'font' => ['bold' => true, 'size' => 10, 'color' => ['argb' => 'FFFFFFFF']],
+            'fill' => ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID, 'startColor' => ['argb' => 'FF1e3a5f']],
+            'alignment' => ['horizontal' => \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER],
+            'borders' => ['allBorders' => ['borderStyle' => \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN]],
+        ];
+        $sheet->getStyle('A2:J2')->applyFromArray($headerStyle);
+
+        // البيانات
+        $rowIdx = 3;
+        $idx = 1;
+        foreach ($items as $item) {
+            $c = $closings->get($item->id);
+            if (!$c) continue;
+
+            $opening        = (float) $c->opening_qty;
+            $inQty          = (float) $c->in_qty;
+            $internalOut    = (float) $c->internal_out_qty;
+            $consumption    = (float) $c->consumption_qty;
+            $theoretical    = (float) $c->closing_qty_theoretical;
+            $actual         = $c->closing_qty_actual !== null ? (float) $c->closing_qty_actual : '';
+            $diff           = (float) $c->diff_qty;
+
+            $sheet->setCellValue('A' . $rowIdx, $idx++);
+            $sheet->setCellValue('B' . $rowIdx, $item->name);
+            $sheet->setCellValue('C' . $rowIdx, $item->unit);
+            $sheet->setCellValue('D' . $rowIdx, $opening > 0 ? $opening : '');
+            $sheet->setCellValue('E' . $rowIdx, $inQty > 0 ? $inQty : '');
+            $sheet->setCellValue('F' . $rowIdx, $internalOut > 0 ? $internalOut : '');
+            $sheet->setCellValue('G' . $rowIdx, $theoretical);
+            $sheet->setCellValue('H' . $rowIdx, $actual);
+            $sheet->setCellValue('I' . $rowIdx, $consumption > 0 ? $consumption : '');
+            $sheet->setCellValue('J' . $rowIdx, $diff != 0 ? $diff : '');
+
+            // لون الفرق
+            if ($diff != 0) {
+                $color = $diff > 0 ? 'FF16A34A' : 'FFDC2626';
+                $sheet->getStyle('J' . $rowIdx)->getFont()->getColor()->setARGB($color);
+            }
+
+            $sheet->getStyle("A{$rowIdx}:J{$rowIdx}")->getBorders()->getAllBorders()
+                ->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN);
+
+            $rowIdx++;
+        }
+
+        // عرض الأعمدة
+        $sheet->getColumnDimension('A')->setWidth(4);
+        $sheet->getColumnDimension('B')->setWidth(28);
+        $sheet->getColumnDimension('C')->setWidth(8);
+        foreach (range('D', 'J') as $col) {
+            $sheet->getColumnDimension($col)->setWidth(12);
+        }
+
+        $writer = new Xlsx($spreadsheet);
+        $writer->setPreCalculateFormulas(false);
+        return response()->streamDownload(function () use ($writer) {
+            $writer->save('php://output');
+        }, "تقرير خامات مخزن {$wh->name} شهر{$month}.xlsx", [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
+    }
 }
