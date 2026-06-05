@@ -833,7 +833,7 @@ class VoucherController extends Controller
                 }
                 $unitCost = $qty != 0 && $cost > 0 ? round(abs($cost / $qty), 4) : 0;
 
-                $lineWhId = $line['warehouse_id'] ?? $dispatchLineWhFallback;
+                $lineWhId = ($line['warehouse_id'] ?? null) ?: $dispatchLineWhFallback;
 
                 DispatchLine::create([
                     'order_id'     => $order->id,

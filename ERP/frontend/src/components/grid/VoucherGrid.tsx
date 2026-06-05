@@ -89,7 +89,7 @@ export function VoucherGrid({ type, date, warehouseId, branchId, orderId, initia
         .filter((r) => r.item_id && r.qty)
         .map((r) => ({
           item_id:      r.item_id,
-          warehouse_id: r.warehouse_id || warehouseId,
+          warehouse_id: type === 'dispatch' ? (r.warehouse_id || undefined) : (r.warehouse_id || warehouseId),
           qty:          parseFloat(r.qty) || 0,
           cost:         parseFloat(r.cost) || 0,
         }));
