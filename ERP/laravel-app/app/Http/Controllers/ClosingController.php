@@ -65,11 +65,17 @@ class ClosingController extends Controller
             $outQty = (float) ($r->out_qty ?? 0);
             $closingQtyTheoretical = (float) ($r->closing_qty_theoretical ?? ($openingQty + $inQty - $outQty));
 
-            $openingValue = (float) ($r->opening_value ?? round($openingQty * $avgCost, 2));
-            // لو قيمة الوارد صفر بس في كمية — نحسبها من متوسط السعر
-            $rawInValue = (float) ($r->in_value ?? 0);
-            $inValue = $rawInValue > 0 ? $rawInValue : round($inQty * $avgCost, 2);
-            $closingValue = (float) ($r->closing_value ?? round($closingQtyTheoretical * $avgCost, 2));
+            if ($isBranch) {
+                // الفروع: القيم المالية تحسب دايماً من الكميات × السعر الحالي
+                $openingValue = round($openingQty * $avgCost, 2);
+                $inValue      = round($inQty * $avgCost, 2);
+                $closingValue = round($closingQtyTheoretical * $avgCost, 2);
+            } else {
+                $openingValue = (float) ($r->opening_value ?? round($openingQty * $avgCost, 2));
+                $rawInValue   = (float) ($r->in_value ?? 0);
+                $inValue      = $rawInValue > 0 ? $rawInValue : round($inQty * $avgCost, 2);
+                $closingValue = (float) ($r->closing_value ?? round($closingQtyTheoretical * $avgCost, 2));
+            }
 
             return [
                 'id'                       => $r?->id ?? ('item-' . $item->id),

@@ -160,7 +160,24 @@ class CostCalculationService
         $productionInVal = (float) $ledger->where('voucher_type', 'production')->where('movement_type', 'in')->sum('total_cost');
 
         // منصرف داخلي (لفروع/مخازن أخرى)
-        $internalOutQty = (float) $ledger->where('voucher_type', 'dispatch')->whereIn('movement_type', ['out', 'transfer_out'])->sum('qty');
+        $dispatchOutEntries = $ledger->where('voucher_type', 'dispatch')
+            ->whereIn('movement_type', ['out', 'transfer_out']);
+
+        // نفلتر الأصناف الـ default_warehouse_id بتاعها مختلف عن المخزن الحالي
+        // عشان ما تظهرش branch consumption في مخازن مش بتاعتها (زي المخزن الرئيسي لأصناف المخازن الفرعية)
+        $internalOutItemIds = $dispatchOutEntries->pluck('item_id')->unique()->filter()->values()->toArray();
+        $excludedItemIds = [];
+        if (!empty($internalOutItemIds)) {
+            $excludedItemIds = Item::whereIn('id', $internalOutItemIds)
+                ->whereNotNull('default_warehouse_id')
+                ->where('default_warehouse_id', '!=', $warehouseId)
+                ->pluck('id')
+                ->toArray();
+        }
+        $internalOutLedger = $dispatchOutEntries->reject(function ($entry) use ($excludedItemIds) {
+            return in_array($entry->item_id, $excludedItemIds);
+        });
+        $internalOutQty = (float) $internalOutLedger->sum('qty');
 
         // استهلاك/مبيعات/إنتاج
         $consumptionQty = (float) $ledger->whereIn('voucher_type', ['production', 'external_sale', 'withdrawal'])->where('movement_type', 'out')->sum('qty');
@@ -202,10 +219,9 @@ class CostCalculationService
         $closingValue          = round($closingQtyTheoretical * $avgCost, 2);
 
         // 5. المنصرف موزعاً على المواقع المستلمة (فروع أو مخازن)
-        // يستخدم نفس collection $ledger بتاعة internal_out_qty لضمان التطابق
+        // يستخدم نفس collection $internalOutLedger بتاعة internal_out_qty لضمان التطابق
         $branchDispatches = [];
-        $dispatchOutEntries = $ledger->where('voucher_type', 'dispatch')
-            ->whereIn('movement_type', ['out', 'transfer_out']);
+        $dispatchOutEntries = $internalOutLedger;
 
         if ($dispatchOutEntries->isNotEmpty()) {
             $refIds = $dispatchOutEntries->pluck('ref_id')->unique()->toArray();

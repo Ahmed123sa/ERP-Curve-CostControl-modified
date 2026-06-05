@@ -243,7 +243,7 @@ class ReportExportService
 
         $items = Item::where('client_id', $clientId)->where('is_active', true)
             ->orderBy('sort_order')->orderBy('name')
-            ->get(['id', 'name', 'unit']);
+            ->get(['id', 'name', 'unit', 'default_cost']);
 
         // Daily data
         $dt = \Carbon\Carbon::parse($month . '-01');
@@ -305,11 +305,31 @@ class ReportExportService
 
         foreach ($items as $item) {
             $r = $closings->get($item->id);
-            $avgCost = $r ? (float) $r->avg_cost : 0;
+
+            if ($isBranch) {
+                // الفروع: السعر من الصنف مباشرة
+                $avgCost = (float) ($item->default_cost ?? 0);
+                if ($avgCost <= 0 && $r && $r->avg_cost > 0) {
+                    $avgCost = (float) $r->avg_cost;
+                }
+            } else {
+                $avgCost = $r ? (float) $r->avg_cost : 0;
+                if ($avgCost <= 0) {
+                    $avgCost = (float) ($item->default_cost ?? 0);
+                }
+            }
+
             $openingQty = $r ? (float) $r->opening_qty : 0;
-            $openingVal = $r ? (float) $r->opening_value : 0;
             $inQty = $r ? (float) $r->in_qty : 0;
-            $inVal = $r ? (float) $r->in_value : 0;
+
+            if ($isBranch) {
+                // الفروع: القيم تحسب دايماً من الكميات × السعر الحالي
+                $openingVal = round($openingQty * $avgCost, 2);
+                $inVal      = round($inQty * $avgCost, 2);
+            } else {
+                $openingVal = $r ? (float) $r->opening_value : 0;
+                $inVal      = $r ? (float) $r->in_value : 0;
+            }
             $closingTheoretical = $r ? (float) $r->closing_qty_theoretical : 0;
             $closingActual = $r ? $r->closing_qty_actual : null;
             $diffQty = $r ? (float) $r->diff_qty : 0;
