@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Client;
 use App\Models\Item;
 use App\Models\Warehouse;
 use App\Models\MonthlyClosing;
@@ -11,9 +12,11 @@ use App\Models\DispatchOrder;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Carbon;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
 use App\Services\ReportExportService;
 
 class ReportController extends Controller
@@ -116,9 +119,15 @@ class ReportController extends Controller
                 }
             }
 
-            // المعادلة: أول المدد + مشتريات المخازن - منصرف الفروع - استهلاك المخازن
-            $row['totals']['theoretical'] = round($row['totals']['opening_qty'] + $row['totals']['purchases_qty'] - $row['totals']['dispatch_qty'] - $row['totals']['consumption_qty'], 3);
-            
+            // النظري للمخازن (main + sub) = closing_qty_theoretical من MonthlyClosing مباشرة
+            // (محسوب من StockLedger: opening + in - out) — أكثر دقة من إعادة الحساب اليدوي
+            $theoreticalSum = 0;
+            foreach ($locations as $loc) {
+                if (!in_array($loc->type, ['main', 'sub'])) continue;
+                $theoreticalSum += (float) ($row['locations'][$loc->id]['theoretical'] ?? 0);
+            }
+            $row['totals']['theoretical'] = round($theoreticalSum, 3);
+
             // الجرد الفعلي الإجمالي = مجموع الأرصدة الفعلية للمخازن (main + sub) فقط
             $totalActual = 0;
             $hasActual = false;
@@ -571,9 +580,9 @@ class ReportController extends Controller
                 'consumption_qty'      => (float) ($c->consumption_qty ?? 0),
                 'closing_theoretical'  => (float) ($c->closing_qty_theoretical ?? 0),
                 'closing_actual'       => $c->closing_qty_actual !== null ? (float) $c->closing_qty_actual : null,
-                'diff_qty'             => (float) ($c->diff_qty ?? 0),
+                'diff_qty'             => (float) -(($c->diff_qty ?? 0)),
                 'avg_cost'             => (float) ($c->avg_cost ?? 0),
-                'diff_value'           => (float) ($c->diff_value ?? 0),
+                'diff_value'           => (float) -(($c->diff_value ?? 0)),
             ];
         })->values();
 
@@ -598,6 +607,7 @@ class ReportController extends Controller
         }
 
         $wh = Warehouse::findOrFail($warehouseId);
+        $client = Client::find($clientId);
 
         $closings = MonthlyClosing::where('client_id', $clientId)
             ->where('warehouse_id', $warehouseId)
@@ -614,19 +624,35 @@ class ReportController extends Controller
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet()->setRightToLeft(true);
 
-        // صف العنوان
+        // صف العلامة التجارية والشعار
         $sheet->mergeCells('A1:J1');
-        $sheet->setCellValue('A1', "مخزن {$wh->name} شهر {$month}");
+        $sheet->setCellValue('A1', $client->name ?? '');
         $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14)->getColor()->setARGB('FF1e3a5f');
-        $sheet->getRowDimension(1)->setRowHeight(30);
+        $sheet->getRowDimension(1)->setRowHeight(35);
+
+        if ($client && $client->logo && Storage::disk('public')->exists($client->logo)) {
+            $drawing = new Drawing();
+            $drawing->setPath(Storage::disk('public')->path($client->logo));
+            $drawing->setHeight(35);
+            $drawing->setCoordinates('A1');
+            $drawing->setOffsetX(5);
+            $drawing->setOffsetY(2);
+            $drawing->setWorksheet($sheet);
+        }
+
+        // صف العنوان
+        $sheet->mergeCells('A2:J2');
+        $sheet->setCellValue('A2', "مخزن {$wh->name} شهر {$month}");
+        $sheet->getStyle('A2')->getFont()->setBold(true)->setSize(12)->getColor()->setARGB('FF1e3a5f');
+        $sheet->getRowDimension(2)->setRowHeight(24);
 
         // الهيدر
         $headers = ['الصنف', 'الوحدة', 'أول المدة', 'وارد مخزن', 'منصرف فروع',
                      'آخر مدة', 'آخر فعلي', 'هوالك-مسحوبات', 'فرق'];
         $colLetters = range('B', 'J');
-        $sheet->setCellValue('A2', '#');
+        $sheet->setCellValue('A3', '#');
         foreach ($headers as $i => $h) {
-            $sheet->setCellValue($colLetters[$i] . '2', $h);
+            $sheet->setCellValue($colLetters[$i] . '3', $h);
         }
         $headerStyle = [
             'font' => ['bold' => true, 'size' => 10, 'color' => ['argb' => 'FFFFFFFF']],
@@ -634,10 +660,10 @@ class ReportController extends Controller
             'alignment' => ['horizontal' => \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER],
             'borders' => ['allBorders' => ['borderStyle' => \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN]],
         ];
-        $sheet->getStyle('A2:J2')->applyFromArray($headerStyle);
+        $sheet->getStyle('A3:J3')->applyFromArray($headerStyle);
 
         // البيانات
-        $rowIdx = 3;
+        $rowIdx = 4;
         $idx = 1;
         foreach ($items as $item) {
             $c = $closings->get($item->id);
@@ -649,7 +675,7 @@ class ReportController extends Controller
             $consumption    = (float) $c->consumption_qty;
             $theoretical    = (float) $c->closing_qty_theoretical;
             $actual         = $c->closing_qty_actual !== null ? (float) $c->closing_qty_actual : '';
-            $diff           = (float) $c->diff_qty;
+            $diff           = (float) -(($c->diff_qty ?? 0));
 
             $sheet->setCellValue('A' . $rowIdx, $idx++);
             $sheet->setCellValue('B' . $rowIdx, $item->name);

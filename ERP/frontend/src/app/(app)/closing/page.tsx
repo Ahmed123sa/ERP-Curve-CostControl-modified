@@ -373,7 +373,7 @@ export default function ClosingPage() {
                           }}
                           className="w-full h-full bg-transparent text-center font-bold text-blue-700 outline-none focus:bg-blue-100" />
                       </td>
-                      <td className="p-1 border-x border-gray-100 text-center font-bold text-red-600">{item.totals.diff || '0'}</td>
+                      <td className={`p-1 border-x border-gray-100 text-center font-bold ${item.totals.diff > 0 ? 'text-green-600' : item.totals.diff < 0 ? 'text-red-600' : 'text-gray-400'}`}>{item.totals.diff !== 0 ? item.totals.diff : '—'}</td>
                     </tr>
                   ))}
                 </tbody>

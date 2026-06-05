@@ -87,6 +87,7 @@ Older copy. Do NOT modify. Changes go into `ERP/laravel-app/`.
 - `grandSummary()` — Matrix report (all items × all locations)
 - `branchPerformance()` — Branch-level performance report
 - `financialDetails()` / `exportFinancialDetails()` — Financial values report (المستلم الفعلي)
+- `diffs()` / `exportDiffs()` — Per-warehouse diffs table + Excel export (created 2026-06-05)
 
 ### `DashboardController.php`
 - KPIs, top diffs
@@ -109,6 +110,7 @@ Older copy. Do NOT modify. Changes go into `ERP/laravel-app/`.
 | `/stock/closing` | `ClosingBalancePage` | Final inventory (physical count) |
 | `/reports/financial-details` | Financial details | Financial values report |
 | `/reports/grand-summary` | Grand summary | Matrix report |
+| `/reports/diffs` | Diffs page | Per-warehouse diffs table + Excel export |
 
 ---
 
