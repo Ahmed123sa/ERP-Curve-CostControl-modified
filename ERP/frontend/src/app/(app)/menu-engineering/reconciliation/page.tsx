@@ -158,7 +158,7 @@ export default function ReconciliationPage() {
   }, [grouped, filterCat, filterSearch]);
 
   // ── Upload handlers ──
-  const overrideKey = (source_name: string, size: string) => source_name + (size ? '|' + size : '');
+  const overrideKey = (source_name: string, size: string, cat?: string) => source_name + (size ? '|' + size : '') + (cat ? '|' + cat : '');
 
   const handleConfirm = async () => {
     if (!uploadPreview || !uploadPreview.length || !branchId) return;
@@ -166,12 +166,12 @@ export default function ReconciliationPage() {
     try {
       const items: any[] = [];
       for (const p of uploadPreview) {
-        const key = overrideKey(p.source_name, p.size || '');
+        const key = overrideKey(p.source_name, p.size || '', p.category || '');
         const rid = uploadOverrides[key] || p.recipe_id;
         items.push({ recipe_id: rid, qty_sold: p.qty_sold, category: p.category || '', source_name: p.source_name || '' });
       }
       for (const u of uploadUnmatched) {
-        const key = overrideKey(u.source_name, u.size || '');
+        const key = overrideKey(u.source_name, u.size || '', u.category || '');
         const overrideRid = uploadOverrides[key];
         if (overrideRid) {
           items.push({ recipe_id: overrideRid, qty_sold: u.qty_sold, category: u.category || '', source_name: u.source_name || '' });
@@ -187,19 +187,21 @@ export default function ReconciliationPage() {
       // Update salesMap with confirmed data so it flows into reconciliation
       const newSalesMap: Record<string, string> = { ...salesMap };
       for (const p of uploadPreview) {
-        const key = overrideKey(p.source_name, p.size || '');
+        const key = overrideKey(p.source_name, p.size || '', p.category || '');
         const rid = uploadOverrides[key] || p.recipe_id;
         const isHalf = !!uploadHalfCats[p.category];
         const qty = isHalf ? (p.qty_sold / 2) : p.qty_sold;
-        newSalesMap[rid] = String(qty);
+        const prev = parseFloat(newSalesMap[rid]) || 0;
+        newSalesMap[rid] = String(prev + qty);
       }
       for (const u of uploadUnmatched) {
-        const key = overrideKey(u.source_name, u.size || '');
+        const key = overrideKey(u.source_name, u.size || '', u.category || '');
         const overrideRid = uploadOverrides[key];
         if (overrideRid) {
           const isHalf = !!uploadHalfCats[u.category];
           const qty = isHalf ? (u.qty_sold / 2) : u.qty_sold;
-          newSalesMap[overrideRid] = String(qty);
+          const prev = parseFloat(newSalesMap[overrideRid]) || 0;
+          newSalesMap[overrideRid] = String(prev + qty);
         }
       }
       setSalesMap(newSalesMap);
@@ -218,7 +220,7 @@ export default function ReconciliationPage() {
     const preview = uploadPreview ?? [];
     const unmatched = uploadUnmatched ?? [];
     for (const p of preview) {
-      const key = overrideKey(p.source_name, p.size || '');
+      const key = overrideKey(p.source_name, p.size || '', p.category || '');
       const rid = uploadOverrides[key] || p.recipe_id;
       const recipe = uploadAllRecipes.find((r: any) => r.id === rid);
       const isHalf = !!uploadHalfCats[p.category];
@@ -230,7 +232,7 @@ export default function ReconciliationPage() {
       });
     }
     for (const u of unmatched) {
-      const key = overrideKey(u.source_name, u.size || '');
+      const key = overrideKey(u.source_name, u.size || '', u.category || '');
       const overrideRid = uploadOverrides[key];
       if (overrideRid) {
         const recipe = uploadAllRecipes.find((r: any) => r.id === overrideRid);
@@ -263,12 +265,12 @@ export default function ReconciliationPage() {
     try {
       const items: any[] = [];
       for (const p of uploadPreview) {
-        const key = overrideKey(p.source_name, p.size || '');
+        const key = overrideKey(p.source_name, p.size || '', p.category || '');
         const rid = uploadOverrides[key] || p.recipe_id;
         items.push({ recipe_id: rid, qty_sold: p.qty_sold, category: p.category || '', source_name: p.source_name || '' });
       }
       for (const u of uploadUnmatched) {
-        const key = overrideKey(u.source_name, u.size || '');
+        const key = overrideKey(u.source_name, u.size || '', u.category || '');
         const overrideRid = uploadOverrides[key];
         if (overrideRid) {
           items.push({ recipe_id: overrideRid, qty_sold: u.qty_sold, category: u.category || '', source_name: u.source_name || '' });
@@ -283,19 +285,21 @@ export default function ReconciliationPage() {
       // Update salesMap
       const newSalesMap: Record<string, string> = { ...salesMap };
       for (const p of uploadPreview) {
-        const key = overrideKey(p.source_name, p.size || '');
+        const key = overrideKey(p.source_name, p.size || '', p.category || '');
         const rid = uploadOverrides[key] || p.recipe_id;
         const isHalf = !!uploadHalfCats[p.category];
         const qty = isHalf ? (p.qty_sold / 2) : p.qty_sold;
-        newSalesMap[rid] = String(qty);
+        const prev = parseFloat(newSalesMap[rid]) || 0;
+        newSalesMap[rid] = String(prev + qty);
       }
       for (const u of uploadUnmatched) {
-        const key = overrideKey(u.source_name, u.size || '');
+        const key = overrideKey(u.source_name, u.size || '', u.category || '');
         const overrideRid = uploadOverrides[key];
         if (overrideRid) {
           const isHalf = !!uploadHalfCats[u.category];
           const qty = isHalf ? (u.qty_sold / 2) : u.qty_sold;
-          newSalesMap[overrideRid] = String(qty);
+          const prev = parseFloat(newSalesMap[overrideRid]) || 0;
+          newSalesMap[overrideRid] = String(prev + qty);
         }
       }
       setSalesMap(newSalesMap);
@@ -514,6 +518,22 @@ export default function ReconciliationPage() {
     if (a === null) return null;
     return t - a; // theoretical - actual
   };
+
+  // Group preview & unmatched items by category for the review modal
+  const groupedByCat = useMemo(() => {
+    const map: Record<string, { matched: any[]; unmatched: any[] }> = {};
+    for (const p of (uploadPreview ?? [])) {
+      const cat = p.category || 'أخرى';
+      if (!map[cat]) map[cat] = { matched: [], unmatched: [] };
+      map[cat].matched.push(p);
+    }
+    for (const u of (uploadUnmatched ?? [])) {
+      const cat = u.category || 'أخرى';
+      if (!map[cat]) map[cat] = { matched: [], unmatched: [] };
+      map[cat].unmatched.push(u);
+    }
+    return Object.entries(map).map(([cat, items]) => ({ cat, ...items }));
+  }, [uploadPreview, uploadUnmatched]);
 
   return (
     <div className="flex-1 flex flex-col h-full" dir="rtl">
@@ -836,7 +856,7 @@ export default function ReconciliationPage() {
       {/* ─── Upload Sales Modal (2-step: upload → review → done) ─── */}
       {showUpload && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" onClick={(e) => { if (e.target === e.currentTarget) resetUpload(); }}>
-          <div className="bg-white rounded-xl shadow-2xl max-w-7xl w-full max-h-[95vh] overflow-auto m-4" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white rounded-xl shadow-2xl w-[95vw] max-w-[1600px] max-h-[95vh] overflow-auto m-4" onClick={(e) => e.stopPropagation()}>
             <div className="p-8">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-bold">رفع مبيعات من إكسيل</h3>
@@ -857,29 +877,22 @@ export default function ReconciliationPage() {
 
               {uploadStep === 'review' && (
                 <div className="space-y-4">
-                  {uploadCategories.length > 0 && (
-                    <div className="bg-gray-50 rounded-lg p-3 border">
-                      <h4 className="text-sm font-bold text-gray-700 mb-2">الكاتيجوريز — إذا كان "نص" يتقسط العدد على 2</h4>
-                      <div className="flex flex-wrap gap-4">
-                        {uploadCategories.map((c: any) => (
-                          <label key={c.name} className="flex items-center gap-2 text-sm cursor-pointer">
-                            <input type="checkbox" checked={!!uploadHalfCats[c.name]} onChange={(e) => setUploadHalfCats((p) => ({ ...p, [c.name]: e.target.checked }))} className="rounded border-gray-300" />
-                            <span className={uploadHalfCats[c.name] ? 'text-orange-700 font-bold' : 'text-gray-700'}>{c.name} {uploadHalfCats[c.name] ? '(نصف)' : ''}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                   <div className="flex items-center gap-4 text-sm text-gray-600 flex-wrap">
                     <span>المطابق: <strong className="text-emerald-700">{uploadPreview?.length ?? 0}</strong></span>
                     <span>غير المطابق: <strong className="text-red-600">{uploadUnmatched.length}</strong></span>
                   </div>
-                  {uploadPreview && uploadPreview.length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-bold text-gray-700 mb-2">الأصناف المطابقة</h4>
-                      <div className="max-h-48 overflow-y-auto border rounded-lg">
+                  {groupedByCat.length === 0 && (
+                    <p className="text-sm text-gray-400 text-center py-4">لا توجد أصناف</p>
+                  )}
+                  {groupedByCat.map(({ cat, matched, unmatched }) => (
+                    <div key={cat} className="border rounded-lg overflow-hidden">
+                      <div className="flex items-center gap-2 px-4 py-2 bg-gray-50 border-b">
+                        <input type="checkbox" checked={!!uploadHalfCats[cat]} onChange={(e) => setUploadHalfCats((p) => ({ ...p, [cat]: e.target.checked }))} className="rounded border-gray-300" />
+                        <span className={`font-bold text-sm ${uploadHalfCats[cat] ? 'text-orange-700' : 'text-gray-700'}`}>{cat} {uploadHalfCats[cat] ? '(نصف)' : ''}</span>
+                      </div>
+                      {matched.length > 0 && (
                         <table className="w-full text-sm">
-                          <thead className="bg-gray-50 sticky top-0"><tr>
+                          <thead><tr className="bg-gray-50/50">
                             <th className="p-2 text-right font-bold text-gray-600">#</th>
                             <th className="p-2 text-right font-bold text-gray-600">الاسم في الملف</th>
                             <th className="p-2 text-right font-bold text-gray-600">المرتبط بـ</th>
@@ -887,58 +900,50 @@ export default function ReconciliationPage() {
                             <th className="p-2 text-center font-bold text-gray-600">الدقة</th>
                           </tr></thead>
                           <tbody>
-                            {uploadPreview.map((p: any, i: number) => {
-                              const isHalf = !!uploadHalfCats[p.category];
-                              const displayQty = isHalf ? (p.qty_sold / 2) : p.qty_sold;
-                              return (
-                                <tr key={p.recipe_id + (p.size || '')} className={`border-b border-gray-100 even:bg-gray-50/50 ${isHalf ? 'bg-orange-50/30' : ''}`}>
-                                  <td className="p-2 text-gray-400">{i + 1}</td>
-                                  <td className="p-2 text-gray-700">{p.source_name}{p.size ? ` (${p.size})` : ''}</td>
-                                  <td className="p-2">
-                                    <SearchableSelect value={uploadOverrides[overrideKey(p.source_name, p.size || '')] || p.recipe_id} onChange={(val) => setUploadOverrides((prev) => ({ ...prev, [overrideKey(p.source_name, p.size || '')]: val }))} options={uploadAllRecipes} />
-                                  </td>
-                                  <td className="p-2 text-center font-mono">{displayQty}</td>
-                                  <td className="p-2 text-center">
-                                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.confidence >= 100 ? 'bg-emerald-100 text-emerald-700' : p.confidence >= 95 ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'}`}>{p.confidence}%</span>
-                                  </td>
-                                </tr>
-                              );
-                            })}
+                            {matched.map((p: any, i: number) => (
+                              <tr key={p.recipe_id + '|' + cat + (p.size || '')} className={`border-b border-gray-100 even:bg-gray-50/50 ${uploadHalfCats[cat] ? 'bg-orange-50/30' : ''}`}>
+                                <td className="p-2 text-gray-400">{i + 1}</td>
+                                <td className="p-2 text-gray-700">{p.source_name}{p.size ? ` (${p.size})` : ''}</td>
+                                <td className="p-2">
+                                  <SearchableSelect value={uploadOverrides[overrideKey(p.source_name, p.size || '', cat)] || p.recipe_id} onChange={(val) => setUploadOverrides((prev) => ({ ...prev, [overrideKey(p.source_name, p.size || '', cat)]: val }))} options={uploadAllRecipes} />
+                                </td>
+                                <td className="p-2 text-center font-mono">{uploadHalfCats[cat] ? (p.qty_sold / 2) : p.qty_sold}</td>
+                                <td className="p-2 text-center">
+                                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.confidence >= 100 ? 'bg-emerald-100 text-emerald-700' : p.confidence >= 95 ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'}`}>{p.confidence}%</span>
+                                </td>
+                              </tr>
+                            ))}
                           </tbody>
                         </table>
-                      </div>
+                      )}
+                      {unmatched.length > 0 && (
+                        <div>
+                          {matched.length > 0 && <div className="border-t border-dashed border-red-200" />}
+                          <table className="w-full text-sm">
+                            <thead><tr className="bg-red-50/50">
+                              <th className="p-2 text-right font-bold text-red-700">الاسم في الملف</th>
+                              <th className="p-2 text-center font-bold text-red-700">العدد</th>
+                              <th className="p-2 text-right font-bold text-red-700">اختيار الصنف</th>
+                            </tr></thead>
+                            <tbody>
+                              {unmatched.map((u: any) => {
+                                const uKey = overrideKey(u.source_name, u.size || '', cat);
+                                return (
+                                  <tr key={uKey} className={`border-b border-red-100 even:bg-red-50/20 ${uploadHalfCats[cat] ? 'bg-orange-50/30' : ''}`}>
+                                    <td className="p-2 text-gray-800 font-medium">{u.source_name}{u.size ? ` (${u.size})` : ''}</td>
+                                    <td className="p-2 text-center font-mono">{uploadHalfCats[cat] ? (u.qty_sold / 2) : u.qty_sold}</td>
+                                    <td className="p-2">
+                                      <SearchableSelect value={uploadOverrides[uKey] || ''} onChange={(val) => setUploadOverrides((prev) => ({ ...prev, [uKey]: val }))} options={uploadAllRecipes} placeholder="— تجاهل —" />
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
                     </div>
-                  )}
-                  {uploadUnmatched.length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-bold text-red-700 mb-2">الأصناف غير المطابقة — اختر الصنف المناسب</h4>
-                      <div className="max-h-48 overflow-y-auto border border-red-200 rounded-lg">
-                        <table className="w-full text-sm">
-                          <thead className="bg-red-50 sticky top-0"><tr>
-                            <th className="p-2 text-right font-bold text-red-700">الاسم في الملف</th>
-                            <th className="p-2 text-center font-bold text-red-700">العدد</th>
-                            <th className="p-2 text-right font-bold text-red-700">اختيار الصنف</th>
-                          </tr></thead>
-                          <tbody>
-                            {uploadUnmatched.map((u: any) => {
-                              const isHalf = !!uploadHalfCats[u.category];
-                              const displayQty = isHalf ? (u.qty_sold / 2) : u.qty_sold;
-                              const uKey = overrideKey(u.source_name, u.size || '');
-                              return (
-                                <tr key={uKey} className={`border-b border-red-100 even:bg-red-50/20 ${isHalf ? 'bg-orange-50/30' : ''}`}>
-                                  <td className="p-2 text-gray-800 font-medium">{u.source_name}{u.size ? ` (${u.size})` : ''}</td>
-                                  <td className="p-2 text-center font-mono">{displayQty}</td>
-                                  <td className="p-2">
-                                    <SearchableSelect value={uploadOverrides[uKey] || ''} onChange={(val) => setUploadOverrides((prev) => ({ ...prev, [uKey]: val }))} options={uploadAllRecipes} placeholder="— تجاهل —" />
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
+                  ))}
                   <div className="flex justify-center gap-3 pt-2 flex-wrap">
                     <button onClick={handleDirectParse} disabled={uploadConfirmLoading} className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{uploadConfirmLoading ? '...' : 'بارسنج مباشر'}</button>
                     <button onClick={handleConfirm} disabled={uploadConfirmLoading} className="px-6 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">{uploadConfirmLoading ? '...' : 'تأكيد وحفظ المبيعات'}</button>

@@ -128,10 +128,11 @@ class MenuSalesImportController extends Controller
             $savedMapping = $this->matchingService->findSavedMapping($clientId, $name);
             if ($savedMapping) {
                 $rid = $savedMapping['recipe_id'];
-                if (isset($matchedItems[$rid])) {
-                    $matchedItems[$rid]['qty_sold'] += $qty;
+                $compositeKey = $rid . '|' . $currentCat;
+                if (isset($matchedItems[$compositeKey])) {
+                    $matchedItems[$compositeKey]['qty_sold'] += $qty;
                 } else {
-                    $matchedItems[$rid] = [
+                    $matchedItems[$compositeKey] = [
                         'recipe_id' => $savedMapping['recipe_id'],
                         'recipe_name' => $savedMapping['recipe_name'],
                         'source_name' => $name,
@@ -155,10 +156,11 @@ class MenuSalesImportController extends Controller
 
             if ($matched) {
                 $rid = $matched['id'];
-                if (isset($matchedItems[$rid])) {
-                    $matchedItems[$rid]['qty_sold'] += $qty;
+                $compositeKey = $rid . '|' . $currentCat;
+                if (isset($matchedItems[$compositeKey])) {
+                    $matchedItems[$compositeKey]['qty_sold'] += $qty;
                 } else {
-                    $matchedItems[$rid] = [
+                    $matchedItems[$compositeKey] = [
                         'recipe_id' => $rid,
                         'recipe_name' => $matched['name'],
                         'source_name' => $name,
@@ -169,7 +171,7 @@ class MenuSalesImportController extends Controller
                     ];
                 }
             } else {
-                $unmatchedKey = $name . '|' . $sizeVal;
+                $unmatchedKey = $name . '|' . $sizeVal . '|' . $currentCat;
                 if (isset($unmatchedRows[$unmatchedKey])) {
                     $unmatchedRows[$unmatchedKey]['qty_sold'] += $qty;
                 } else {
@@ -321,10 +323,11 @@ class MenuSalesImportController extends Controller
             $savedMapping = $this->matchingService->findSavedMapping($clientId, $name);
             if ($savedMapping) {
                 $rid = $savedMapping['recipe_id'];
-                if (isset($matchedItems[$rid])) {
-                    $matchedItems[$rid]['qty_sold'] += $qty;
+                $compositeKey = $rid . '|' . $currentCat;
+                if (isset($matchedItems[$compositeKey])) {
+                    $matchedItems[$compositeKey]['qty_sold'] += $qty;
                 } else {
-                    $matchedItems[$rid] = [
+                    $matchedItems[$compositeKey] = [
                         'recipe_id' => $rid,
                         'recipe_name' => $savedMapping['recipe_name'],
                         'source_name' => $name,
@@ -348,10 +351,11 @@ class MenuSalesImportController extends Controller
 
             if ($matched) {
                 $rid = $matched['id'];
-                if (isset($matchedItems[$rid])) {
-                    $matchedItems[$rid]['qty_sold'] += $qty;
+                $compositeKey = $rid . '|' . $currentCat;
+                if (isset($matchedItems[$compositeKey])) {
+                    $matchedItems[$compositeKey]['qty_sold'] += $qty;
                 } else {
-                    $matchedItems[$rid] = [
+                    $matchedItems[$compositeKey] = [
                         'recipe_id' => $rid,
                         'recipe_name' => $matched['name'],
                         'source_name' => $name,
@@ -362,7 +366,7 @@ class MenuSalesImportController extends Controller
                     ];
                 }
             } else {
-                $unmatchedKey = $name . '|' . $sizeVal;
+                $unmatchedKey = $name . '|' . $sizeVal . '|' . $currentCat;
                 if (isset($unmatchedRows[$unmatchedKey])) {
                     $unmatchedRows[$unmatchedKey]['qty_sold'] += $qty;
                 } else {
