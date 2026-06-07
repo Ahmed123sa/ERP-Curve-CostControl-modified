@@ -769,8 +769,8 @@ export default function ReconciliationPage() {
       {/* ─── Upload Sales Modal (2-step: upload → review → done) ─── */}
       {showUpload && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" onClick={(e) => { if (e.target === e.currentTarget) resetUpload(); }}>
-          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-auto m-4" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6">
+          <div className="bg-white rounded-xl shadow-2xl max-w-7xl w-full max-h-[95vh] overflow-auto m-4" onClick={(e) => e.stopPropagation()}>
+            <div className="p-8">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-bold">رفع مبيعات من إكسيل</h3>
                 <button onClick={resetUpload} className="text-gray-400 hover:text-gray-700 text-xl leading-none">&times;</button>
@@ -898,8 +898,8 @@ export default function ReconciliationPage() {
       {/* ─── Saved Reconciliations Modal ─── */}
       {showSavedRecons && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" onClick={(e) => { if (e.target === e.currentTarget) setShowSavedRecons(false); }}>
-          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-auto m-4" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6">
+          <div className="bg-white rounded-xl shadow-2xl max-w-7xl w-full max-h-[95vh] overflow-auto m-4" onClick={(e) => e.stopPropagation()}>
+            <div className="p-8">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-bold">التسويات المحفوظة</h3>
                 <button onClick={() => setShowSavedRecons(false)} className="text-gray-400 hover:text-gray-700 text-xl leading-none">&times;</button>
