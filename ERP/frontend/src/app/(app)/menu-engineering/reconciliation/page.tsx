@@ -184,6 +184,26 @@ export default function ReconciliationPage() {
         half_categories: uploadHalfCats,
       });
 
+      // Update salesMap with confirmed data so it flows into reconciliation
+      const newSalesMap: Record<string, string> = { ...salesMap };
+      for (const p of uploadPreview) {
+        const key = overrideKey(p.source_name, p.size || '');
+        const rid = uploadOverrides[key] || p.recipe_id;
+        const isHalf = !!uploadHalfCats[p.category];
+        const qty = isHalf ? (p.qty_sold / 2) : p.qty_sold;
+        newSalesMap[rid] = String(qty);
+      }
+      for (const u of uploadUnmatched) {
+        const key = overrideKey(u.source_name, u.size || '');
+        const overrideRid = uploadOverrides[key];
+        if (overrideRid) {
+          const isHalf = !!uploadHalfCats[u.category];
+          const qty = isHalf ? (u.qty_sold / 2) : u.qty_sold;
+          newSalesMap[overrideRid] = String(qty);
+        }
+      }
+      setSalesMap(newSalesMap);
+
       const exportRows: any[] = [];
       for (const p of uploadPreview) {
         const key = overrideKey(p.source_name, p.size || '');
@@ -240,6 +260,8 @@ export default function ReconciliationPage() {
     setUploadExportData([]);
     setUploadAllRecipes([]);
     setUploadCategories([]);
+    // Auto-refresh reconciliation with newly confirmed sales
+    setTimeout(() => handleRun(), 100);
   };
 
   // ── Auto upload (direct upload with hardcoded column mapping for .xls exports) ──
@@ -322,8 +344,57 @@ export default function ReconciliationPage() {
       setTo(d.to_date.slice(0, 10));
       setBranchId(d.branch_id);
       if (d.sales_data) setSalesMap(d.sales_data);
+      // Transform saved items directly into inv format (no recalculation)
+      const items = d.items as any[];
+      const ingIds = items.map((i: any) => i.ingredient_id);
+      const ingNames: Record<string, string> = {};
+      const opening: Record<string, number> = {};
+      const purchases: Record<string, number> = {};
+      const closing: Record<string, number> = {};
+      const actual: Record<string, number> = {};
+      const totals: Record<string, number> = {};
+      const variance: Record<string, number> = {};
+      for (const i of items) {
+        ingNames[i.ingredient_id] = i.ingredient_name;
+        opening[i.ingredient_id] = i.opening_qty;
+        purchases[i.ingredient_id] = i.purchases_qty;
+        closing[i.ingredient_id] = i.closing_actual;
+        actual[i.ingredient_id] = i.actual_received;
+        totals[i.ingredient_id] = i.sales_qty;
+        variance[i.ingredient_id] = i.diff_qty;
+      }
+      setInv({
+        ingredient_ids: ingIds,
+        ingredient_names: ingNames,
+        categories: {},
+        totals,
+        opening,
+        purchases,
+        closing,
+        actual,
+        variance,
+      });
       setShowSavedRecons(false);
-      setTimeout(() => handleRun(), 100);
+    } catch (e: any) {
+      console.error(e);
+    }
+  };
+
+  const handleExportRecon = async (id: string, branchName: string, fromDate: string) => {
+    try {
+      const res = await api.get(`/menu-engineering/reconciliations/${id}/export`, {
+        responseType: 'blob',
+      });
+      const month = fromDate.slice(0, 7);
+      const fileName = `${branchName} ${month}.xlsx`;
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
     } catch (e: any) {
       console.error(e);
     }
@@ -859,7 +930,7 @@ export default function ReconciliationPage() {
                         <td className="p-2 text-center text-gray-600">{new Date(r.created_at).toLocaleDateString('ar-EG')}</td>
                         <td className="p-2 text-center whitespace-nowrap">
                           <button onClick={() => handleLoadRecon(r.id)} className="px-2 py-1 text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded">تحميل</button>
-                          <a href={`${api.defaults.baseURL}/menu-engineering/reconciliations/${r.id}/export`} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs text-emerald-600 hover:text-emerald-800 border border-emerald-200 rounded mr-1 inline-block">تصدير</a>
+                          <button onClick={() => handleExportRecon(r.id, r.branch_name, r.from_date)} className="px-2 py-1 text-xs text-emerald-600 hover:text-emerald-800 border border-emerald-200 rounded mr-1">تصدير</button>
                           <button onClick={() => handleDeleteRecon(r.id)} className="px-2 py-1 text-xs text-red-600 hover:text-red-800 border border-red-200 rounded mr-1">حذف</button>
                         </td>
                       </tr>

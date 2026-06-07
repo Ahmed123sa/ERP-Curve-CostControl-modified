@@ -216,31 +216,33 @@ class MenuReconciliationController extends Controller
         $recon = MenuReconciliation::with('items')->findOrFail($id);
         $branch = Warehouse::find($recon->branch_id);
         $client = Client::find($recon->client_id);
+        $branchName = $branch?->name ?? '—';
+        $clientName = $client?->name ?? '';
 
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet()->setRightToLeft(true);
 
-        // صف العلامة التجارية
+        // Row 1 — Client / Company name
         $sheet->mergeCells('A1:J1');
-        $sheet->setCellValue('A1', $client->name ?? '');
-        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14)->getColor()->setARGB('FF1e3a5f');
-        $sheet->getRowDimension(1)->setRowHeight(35);
+        $sheet->setCellValue('A1', $clientName);
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(16)->getColor()->setARGB('FF1e3a5f');
+        $sheet->getRowDimension(1)->setRowHeight(38);
 
         if ($client && $client->logo && \Illuminate\Support\Facades\Storage::disk('public')->exists($client->logo)) {
             $drawing = new Drawing();
             $drawing->setPath(\Illuminate\Support\Facades\Storage::disk('public')->path($client->logo));
-            $drawing->setHeight(35);
+            $drawing->setHeight(38);
             $drawing->setCoordinates('A1');
             $drawing->setOffsetX(5);
             $drawing->setOffsetY(2);
             $drawing->setWorksheet($sheet);
         }
 
-        // صف العنوان
+        // Row 2 — Title: branch + period
         $sheet->mergeCells('A2:J2');
-        $sheet->setCellValue('A2', "تسوية {$branch?->name} من {$recon->from_date->format('Y-m-d')} إلى {$recon->to_date->format('Y-m-d')}");
-        $sheet->getStyle('A2')->getFont()->setBold(true)->setSize(12)->getColor()->setARGB('FF1e3a5f');
-        $sheet->getRowDimension(2)->setRowHeight(24);
+        $sheet->setCellValue('A2', "تسوية {$branchName} من {$recon->from_date->format('Y-m-d')} إلى {$recon->to_date->format('Y-m-d')}");
+        $sheet->getStyle('A2')->getFont()->setBold(true)->setSize(13)->getColor()->setARGB('FF1e3a5f');
+        $sheet->getRowDimension(2)->setRowHeight(26);
 
         // الهيدر
         $headers = ['اسم الصنف', 'الوحدة', 'أول المدة', 'مشتريات', 'آخر مدة فعلي',
@@ -355,7 +357,7 @@ class MenuReconciliationController extends Controller
         $monthName = $recon->from_date->format('Y-m');
         return response()->streamDownload(function () use ($writer) {
             $writer->save('php://output');
-        }, "{$branch?->name} {$monthName}.xlsx", [
+        }, "{$branchName} {$monthName}.xlsx", [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
     }

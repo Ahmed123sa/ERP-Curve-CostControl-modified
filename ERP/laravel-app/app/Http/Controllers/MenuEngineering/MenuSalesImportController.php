@@ -52,6 +52,45 @@ class MenuSalesImportController extends Controller
 
         [$exactMap, $sizeMap, $allNames] = $this->matchingService->buildMatchingMaps($recipes);
 
+        // Try auto-detection first; fall back to hardcoded constants if invalid
+        $analysis = $this->analyzeColumns($rows);
+        $detected = $analysis['suggested_mapping'];
+        $columns = $analysis['columns'];
+        $colByIndex = [];
+        foreach ($columns as $c) {
+            $colByIndex[$c['index']] = $c;
+        }
+
+        $useDetected = false;
+        if ($detected['name_col'] !== null && isset($colByIndex[$detected['name_col']])) {
+            $nameColInfo = $colByIndex[$detected['name_col']];
+            if ($nameColInfo['type'] === 'text') {
+                $hasNameLike = false;
+                foreach ($nameColInfo['sample_values'] ?? [] as $sv) {
+                    $svClean = str_replace(',', '', $sv);
+                    if (!is_numeric($svClean) && preg_match('/\p{L}/u', $svClean)) {
+                        $hasNameLike = true;
+                        break;
+                    }
+                }
+                $useDetected = $hasNameLike;
+            }
+        }
+
+        if ($useDetected) {
+            $nameCol = (int) $detected['name_col'];
+            $qtyCol = (int) ($detected['qty_col'] ?? 0);
+            $sizeCol = isset($detected['size_col']) && $detected['size_col'] !== null ? (int) $detected['size_col'] : null;
+            $catCol = isset($detected['cat_col']) && $detected['cat_col'] !== null ? (int) $detected['cat_col'] : null;
+            $headerRows = (int) ($detected['header_rows'] ?? 0);
+        } else {
+            $nameCol = self::NAME_COL;
+            $qtyCol = self::QTY_COL;
+            $sizeCol = self::SIZE_COL;
+            $catCol = self::CAT_COL;
+            $headerRows = self::HEADER_ROWS;
+        }
+
         $matchedItems = [];
         $unmatchedRows = [];
         $currentCat = '';
@@ -59,7 +98,7 @@ class MenuSalesImportController extends Controller
         $halfCategories = [];
 
         foreach ($rows as $rIdx => $row) {
-            $catVal = trim($row[self::CAT_COL] ?? '');
+            $catVal = $catCol !== null ? trim($row[$catCol] ?? '') : '';
             if (!empty($catVal)) {
                 $currentCat = $catVal;
                 if (!isset($seenCats[$currentCat])) {
@@ -68,13 +107,13 @@ class MenuSalesImportController extends Controller
                 }
             }
 
-            if ($rIdx < self::HEADER_ROWS) {
+            if ($rIdx < $headerRows) {
                 continue;
             }
 
-            $name = trim($row[self::NAME_COL] ?? '');
-            $qty = (float) ($row[self::QTY_COL] ?? 0);
-            $sizeVal = trim($row[self::SIZE_COL] ?? '');
+            $name = trim($row[$nameCol] ?? '');
+            $qty = (float) ($row[$qtyCol] ?? 0);
+            $sizeVal = $sizeCol !== null ? trim($row[$sizeCol] ?? '') : '';
 
             if (empty($name) || $qty <= 0) {
                 continue;
@@ -139,7 +178,7 @@ class MenuSalesImportController extends Controller
             'unmatched' => array_values($unmatchedRows),
             'matched_count' => count($preview),
             'unmatched_count' => count($unmatchedRows),
-            'total_data_rows' => count($rows) - self::HEADER_ROWS,
+            'total_data_rows' => count($rows) - $headerRows,
             'all_recipes' => $recipes->map(fn($r) => ['id' => $r->id, 'name' => $r->name]),
             'categories' => $categories,
         ]);
@@ -166,149 +205,11 @@ class MenuSalesImportController extends Controller
         }
 
         $totalRows = count($rows);
-        $maxCols = 0;
-        foreach ($rows as $row) {
-            $maxCols = max($maxCols, count($row));
-        }
+        $analysis = $this->analyzeColumns($rows);
+        $columns = $analysis['columns'];
+        $suggestedMapping = $analysis['suggested_mapping'];
+        $dataStart = $analysis['header_rows'];
 
-        // Scan ALL columns to collect candidate headers per column
-        $scanDepth = min(30, $totalRows);
-        // For each column, collect all non-empty values from first 30 rows
-        $colCandidates = array_fill(0, $maxCols, []);
-        // Track per-row keyword match score (to find the best header row)
-        $rowScores = array_fill(0, $scanDepth, 0);
-
-        // Build flattened keyword lookup
-        $allKeywords = [];
-        foreach (self::HEADER_KEYWORDS as $field => $kws) {
-            foreach ($kws as $kw) {
-                $norm = $this->matchingService->normalize($kw);
-                $allKeywords[$norm] = $field;
-            }
-        }
-
-        for ($col = 0; $col < $maxCols; $col++) {
-            for ($i = 0; $i < $scanDepth; $i++) {
-                if (isset($rows[$i][$col])) {
-                    $val = trim((string) $rows[$i][$col]);
-                    if (!empty($val)) {
-                        $colCandidates[$col][] = $val;
-                        // Score this row for keyword matches
-                        $normVal = $this->matchingService->normalize($val);
-                        if (isset($allKeywords[$normVal])) {
-                            $rowScores[$i] += 10;
-                        } else {
-                            foreach ($allKeywords as $kwNorm => $field) {
-                                if (mb_strpos($normVal, $kwNorm) !== false) {
-                                    $rowScores[$i] += 5;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Find the row with the highest keyword score = best header row
-        $headerRowIdx = 0;
-        $bestScore = 0;
-        foreach ($rowScores as $i => $score) {
-            if ($score > $bestScore) {
-                $bestScore = $score;
-                $headerRowIdx = $i;
-            }
-        }
-
-        // Build columns info
-        $columns = [];
-        for ($col = 0; $col < $maxCols; $col++) {
-            // Collect unique candidates for this column from all scanned rows
-            $seen = [];
-            $candidates = [];
-            foreach ($colCandidates[$col] as $v) {
-                $norm = $this->matchingService->normalize($v);
-                if (!isset($seen[$norm])) {
-                    $seen[$norm] = true;
-                    $candidates[] = $v;
-                }
-            }
-
-            // Use the value from best header row if available
-            $header = isset($rows[$headerRowIdx][$col]) ? trim((string) $rows[$headerRowIdx][$col]) : '';
-            // If empty, try adjacent rows
-            if (empty($header)) {
-                for ($d = 1; $d <= 3; $d++) {
-                    $up = $headerRowIdx - $d;
-                    $down = $headerRowIdx + $d;
-                    if ($up >= 0 && !empty(trim((string) ($rows[$up][$col] ?? '')))) {
-                        $header = trim((string) $rows[$up][$col]);
-                        break;
-                    }
-                    if ($down < $totalRows && !empty(trim((string) ($rows[$down][$col] ?? '')))) {
-                        $header = trim((string) $rows[$down][$col]);
-                        break;
-                    }
-                }
-            }
-            // If still empty, use first non-empty candidate
-            if (empty($header) && !empty($candidates)) {
-                $header = $candidates[0];
-            }
-
-            // Collect sample values from data rows (rows after header row)
-            $sampleValues = [];
-            $numericCount = 0;
-            $textCount = 0;
-            $emptyCount = 0;
-
-            // Data rows are after the header row
-            $dataStart = $headerRowIdx + 1;
-            for ($i = $dataStart; $i < min($dataStart + 10, $totalRows); $i++) {
-                if (isset($rows[$i][$col])) {
-                    $val = trim((string) $rows[$i][$col]);
-                    if (!empty($val)) {
-                        $sampleValues[] = mb_substr($val, 0, 50);
-                        $cleanVal = str_replace(',', '', $val);
-                        if (is_numeric($cleanVal)) {
-                            $numericCount++;
-                        } else {
-                            $textCount++;
-                        }
-                    } else {
-                        $emptyCount++;
-                    }
-                }
-            }
-
-            if ($textCount > $numericCount && $textCount > 0) {
-                $type = 'text';
-            } elseif ($numericCount > 0) {
-                $type = 'numeric';
-            } else {
-                $type = 'blank';
-            }
-
-            $columns[] = [
-                'index' => $col,
-                'header' => $header,
-                'normalized' => $this->matchingService->normalize($header),
-                'sample_values' => array_slice($sampleValues, 0, 5),
-                'candidates' => array_slice($candidates, 0, 5),
-                'type' => $type,
-            ];
-        }
-
-        // Auto-detect mapping by scanning candidates AND headers
-        $suggestedMapping = $this->autoDetectMapping($columns);
-
-        // Data starts after header row
-        $dataStart = $headerRowIdx + 1;
-        if ($dataStart < 1) $dataStart = 1;
-
-        $suggestedMapping['header_rows'] = $dataStart;
-
-        // Sample rows for preview (first 5 data rows)
         $sampleRows = [];
         for ($i = $dataStart; $i < min($dataStart + 5, $totalRows); $i++) {
             $sampleRows[] = $rows[$i] ?? [];
@@ -318,7 +219,7 @@ class MenuSalesImportController extends Controller
             'columns' => $columns,
             'suggested_mapping' => $suggestedMapping,
             'total_rows' => $totalRows,
-            'header_row_idx' => $headerRowIdx,
+            'header_row_idx' => $dataStart - 1,
             'sample_rows' => $sampleRows,
         ]);
     }
@@ -686,6 +587,138 @@ class MenuSalesImportController extends Controller
         $session->delete();
 
         return response()->json(['message' => 'تم حذف الجلسة']);
+    }
+
+    private function analyzeColumns(array $rows): array
+    {
+        $totalRows = count($rows);
+        $maxCols = 0;
+        foreach ($rows as $row) {
+            $maxCols = max($maxCols, count($row));
+        }
+
+        $scanDepth = min(30, $totalRows);
+        $colCandidates = array_fill(0, $maxCols, []);
+        $rowScores = array_fill(0, $scanDepth, 0);
+
+        $allKeywords = [];
+        foreach (self::HEADER_KEYWORDS as $field => $kws) {
+            foreach ($kws as $kw) {
+                $norm = $this->matchingService->normalize($kw);
+                $allKeywords[$norm] = $field;
+            }
+        }
+
+        for ($col = 0; $col < $maxCols; $col++) {
+            for ($i = 0; $i < $scanDepth; $i++) {
+                if (isset($rows[$i][$col])) {
+                    $val = trim((string) $rows[$i][$col]);
+                    if (!empty($val)) {
+                        $colCandidates[$col][] = $val;
+                        $normVal = $this->matchingService->normalize($val);
+                        if (isset($allKeywords[$normVal])) {
+                            $rowScores[$i] += 10;
+                        } else {
+                            foreach ($allKeywords as $kwNorm => $field) {
+                                if (mb_strpos($normVal, $kwNorm) !== false) {
+                                    $rowScores[$i] += 5;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        $headerRowIdx = 0;
+        $bestScore = 0;
+        foreach ($rowScores as $i => $score) {
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $headerRowIdx = $i;
+            }
+        }
+
+        $columns = [];
+        for ($col = 0; $col < $maxCols; $col++) {
+            $seen = [];
+            $candidates = [];
+            foreach ($colCandidates[$col] as $v) {
+                $norm = $this->matchingService->normalize($v);
+                if (!isset($seen[$norm])) {
+                    $seen[$norm] = true;
+                    $candidates[] = $v;
+                }
+            }
+
+            $header = isset($rows[$headerRowIdx][$col]) ? trim((string) $rows[$headerRowIdx][$col]) : '';
+            if (empty($header)) {
+                for ($d = 1; $d <= 3; $d++) {
+                    $up = $headerRowIdx - $d;
+                    $down = $headerRowIdx + $d;
+                    if ($up >= 0 && !empty(trim((string) ($rows[$up][$col] ?? '')))) {
+                        $header = trim((string) $rows[$up][$col]);
+                        break;
+                    }
+                    if ($down < $totalRows && !empty(trim((string) ($rows[$down][$col] ?? '')))) {
+                        $header = trim((string) $rows[$down][$col]);
+                        break;
+                    }
+                }
+            }
+            if (empty($header) && !empty($candidates)) {
+                $header = $candidates[0];
+            }
+
+            $sampleValues = [];
+            $numericCount = 0;
+            $textCount = 0;
+
+            $dataStart = $headerRowIdx + 1;
+            for ($i = $dataStart; $i < min($dataStart + 10, $totalRows); $i++) {
+                if (isset($rows[$i][$col])) {
+                    $val = trim((string) $rows[$i][$col]);
+                    if (!empty($val)) {
+                        $sampleValues[] = mb_substr($val, 0, 50);
+                        $cleanVal = str_replace(',', '', $val);
+                        if (is_numeric($cleanVal)) {
+                            $numericCount++;
+                        } else {
+                            $textCount++;
+                        }
+                    }
+                }
+            }
+
+            if ($textCount > $numericCount && $textCount > 0) {
+                $type = 'text';
+            } elseif ($numericCount > 0) {
+                $type = 'numeric';
+            } else {
+                $type = 'blank';
+            }
+
+            $columns[] = [
+                'index' => $col,
+                'header' => $header,
+                'normalized' => $this->matchingService->normalize($header),
+                'sample_values' => array_slice($sampleValues, 0, 5),
+                'candidates' => array_slice($candidates, 0, 5),
+                'type' => $type,
+            ];
+        }
+
+        $suggestedMapping = $this->autoDetectMapping($columns);
+        $dataStart = $headerRowIdx + 1;
+        if ($dataStart < 1) $dataStart = 1;
+        $suggestedMapping['header_rows'] = $dataStart;
+
+        return [
+            'columns' => $columns,
+            'suggested_mapping' => $suggestedMapping,
+            'header_rows' => $dataStart,
+        ];
     }
 
     private function autoDetectMapping(array $columns): array
