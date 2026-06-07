@@ -357,7 +357,7 @@ class MenuReconciliationController extends Controller
         $monthName = $recon->from_date->format('Y-m');
         return response()->streamDownload(function () use ($writer) {
             $writer->save('php://output');
-        }, "{$branchName} {$monthName}.xlsx", [
+        }, "تقرير خامات {$branchName} {$monthName}.xlsx", [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
     }

@@ -386,7 +386,7 @@ export default function ReconciliationPage() {
         responseType: 'blob',
       });
       const month = fromDate.slice(0, 7);
-      const fileName = `${branchName} ${month}.xlsx`;
+      const fileName = `تقرير خامات ${branchName} ${month}.xlsx`;
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const a = document.createElement('a');
       a.href = url;
