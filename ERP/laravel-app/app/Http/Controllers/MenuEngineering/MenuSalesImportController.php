@@ -124,6 +124,26 @@ class MenuSalesImportController extends Controller
                 $matchName = $this->matchingService->stripHalfPrefix($matchName);
             }
 
+            // Try saved mapping first
+            $savedMapping = $this->matchingService->findSavedMapping($clientId, $name);
+            if ($savedMapping) {
+                $rid = $savedMapping['recipe_id'];
+                if (isset($matchedItems[$rid])) {
+                    $matchedItems[$rid]['qty_sold'] += $qty;
+                } else {
+                    $matchedItems[$rid] = [
+                        'recipe_id' => $savedMapping['recipe_id'],
+                        'recipe_name' => $savedMapping['recipe_name'],
+                        'source_name' => $name,
+                        'qty_sold' => $qty,
+                        'category' => $currentCat,
+                        'size' => $sizeVal,
+                        'confidence' => $savedMapping['confidence'],
+                    ];
+                }
+                continue;
+            }
+
             $matched = $this->matchingService->findRecipe(
                 name: $matchName,
                 sizeVal: $sizeVal,
