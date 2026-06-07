@@ -1,9 +1,11 @@
-'use client';
+﻿'use client';
 
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/lib/store';
+import * as XLSX from 'xlsx';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 
 export default function ReconciliationPage() {
   const [branchId, setBranchId] = useState('');
@@ -14,7 +16,39 @@ export default function ReconciliationPage() {
   const [to, setTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [salesMap, setSalesMap] = useState<Record<string, string>>({});
   const [inv, setInv] = useState<any>(null);
+
   const [loading, setLoading] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
+  const [branchName, setBranchName] = useState('');
+  const [saleDate, setSaleDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [uploadStep, setUploadStep] = useState<'file' | 'review' | 'done'>('file');
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [uploadConfirmLoading, setUploadConfirmLoading] = useState(false);
+  const [uploadColumns, setUploadColumns] = useState<any[]>([]);
+
+  const [uploadPreview, setUploadPreview] = useState<any[] | null>(null);
+  const [uploadUnmatched, setUploadUnmatched] = useState<any[]>([]);
+  const [uploadAllRecipes, setUploadAllRecipes] = useState<any[]>([]);
+  const [uploadOverrides, setUploadOverrides] = useState<Record<string, string>>({});
+  const [uploadCategories, setUploadCategories] = useState<any[]>([]);
+  const [uploadHalfCats, setUploadHalfCats] = useState<Record<string, boolean>>({});
+  const [uploadExportData, setUploadExportData] = useState<any[]>([]);
+  const [uploadMapping, setUploadMapping] = useState<{
+    name_col: number;
+    qty_col: number;
+    size_col: number | null;
+    cat_col: number | null;
+    header_rows: number;
+  }>({ name_col: 0, qty_col: 1, size_col: null, cat_col: null, header_rows: 1 });
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [filterCat, setFilterCat] = useState('');
+  const [filterSearch, setFilterSearch] = useState('');
+  const [showSavedRecons, setShowSavedRecons] = useState(false);
+  const [savedRecons, setSavedRecons] = useState<any[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [loadingSaved, setLoadingSaved] = useState(false);
+
   const { currentClient } = useAuthStore();
 
   // ── Branches ──
@@ -106,6 +140,205 @@ export default function ReconciliationPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [salesMap, allRecipes, ingIndex.ids]);
 
+
+  // ── Filtered grouped (for category filter + search) ──
+  const filteredGrouped = useMemo(() => {
+    const entries = Object.entries(grouped) as [string, any[]][];
+    return entries
+      .filter(([cat]) => !filterCat || cat === filterCat)
+      .map(([cat, items]) => [
+        cat,
+        filterSearch
+          ? items.filter((r: any) =>
+              r.name.toLowerCase().includes(filterSearch.toLowerCase())
+            )
+          : items,
+      ] as [string, any[]])
+      .filter(([, items]) => items.length > 0);
+  }, [grouped, filterCat, filterSearch]);
+
+  // ── Upload handlers ──
+  const overrideKey = (source_name: string, size: string) => source_name + (size ? '|' + size : '');
+
+  const handleConfirm = async () => {
+    if (!uploadPreview || !uploadPreview.length || !branchId) return;
+    setUploadConfirmLoading(true);
+    try {
+      const items: any[] = [];
+      for (const p of uploadPreview) {
+        const key = overrideKey(p.source_name, p.size || '');
+        const rid = uploadOverrides[key] || p.recipe_id;
+        items.push({ recipe_id: rid, qty_sold: p.qty_sold, category: p.category || '', source_name: p.source_name || '' });
+      }
+      for (const u of uploadUnmatched) {
+        const key = overrideKey(u.source_name, u.size || '');
+        const overrideRid = uploadOverrides[key];
+        if (overrideRid) {
+          items.push({ recipe_id: overrideRid, qty_sold: u.qty_sold, category: u.category || '', source_name: u.source_name || '' });
+        }
+      }
+      await api.post('/menu-engineering/confirm-sales', {
+        branch_id: branchId,
+        sale_date: saleDate,
+        items,
+        half_categories: uploadHalfCats,
+      });
+
+      const exportRows: any[] = [];
+      for (const p of uploadPreview) {
+        const key = overrideKey(p.source_name, p.size || '');
+        const rid = uploadOverrides[key] || p.recipe_id;
+        const recipe = uploadAllRecipes.find((r: any) => r.id === rid);
+        const isHalf = !!uploadHalfCats[p.category];
+        exportRows.push({
+          category: p.category || '',
+          item: recipe?.name || p.source_name,
+          size: p.size || '',
+          qty: isHalf ? (p.qty_sold / 2) : p.qty_sold,
+        });
+      }
+      for (const u of uploadUnmatched) {
+        const key = overrideKey(u.source_name, u.size || '');
+        const overrideRid = uploadOverrides[key];
+        if (overrideRid) {
+          const recipe = uploadAllRecipes.find((r: any) => r.id === overrideRid);
+          const isHalf = !!uploadHalfCats[u.category];
+          exportRows.push({
+            category: u.category || '',
+            item: recipe?.name || u.source_name,
+            size: u.size || '',
+            qty: isHalf ? (u.qty_sold / 2) : u.qty_sold,
+          });
+        }
+      }
+      setUploadExportData(exportRows);
+      setUploadStep('done');
+    } catch (e: any) {
+      console.error(e);
+    }
+    setUploadConfirmLoading(false);
+  };
+
+  const handleExportExcel = () => {
+    const ws = XLSX.utils.json_to_sheet(uploadExportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'مبيعات');
+    const month = saleDate ? saleDate.slice(0, 7) : new Date().toISOString().slice(0, 7);
+    const fileName = branchName ? `${branchName}_${month}.xlsx` : `مبيعات_${month}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+  };
+
+  const resetUpload = () => {
+    setShowUpload(false);
+    setUploadStep('file');
+    setUploadFile(null);
+    setUploadPreview(null);
+    setUploadUnmatched([]);
+    setUploadOverrides({});
+    setUploadHalfCats({});
+    setUploadColumns([]);
+    setUploadExportData([]);
+    setUploadAllRecipes([]);
+    setUploadCategories([]);
+  };
+
+  // ── Auto upload (direct upload with hardcoded column mapping for .xls exports) ──
+  const handleAutoUpload = async () => {
+    if (!uploadFile || !branchId) return;
+    setUploadLoading(true);
+    setUploadColumns([]);
+    setUploadStep('file');
+    try {
+      const fd = new FormData();
+      fd.append('file', uploadFile);
+      fd.append('branch_id', branchId);
+      fd.append('sale_date', saleDate);
+      const res = await api.post('/menu-engineering/upload-sales', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setUploadPreview(res.data.preview);
+      setUploadUnmatched(res.data.unmatched ?? []);
+      setUploadAllRecipes(res.data.all_recipes ?? []);
+      setUploadCategories(res.data.categories ?? []);
+      const halfMap: Record<string, boolean> = {};
+      for (const c of (res.data.categories ?? [])) {
+        if (c.half) halfMap[c.name] = true;
+      }
+      setUploadHalfCats(halfMap);
+      setUploadStep('review');
+    } catch (e: any) {
+      console.error(e);
+    }
+    setUploadLoading(false);
+  };
+
+  // ── Save reconciliation ──
+  const handleSaveRecon = async () => {
+    if (!inv || !branchId || !from || !to) return;
+    setSaving(true);
+    try {
+      const items = ingIds.map((id: string) => ({
+        ingredient_id: id,
+        ingredient_name: ingIndex.names[id],
+        unit: '',
+        opening_qty: opening(id) ?? 0,
+        purchases_qty: purchases(id) ?? 0,
+        closing_actual: closing(id) ?? 0,
+        sales_qty: totals[id] ?? 0,
+        waste_qty: 0,
+      }));
+      await api.post('/menu-engineering/reconciliations', {
+        branch_id: branchId,
+        from_date: from,
+        to_date: to,
+        items,
+        sales_data: salesMap,
+      });
+      setSaving(false);
+    } catch (e: any) {
+      console.error(e);
+      setSaving(false);
+    }
+  };
+
+  const loadSavedRecons = async () => {
+    setLoadingSaved(true);
+    try {
+      const res = await api.get('/menu-engineering/reconciliations', {
+        params: { branch_id: branchId || undefined },
+      });
+      setSavedRecons(res.data);
+    } catch (e: any) {
+      console.error(e);
+    }
+    setLoadingSaved(false);
+  };
+
+  const handleLoadRecon = async (id: string) => {
+    try {
+      const res = await api.get(`/menu-engineering/reconciliations/${id}`);
+      const d = res.data;
+      setFrom(d.from_date.slice(0, 10));
+      setTo(d.to_date.slice(0, 10));
+      setBranchId(d.branch_id);
+      if (d.sales_data) setSalesMap(d.sales_data);
+      setShowSavedRecons(false);
+      setTimeout(() => handleRun(), 100);
+    } catch (e: any) {
+      console.error(e);
+    }
+  };
+
+  const handleDeleteRecon = async (id: string) => {
+    if (!window.confirm('تأكيد حذف التسوية؟')) return;
+    try {
+      await api.delete(`/menu-engineering/reconciliations/${id}`);
+      loadSavedRecons();
+    } catch (e: any) {
+      console.error(e);
+    }
+  };
+
   // ── Run reconciliation ──
   const handleRun = async () => {
     if (!branchId || !from || !to) return;
@@ -186,6 +419,17 @@ export default function ReconciliationPage() {
             >
               {loading ? '...' : 'تشغيل التسوية'}
             </button>
+            <button
+              onClick={() => {
+                setShowUpload(true);
+                const b = branches.find((x: any) => x.id === branchId);
+                if (b) setBranchName(b.name);
+              }}
+              disabled={!branchId}
+              className="px-5 py-1.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+            >
+              رفع مبيعات
+            </button>
           </div>
         </div>
       </div>
@@ -203,6 +447,23 @@ export default function ReconciliationPage() {
         )}
 
         {branchId && visibleRecipes.length > 0 && (
+          <div>
+          <div className="flex items-center gap-3 mb-3">
+            <select value={filterCat} onChange={(e) => setFilterCat(e.target.value)}
+              className="border rounded px-2 py-1 text-sm outline-none bg-white">
+              <option value="">كل الكاتيجوريز</option>
+              {Object.keys(grouped).map(cat => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
+            </select>
+            <input type="text" placeholder="بحث بالاسم..." value={filterSearch}
+              onChange={(e) => setFilterSearch(e.target.value)}
+              className="border rounded px-2 py-1 text-sm outline-none w-48" />
+            <button onClick={() => { setShowSavedRecons(true); loadSavedRecons(); }}
+              className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 border">
+              التسويات المحفوظة
+            </button>
+          </div>
           <div className="bg-white border rounded-xl shadow-sm overflow-x-auto">
             <table className="w-full text-sm border-collapse" style={{ minWidth: ingIds.length * 130 + 300 }}>
               {/* ─── Column headers ─── */}
@@ -226,7 +487,7 @@ export default function ReconciliationPage() {
                 </tr>
               </thead>
               <tbody>
-                {Object.entries(grouped).map(([catName, items]) => (
+                {filteredGrouped.map(([catName, items]) => (
                   <Fragment key={catName}>
                     {/* Category header */}
                     <tr className="bg-gray-100 border-b border-gray-200">
@@ -255,14 +516,14 @@ export default function ReconciliationPage() {
                           </td>
                           <td className="p-2 text-center border-l border-gray-100">
                             <input
-                              type="number"
-                              min="0"
-                              step="1"
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
                               value={salesMap[r.id] ?? ''}
                               onChange={(e) =>
                                 setSalesMap((p) => ({ ...p, [r.id]: e.target.value }))
                               }
-                              className="w-20 border border-gray-300 rounded px-2 py-1 text-center font-mono text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
+                              className="w-20 border border-gray-300 rounded px-2 py-1 text-center font-mono text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                               placeholder="0"
                             />
                           </td>
@@ -286,6 +547,17 @@ export default function ReconciliationPage() {
                         </tr>
                       );
                     })}
+                    {/* Category sales subtotal */}
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      <td className="p-2 font-bold text-gray-700">{catName} — إجمالي البيع</td>
+                      <td className="p-2 text-center font-bold text-blue-700">
+                        {(items as any[]).reduce((sum: number, r: any) => sum + (parseFloat(salesMap[r.id]) || 0), 0)}
+                      </td>
+                      {ingIds.map((id) => (
+                        <td key={id} className="p-2 text-center border-l border-gray-100" />
+                      ))}
+                      <td className="p-2 text-center text-xs text-gray-400" />
+                    </tr>
                   </Fragment>
                 ))}
 
@@ -413,8 +685,194 @@ export default function ReconciliationPage() {
               </tbody>
             </table>
           </div>
+          {inv && (
+            <div className="flex justify-center mt-4">
+              <button onClick={handleSaveRecon} disabled={saving}
+                className="px-6 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">
+                {saving ? '...' : 'حفظ التسوية'}
+              </button>
+            </div>
+          )}
+          </div>
         )}
-      </div>
+      {/* ─── Upload Sales Modal (2-step: upload → review → done) ─── */}
+      {showUpload && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" onClick={(e) => { if (e.target === e.currentTarget) resetUpload(); }}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-auto m-4" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold">رفع مبيعات من إكسيل</h3>
+                <button onClick={resetUpload} className="text-gray-400 hover:text-gray-700 text-xl leading-none">&times;</button>
+              </div>
+
+              {uploadStep === 'file' && (
+                <div className="space-y-4">
+                  <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center">
+                    <input ref={fileInputRef} type="file" accept=".xlsx,.xls" onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)} className="hidden" />
+                    <div className="text-gray-400 mb-3 text-2xl">+</div>
+                    <p className="text-sm text-gray-500 mb-3">{uploadFile ? uploadFile.name : 'اختر ملف XLSX'}</p>
+                    <button onClick={() => fileInputRef.current?.click()} className="px-4 py-1.5 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 border">تصفح</button>
+                  </div>
+                  <div className="flex justify-center"><button onClick={handleAutoUpload} disabled={!uploadFile || uploadLoading} className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{uploadLoading ? 'جاري المعالجة...' : 'رفع ومعالجة'}</button></div>
+                </div>
+              )}
+
+              {uploadStep === 'review' && (
+                <div className="space-y-4">
+                  {uploadCategories.length > 0 && (
+                    <div className="bg-gray-50 rounded-lg p-3 border">
+                      <h4 className="text-sm font-bold text-gray-700 mb-2">الكاتيجوريز — إذا كان "نص" يتقسط العدد على 2</h4>
+                      <div className="flex flex-wrap gap-4">
+                        {uploadCategories.map((c: any) => (
+                          <label key={c.name} className="flex items-center gap-2 text-sm cursor-pointer">
+                            <input type="checkbox" checked={!!uploadHalfCats[c.name]} onChange={(e) => setUploadHalfCats((p) => ({ ...p, [c.name]: e.target.checked }))} className="rounded border-gray-300" />
+                            <span className={uploadHalfCats[c.name] ? 'text-orange-700 font-bold' : 'text-gray-700'}>{c.name} {uploadHalfCats[c.name] ? '(نصف)' : ''}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-4 text-sm text-gray-600 flex-wrap">
+                    <span>المطابق: <strong className="text-emerald-700">{uploadPreview?.length ?? 0}</strong></span>
+                    <span>غير المطابق: <strong className="text-red-600">{uploadUnmatched.length}</strong></span>
+                  </div>
+                  {uploadPreview && uploadPreview.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-bold text-gray-700 mb-2">الأصناف المطابقة</h4>
+                      <div className="max-h-48 overflow-y-auto border rounded-lg">
+                        <table className="w-full text-sm">
+                          <thead className="bg-gray-50 sticky top-0"><tr>
+                            <th className="p-2 text-right font-bold text-gray-600">#</th>
+                            <th className="p-2 text-right font-bold text-gray-600">الاسم في الملف</th>
+                            <th className="p-2 text-right font-bold text-gray-600">المرتبط بـ</th>
+                            <th className="p-2 text-center font-bold text-gray-600">العدد</th>
+                            <th className="p-2 text-center font-bold text-gray-600">الدقة</th>
+                          </tr></thead>
+                          <tbody>
+                            {uploadPreview.map((p: any, i: number) => {
+                              const isHalf = !!uploadHalfCats[p.category];
+                              const displayQty = isHalf ? (p.qty_sold / 2) : p.qty_sold;
+                              return (
+                                <tr key={p.recipe_id + (p.size || '')} className={`border-b border-gray-100 even:bg-gray-50/50 ${isHalf ? 'bg-orange-50/30' : ''}`}>
+                                  <td className="p-2 text-gray-400">{i + 1}</td>
+                                  <td className="p-2 text-gray-700">{p.source_name}{p.size ? ` (${p.size})` : ''}</td>
+                                  <td className="p-2">
+                                    <SearchableSelect value={uploadOverrides[overrideKey(p.source_name, p.size || '')] || p.recipe_id} onChange={(val) => setUploadOverrides((prev) => ({ ...prev, [overrideKey(p.source_name, p.size || '')]: val }))} options={uploadAllRecipes} />
+                                  </td>
+                                  <td className="p-2 text-center font-mono">{displayQty}</td>
+                                  <td className="p-2 text-center">
+                                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.confidence >= 100 ? 'bg-emerald-100 text-emerald-700' : p.confidence >= 95 ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-700'}`}>{p.confidence}%</span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                  {uploadUnmatched.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-bold text-red-700 mb-2">الأصناف غير المطابقة — اختر الصنف المناسب</h4>
+                      <div className="max-h-48 overflow-y-auto border border-red-200 rounded-lg">
+                        <table className="w-full text-sm">
+                          <thead className="bg-red-50 sticky top-0"><tr>
+                            <th className="p-2 text-right font-bold text-red-700">الاسم في الملف</th>
+                            <th className="p-2 text-center font-bold text-red-700">العدد</th>
+                            <th className="p-2 text-right font-bold text-red-700">اختيار الصنف</th>
+                          </tr></thead>
+                          <tbody>
+                            {uploadUnmatched.map((u: any) => {
+                              const isHalf = !!uploadHalfCats[u.category];
+                              const displayQty = isHalf ? (u.qty_sold / 2) : u.qty_sold;
+                              const uKey = overrideKey(u.source_name, u.size || '');
+                              return (
+                                <tr key={uKey} className={`border-b border-red-100 even:bg-red-50/20 ${isHalf ? 'bg-orange-50/30' : ''}`}>
+                                  <td className="p-2 text-gray-800 font-medium">{u.source_name}{u.size ? ` (${u.size})` : ''}</td>
+                                  <td className="p-2 text-center font-mono">{displayQty}</td>
+                                  <td className="p-2">
+                                    <SearchableSelect value={uploadOverrides[uKey] || ''} onChange={(val) => setUploadOverrides((prev) => ({ ...prev, [uKey]: val }))} options={uploadAllRecipes} placeholder="— تجاهل —" />
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex justify-center gap-3 pt-2">
+                    <button onClick={handleConfirm} disabled={uploadConfirmLoading} className="px-6 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">{uploadConfirmLoading ? '...' : 'تأكيد وحفظ المبيعات'}</button>
+                    <button onClick={() => { setUploadStep('file'); setUploadPreview(null); setUploadUnmatched([]); setUploadOverrides({}); setUploadHalfCats({}); }} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">رجوع</button>
+                  </div>
+                </div>
+              )}
+
+              {uploadStep === 'done' && (
+                <div className="text-center py-8 space-y-4">
+                  <div className="text-emerald-600 text-5xl mb-4">&#10003;</div>
+                  <h4 className="text-lg font-bold text-gray-800">تم حفظ المبيعات بنجاح</h4>
+                  <p className="text-sm text-gray-500">{uploadExportData.length} صنف</p>
+                  <div className="flex justify-center gap-3 pt-2">
+                    <button onClick={handleExportExcel} disabled={!uploadExportData.length} className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">تصدير Excel</button>
+                    <button onClick={resetUpload} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 border rounded-lg">إغلاق</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Saved Reconciliations Modal ─── */}
+      {showSavedRecons && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" onClick={(e) => { if (e.target === e.currentTarget) setShowSavedRecons(false); }}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-auto m-4" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold">التسويات المحفوظة</h3>
+                <button onClick={() => setShowSavedRecons(false)} className="text-gray-400 hover:text-gray-700 text-xl leading-none">&times;</button>
+              </div>
+              {loadingSaved ? (
+                <div className="text-center text-gray-400 py-8">...</div>
+              ) : savedRecons.length === 0 ? (
+                <div className="text-center text-gray-400 py-8">لا توجد تسويات محفوظة</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr className="border-b-2 border-gray-200">
+                      <th className="p-2 text-right font-bold text-gray-600">الفرع</th>
+                      <th className="p-2 text-center font-bold text-gray-600">من</th>
+                      <th className="p-2 text-center font-bold text-gray-600">إلى</th>
+                      <th className="p-2 text-center font-bold text-gray-600"># أصناف</th>
+                      <th className="p-2 text-center font-bold text-gray-600">تاريخ الحفظ</th>
+                      <th className="p-2 text-center font-bold text-gray-600"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {savedRecons.map((r: any) => (
+                      <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50/50">
+                        <td className="p-2 text-gray-800">{r.branch_name}</td>
+                        <td className="p-2 text-center text-gray-600">{r.from_date}</td>
+                        <td className="p-2 text-center text-gray-600">{r.to_date}</td>
+                        <td className="p-2 text-center text-gray-600">{r.items_count}</td>
+                        <td className="p-2 text-center text-gray-600">{new Date(r.created_at).toLocaleDateString('ar-EG')}</td>
+                        <td className="p-2 text-center whitespace-nowrap">
+                          <button onClick={() => handleLoadRecon(r.id)} className="px-2 py-1 text-xs text-blue-600 hover:text-blue-800 border border-blue-200 rounded">تحميل</button>
+                          <a href={`${api.defaults.baseURL}/menu-engineering/reconciliations/${r.id}/export`} target="_blank" rel="noopener noreferrer" className="px-2 py-1 text-xs text-emerald-600 hover:text-emerald-800 border border-emerald-200 rounded mr-1 inline-block">تصدير</a>
+                          <button onClick={() => handleDeleteRecon(r.id)} className="px-2 py-1 text-xs text-red-600 hover:text-red-800 border border-red-200 rounded mr-1">حذف</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
     </div>
   );
 }

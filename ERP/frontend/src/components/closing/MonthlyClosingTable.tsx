@@ -60,6 +60,7 @@ export function MonthlyClosingTable({ clientId, warehouseId, month }: Props) {
       api.patch(`/closing/${closingId}/actual`, { closing_qty_actual: actual }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['closing'] });
+      qc.invalidateQueries({ queryKey: ['grand-summary'] });
     },
   });
 

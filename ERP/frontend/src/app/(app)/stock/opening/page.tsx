@@ -11,7 +11,7 @@ export default function OpeningBalancePage() {
   const qc = useQueryClient();
   const [warehouseId, setWarehouseId] = useState('');
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [lines, setLines] = useState<{ item_id: string; item_name: string; unit: string; qty: number; cost: number }[]>([]);
+  const [lines, setLines] = useState<{ item_id: string; item_name: string; unit: string; qty: number; cost: number; unit_price: number }[]>([]);
   const { currentClient } = useAuthStore();
 
   const { data: warehouses = [] } = useQuery({
@@ -39,12 +39,15 @@ export default function OpeningBalancePage() {
       const existingByItem = new Map(existingOpening.map((r: any) => [r.item_id, r]));
       const allLines = items.map((i: any) => {
         const ex = existingByItem.get(i.id) as any;
+        const unitPrice = Number(i.default_cost || 0);
+        const existingQty = ex ? Number(ex.qty || 0) : 0;
         return {
           item_id: i.id,
           item_name: i.name,
           unit: i.unit || '',
-          qty: ex ? Number(ex.qty || 0) : 0,
-          cost: ex ? Number(ex.cost || 0) : 0,
+          qty: existingQty,
+          cost: existingQty > 0 ? existingQty * unitPrice : 0,
+          unit_price: unitPrice,
         };
       });
       setLines(allLines);
@@ -52,23 +55,34 @@ export default function OpeningBalancePage() {
   }, [warehouseId, month, items.length, existingOpening, isFetchingExisting]);
 
   const addLine = () => {
-    setLines([...lines, { item_id: '', item_name: '', unit: '', qty: 0, cost: 0 }]);
+    setLines([...lines, { item_id: '', item_name: '', unit: '', qty: 0, cost: 0, unit_price: 0 }]);
   };
 
   const removeLine = (idx: number) => {
     setLines(lines.filter((_, i) => i !== idx));
   };
 
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+
   const updateLine = (idx: number, field: string, value: any) => {
-    setLines(lines.map((l, i) => i === idx ? { ...l, [field]: value } : l));
+    setLines(lines.map((l, i) => {
+      if (i !== idx) return l;
+      const updated = { ...l, [field]: value };
+      if (field === 'qty') {
+        updated.cost = round2(updated.qty * updated.unit_price);
+      }
+      return updated;
+    }));
   };
 
   const setItemFromSelect = (idx: number, itemId: string) => {
     const item = items.find((i: any) => i.id === itemId);
     if (item) {
+      const unitPrice = Number(item.default_cost || 0);
       updateLine(idx, 'item_id', item.id);
       updateLine(idx, 'item_name', item.name);
       updateLine(idx, 'unit', item.unit || '');
+      updateLine(idx, 'unit_price', unitPrice);
     }
   };
 
@@ -194,13 +208,13 @@ export default function OpeningBalancePage() {
                     <input
                       type="number"
                       value={line.cost || ''}
-                      onChange={(e) => updateLine(idx, 'cost', parseFloat(e.target.value) || 0)}
+                      readOnly
                       placeholder="0"
-                      className="w-full border border-gray-200 rounded-lg px-2 py-1 text-sm text-left focus:ring-2 focus:ring-blue-300 outline-none"
+                      className="w-full border border-gray-100 bg-gray-50 rounded-lg px-2 py-1 text-sm text-left text-gray-600 outline-none cursor-default"
                     />
                   </td>
-                  <td className="px-4 py-2 text-gray-400 text-xs font-mono">
-                    {line.qty > 0 && line.cost > 0 ? (line.cost / line.qty).toFixed(2) : '—'}
+                  <td className="px-4 py-2 text-gray-600 text-xs font-mono font-medium">
+                    {line.unit_price > 0 ? line.unit_price.toFixed(2) : '—'}
                   </td>
                   <td className="px-4 py-2 text-center">
                     <button onClick={() => removeLine(idx)} className="text-gray-300 hover:text-red-500 text-sm">✕</button>

@@ -33,6 +33,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/dashboard/warehouse-summary', [DashboardController::class, 'warehouseSummary']);
         Route::get('/dashboard/export', [DashboardController::class, 'export']);
         Route::get('/dashboard/smart-summary', [DashboardController::class, 'smartSummary']);
+        Route::get('/dashboard/diffs-by-warehouse', [DashboardController::class, 'diffsByWarehouse']);
+        Route::get('/dashboard/top-diff-items', [DashboardController::class, 'topDiffItems']);
     });
 
     // ── Clients ───────────────────────────────────────────
@@ -215,8 +217,21 @@ osts']);
         Route::get('/report/summary/export-pdf', [\App\Http\Controllers\MenuEngineering\MenuReportController::class, 'exportPdf']);
         Route::get('/sales', [\App\Http\Controllers\MenuEngineering\MenuReconciliationController::class, 'indexSales']);
         Route::post('/sales', [\App\Http\Controllers\MenuEngineering\MenuReconciliationController::class, 'storeSale']);
+        Route::post('/upload-sales', [\App\Http\Controllers\MenuEngineering\MenuSalesImportController::class, 'upload']);
+        Route::post('/upload-sales/preview-columns', [\App\Http\Controllers\MenuEngineering\MenuSalesImportController::class, 'previewColumns']);
+        Route::post('/upload-sales/process', [\App\Http\Controllers\MenuEngineering\MenuSalesImportController::class, 'process']);
+        Route::post('/confirm-sales', [\App\Http\Controllers\MenuEngineering\MenuSalesImportController::class, 'confirm']);
+        Route::get('/upload-sales/session/{session}', [\App\Http\Controllers\MenuEngineering\MenuSalesImportController::class, 'getSession']);
+        Route::put('/upload-sales/session/{session}/items/{item}', [\App\Http\Controllers\MenuEngineering\MenuSalesImportController::class, 'updateSessionItem']);
+        Route::post('/confirm-sales-from-session', [\App\Http\Controllers\MenuEngineering\MenuSalesImportController::class, 'confirmFromSession']);
+        Route::delete('/upload-sales/session/{session}', [\App\Http\Controllers\MenuEngineering\MenuSalesImportController::class, 'deleteSession']);
         Route::post('/reconcile', [\App\Http\Controllers\MenuEngineering\MenuReconciliationController::class, 'detailedReconcile']);
         Route::post('/reconcile/detailed', [\App\Http\Controllers\MenuEngineering\MenuReconciliationController::class, 'detailedReconcile']);
+        Route::post('/reconciliations', [\App\Http\Controllers\MenuEngineering\MenuReconciliationController::class, 'storeReconciliation']);
+        Route::get('/reconciliations', [\App\Http\Controllers\MenuEngineering\MenuReconciliationController::class, 'indexReconciliations']);
+        Route::get('/reconciliations/{id}', [\App\Http\Controllers\MenuEngineering\MenuReconciliationController::class, 'showReconciliation']);
+        Route::delete('/reconciliations/{id}', [\App\Http\Controllers\MenuEngineering\MenuReconciliationController::class, 'deleteReconciliation']);
+        Route::get('/reconciliations/{id}/export', [\App\Http\Controllers\MenuEngineering\MenuReconciliationController::class, 'exportReconciliation']);
 
         // Smart Analytics
         Route::prefix('analytics')->group(function () {

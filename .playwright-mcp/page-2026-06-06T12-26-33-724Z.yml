@@ -1,0 +1,12 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - heading "Curve" [level=1] [ref=e5]
+    - paragraph [ref=e6]: نظام إدارة التكاليف
+  - generic [ref=e7]:
+    - generic [ref=e8]:
+      - text: البريد الإلكتروني
+      - textbox [ref=e9]: admin@erp.local
+    - generic [ref=e10]:
+      - text: كلمة المرور
+      - textbox [ref=e11]: admin123
+    - button "دخول" [ref=e12]

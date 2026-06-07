@@ -154,6 +154,7 @@ export default function ClosingPage() {
       api.patch(`/closing/${id}/actual`, { closing_qty_actual: actual }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['grand-summary'] });
+      qc.invalidateQueries({ queryKey: ['closing'] });
     }
   });
 

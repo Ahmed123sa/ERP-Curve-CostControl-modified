@@ -504,8 +504,8 @@ class VoucherController extends Controller
             foreach ($request->lines as $line) {
                 $qty      = (float) $line['qty'];
                 $cost     = (float) ($line['cost'] ?? 0);
-                // للتوزيع (dispatch) بدون تكلفة — نحسب تلقائياً من default_cost
-                if ($request->type === 'dispatch' && $cost <= 0) {
+                // للتوزيع (dispatch) أو أول المدة (opening) بدون تكلفة — نحسب تلقائياً من default_cost
+                if (in_array($request->type, ['dispatch', 'opening']) && $cost <= 0) {
                     $item = Item::where('id', $line['item_id'])->where('client_id', $clientId)->first();
                     if ($item && $item->default_cost > 0) {
                         $cost = round(abs($qty) * $item->default_cost, 2);

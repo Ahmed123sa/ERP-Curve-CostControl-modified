@@ -163,21 +163,8 @@ class CostCalculationService
         $dispatchOutEntries = $ledger->where('voucher_type', 'dispatch')
             ->whereIn('movement_type', ['out', 'transfer_out']);
 
-        // نفلتر الأصناف الـ default_warehouse_id بتاعها مختلف عن المخزن الحالي
-        // عشان ما تظهرش branch consumption في مخازن مش بتاعتها (زي المخزن الرئيسي لأصناف المخازن الفرعية)
-        $internalOutItemIds = $dispatchOutEntries->pluck('item_id')->unique()->filter()->values()->toArray();
-        $excludedItemIds = [];
-        if (!empty($internalOutItemIds)) {
-            $excludedItemIds = Item::whereIn('id', $internalOutItemIds)
-                ->whereNotNull('default_warehouse_id')
-                ->where('default_warehouse_id', '!=', $warehouseId)
-                ->pluck('id')
-                ->toArray();
-        }
-        $internalOutLedger = $dispatchOutEntries->reject(function ($entry) use ($excludedItemIds) {
-            return in_array($entry->item_id, $excludedItemIds);
-        });
-        $internalOutQty = (float) $internalOutLedger->sum('qty');
+        $internalOutLedger = $dispatchOutEntries;
+        $internalOutQty = (float) $dispatchOutEntries->sum('qty');
 
         // استهلاك/مبيعات/إنتاج
         $consumptionQty = (float) $ledger->whereIn('voucher_type', ['production', 'external_sale', 'withdrawal'])->where('movement_type', 'out')->sum('qty');
@@ -309,15 +296,17 @@ class CostCalculationService
                 }
 
                 // لو مفيش أي حركة خالص — نحذف أي تقفيل سابق (عشان لو اتمسح إذن محدثش)
-                // بس لو فيه physical_count محفوظ — نسيبه عشان ما نضيعش الجرد
+                // بس لو فيه physical_count أو closing_qty_actual محفوظ — نسيبه عشان ما نضيعش الجرد
                 if ($summary['opening_qty'] == 0 && $summary['in_qty'] == 0 && $summary['out_qty'] == 0) {
-                    $hasPhysical = MonthlyClosing::where('client_id', $clientId)
+                    $hasManual = MonthlyClosing::where('client_id', $clientId)
                         ->where('warehouse_id', $warehouseId)
                         ->where('item_id', $item->id)
                         ->where('month', $month)
-                        ->whereNotNull('physical_count')
-                        ->exists();
-                    if (!$hasPhysical) {
+                        ->where(function ($q) {
+                            $q->whereNotNull('physical_count')
+                              ->orWhereNotNull('closing_qty_actual');
+                        })->exists();
+                    if (!$hasManual) {
                         MonthlyClosing::where('client_id', $clientId)
                             ->where('warehouse_id', $warehouseId)
                             ->where('item_id', $item->id)
@@ -325,7 +314,7 @@ class CostCalculationService
                             ->delete();
                         continue;
                     }
-                    // لو فيه physical_count — نكمل updateOrCreate عشان نحافظ عليه
+                    // لو فيه physical_count أو closing_qty_actual — نكمل updateOrCreate عشان نحافظ عليه
                 }
 
                 $closing = MonthlyClosing::updateOrCreate(
@@ -355,7 +344,7 @@ class CostCalculationService
 
                 // حساب الفرق لو في جرد فعلي
                 if ($closing->closing_qty_actual !== null) {
-                    $closing->diff_qty   = round($closing->closing_qty_theoretical - $closing->closing_qty_actual, 3);
+                    $closing->diff_qty   = round($closing->closing_qty_actual - $closing->closing_qty_theoretical, 3);
                     $closing->diff_value = round($closing->diff_qty * $summary['avg_cost'], 2);
                     $closing->save();
                 }

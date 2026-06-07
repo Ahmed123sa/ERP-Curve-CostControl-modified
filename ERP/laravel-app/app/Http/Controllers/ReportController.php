@@ -7,16 +7,15 @@ use App\Models\Item;
 use App\Models\Warehouse;
 use App\Models\MonthlyClosing;
 use App\Models\StockLedger;
-use App\Models\DispatchLine;
-use App\Models\DispatchOrder;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Carbon;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Conditional;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use App\Services\ReportExportService;
 
 class ReportController extends Controller
@@ -205,7 +204,7 @@ class ReportController extends Controller
     /**
      * تصدير التفاصيل المالية إلى Excel
      */
-    public function exportFinancialDetails(Request $request)
+    public function exportFinancialDetails(Request $request): StreamedResponse
     {
         $clientId = $request->user()->current_client_id;
         $month    = $request->month ?? now()->format('Y-m');
@@ -398,21 +397,21 @@ class ReportController extends Controller
         ];
     }
 
-    public function exportMatrix(Request $request)
+    public function exportMatrix(Request $request): StreamedResponse
     {
         return app(ReportExportService::class)->exportMatrixExcel(
             $request->user()->current_client_id, $request->month ?? now()->format('Y-m')
         );
     }
 
-    public function exportMatrixPdf(Request $request)
+    public function exportMatrixPdf(Request $request): StreamedResponse
     {
         return app(ReportExportService::class)->exportMatrixPdf(
             $request->user()->current_client_id, $request->month ?? now()->format('Y-m')
         );
     }
 
-    public function exportFinancialPdf(Request $request)
+    public function exportFinancialPdf(Request $request): StreamedResponse
     {
         return app(ReportExportService::class)->exportFinancialPdf(
             $request->user()->current_client_id, $request->month ?? now()->format('Y-m')
@@ -574,15 +573,15 @@ class ReportController extends Controller
                 'item_id'              => $item->id,
                 'item_name'            => $item->name,
                 'unit'                 => $item->unit,
-                'opening_qty'          => (float) ($c->opening_qty ?? 0),
-                'in_qty'               => (float) ($c->in_qty ?? 0),
-                'internal_out_qty'     => (float) ($c->internal_out_qty ?? 0),
-                'consumption_qty'      => (float) ($c->consumption_qty ?? 0),
-                'closing_theoretical'  => (float) ($c->closing_qty_theoretical ?? 0),
-                'closing_actual'       => $c->closing_qty_actual !== null ? (float) $c->closing_qty_actual : null,
-                'diff_qty'             => (float) -(($c->diff_qty ?? 0)),
-                'avg_cost'             => (float) ($c->avg_cost ?? 0),
-                'diff_value'           => (float) -(($c->diff_value ?? 0)),
+                'opening_qty'          => (float) ($c?->opening_qty ?? 0),
+                'in_qty'               => (float) ($c?->in_qty ?? 0),
+                'internal_out_qty'     => (float) ($c?->internal_out_qty ?? 0),
+                'consumption_qty'      => (float) ($c?->consumption_qty ?? 0),
+                'closing_theoretical'  => (float) ($c?->closing_qty_theoretical ?? 0),
+                'closing_actual'       => $c?->closing_qty_actual !== null ? (float) $c->closing_qty_actual : null,
+                'diff_qty'             => (float) ($c?->diff_qty ?? 0),
+                'avg_cost'             => (float) ($c?->avg_cost ?? 0),
+                'diff_value'           => (float) ($c?->diff_value ?? 0),
             ];
         })->values();
 
@@ -596,7 +595,7 @@ class ReportController extends Controller
     /**
      * تصدير تقرير الفروق والهدر إلى Excel
      */
-    public function exportDiffs(Request $request)
+    public function exportDiffs(Request $request): StreamedResponse
     {
         $clientId    = $request->user()->current_client_id;
         $warehouseId = $request->warehouse_id;
@@ -675,24 +674,18 @@ class ReportController extends Controller
             $consumption    = (float) $c->consumption_qty;
             $theoretical    = (float) $c->closing_qty_theoretical;
             $actual         = $c->closing_qty_actual !== null ? (float) $c->closing_qty_actual : '';
-            $diff           = (float) -(($c->diff_qty ?? 0));
+            $diff           = (float) ($c->diff_qty ?? 0);
 
-            $sheet->setCellValue('A' . $rowIdx, $idx++);
-            $sheet->setCellValue('B' . $rowIdx, $item->name);
-            $sheet->setCellValue('C' . $rowIdx, $item->unit);
-            $sheet->setCellValue('D' . $rowIdx, $opening > 0 ? $opening : '');
-            $sheet->setCellValue('E' . $rowIdx, $inQty > 0 ? $inQty : '');
-            $sheet->setCellValue('F' . $rowIdx, $internalOut > 0 ? $internalOut : '');
-            $sheet->setCellValue('G' . $rowIdx, $theoretical);
-            $sheet->setCellValue('H' . $rowIdx, $actual);
-            $sheet->setCellValue('I' . $rowIdx, $consumption > 0 ? $consumption : '');
-            $sheet->setCellValue('J' . $rowIdx, $diff != 0 ? $diff : '');
-
-            // لون الفرق
-            if ($diff != 0) {
-                $color = $diff > 0 ? 'FF16A34A' : 'FFDC2626';
-                $sheet->getStyle('J' . $rowIdx)->getFont()->getColor()->setARGB($color);
-            }
+            $sheet->setCellValue("A{$rowIdx}", $idx++);
+            $sheet->setCellValue("B{$rowIdx}", $item->name);
+            $sheet->setCellValue("C{$rowIdx}", $item->unit);
+            $sheet->setCellValue("D{$rowIdx}", $opening > 0 ? $opening : '');
+            $sheet->setCellValue("E{$rowIdx}", $inQty > 0 ? $inQty : '');
+            $sheet->setCellValue("F{$rowIdx}", $internalOut > 0 ? $internalOut : '');
+            $sheet->setCellValue("G{$rowIdx}", $theoretical);
+            $sheet->setCellValue("H{$rowIdx}", $actual);
+            $sheet->setCellValue("I{$rowIdx}", $consumption > 0 ? $consumption : '');
+            $sheet->setCellValue("J{$rowIdx}", $diff != 0 ? $diff : '');
 
             $sheet->getStyle("A{$rowIdx}:J{$rowIdx}")->getBorders()->getAllBorders()
                 ->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN);
@@ -700,13 +693,76 @@ class ReportController extends Controller
             $rowIdx++;
         }
 
+        $lastDataRow = $rowIdx - 1;
+
+        // Conditional Formatting على عمود الفرق (J) — أخضر للفائض، أحمر للعجز
+        $conditionalGreen = new Conditional();
+        $conditionalGreen->setConditionType(Conditional::CONDITION_CELLIS);
+        $conditionalGreen->setOperatorType(Conditional::OPERATOR_GREATERTHAN);
+        $conditionalGreen->addCondition('0');
+        $conditionalGreen->getStyle()->getFont()->getColor()->setARGB('FF16A34A');
+
+        $conditionalRed = new Conditional();
+        $conditionalRed->setConditionType(Conditional::CONDITION_CELLIS);
+        $conditionalRed->setOperatorType(Conditional::OPERATOR_LESSTHAN);
+        $conditionalRed->addCondition('0');
+        $conditionalRed->getStyle()->getFont()->getColor()->setARGB('FFDC2626');
+
+        $sheet->getStyle("J4:J{$lastDataRow}")->setConditionalStyles([$conditionalGreen, $conditionalRed]);
+
+        // Alternating Row Colors (زبرا)
+        $zebraStyle = new Conditional();
+        $zebraStyle->setConditionType(Conditional::CONDITION_EXPRESSION);
+        $zebraStyle->addCondition('MOD(ROW(),2)=0');
+        $zebraStyle->getStyle()->getFill()
+            ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+            ->setStartColor(new \PhpOffice\PhpSpreadsheet\Style\Color('FFF5F5FA'));
+        $sheet->getStyle("A4:J{$lastDataRow}")->setConditionalStyles([$zebraStyle]);
+
+        // Summary Row
+        $summaryRow = $lastDataRow + 1;
+        $sheet->setCellValue("A{$summaryRow}", '');
+        $sheet->setCellValue("B{$summaryRow}", 'الإجمالي');
+        $sheet->getStyle("B{$summaryRow}")->getFont()->setBold(true);
+        $sheet->setCellValue("D{$summaryRow}", "=SUM(D4:D{$lastDataRow})");
+        $sheet->setCellValue("E{$summaryRow}", "=SUM(E4:E{$lastDataRow})");
+        $sheet->setCellValue("F{$summaryRow}", "=SUM(F4:F{$lastDataRow})");
+        $sheet->setCellValue("G{$summaryRow}", "=SUM(G4:G{$lastDataRow})");
+        $sheet->setCellValue("H{$summaryRow}", "=SUM(H4:H{$lastDataRow})");
+        $sheet->setCellValue("I{$summaryRow}", "=SUM(I4:I{$lastDataRow})");
+        $sheet->setCellValue("J{$summaryRow}", "=SUM(J4:J{$lastDataRow})");
+        $sheet->getStyle("A{$summaryRow}:J{$summaryRow}")
+            ->getFont()->setBold(true);
+        $sheet->getStyle("A{$summaryRow}:J{$summaryRow}")
+            ->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+            ->setStartColor(new \PhpOffice\PhpSpreadsheet\Style\Color('FFE8EEF7'));
+        $sheet->getStyle("A{$summaryRow}:J{$summaryRow}")
+            ->getBorders()->getTop()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_MEDIUM);
+
         // عرض الأعمدة
         $sheet->getColumnDimension('A')->setWidth(4);
         $sheet->getColumnDimension('B')->setWidth(28);
         $sheet->getColumnDimension('C')->setWidth(8);
         foreach (range('D', 'J') as $col) {
-            $sheet->getColumnDimension($col)->setWidth(12);
+            $sheet->getColumnDimension($col)->setWidth(13);
         }
+
+        // تنسيق الأرقام (فاصل آلاف، منزلتين عشريتين)
+        $sheet->getStyle("D3:J{$summaryRow}")
+            ->getNumberFormat()
+            ->setFormatCode('#,##0.00');
+
+        // تجميد الصفوف الأولى (تبقى ظاهرة أثناء التمرير)
+        $sheet->freezePane('B4');
+
+        // فلتر تلقائي على الهيدر
+        $sheet->setAutoFilter("A3:J{$lastDataRow}");
+
+        // Page Setup
+        $sheet->getPageSetup()->setOrientation(\PhpOffice\PhpSpreadsheet\Worksheet\PageSetup::ORIENTATION_LANDSCAPE);
+        $sheet->getPageSetup()->setFitToWidth(1);
+        $sheet->getPageSetup()->setFitToHeight(0);
+        $sheet->getPageSetup()->setRowsToRepeatAtTopByStartAndEnd(3, 3);
 
         $writer = new Xlsx($spreadsheet);
         $writer->setPreCalculateFormulas(false);

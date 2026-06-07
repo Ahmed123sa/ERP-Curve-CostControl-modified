@@ -716,7 +716,6 @@ class ReportExportService
             ['إجمالي المشتريات', $kpis['purchases']],
             ['إجمالي المنصرف', $kpis['dispatched']],
             ['إجمالي الفروق', $kpis['diffs']],
-            ['نسبة تكلفة الطعام %', $kpis['foodCostPct'] . '%'],
         ];
         return $this->streamExcel($rows, "مؤشرات_الرئيسية_{$month}.xlsx");
     }
@@ -725,13 +724,16 @@ class ReportExportService
     {
         $start = now()->parse($month . '-01')->toDateString();
         $end = now()->parse($month . '-01')->endOfMonth()->toDateString();
+        $warehouseIds = Warehouse::where('client_id', $clientId)
+            ->whereIn('type', ['main', 'sub'])->pluck('id');
         $purchases = (float) StockLedger::where('client_id', $clientId)->whereBetween('date', [$start, $end])
             ->where('voucher_type', 'purchase')->where('movement_type', 'in')->sum('total_cost');
         $dispatched = (float) StockLedger::where('client_id', $clientId)->whereBetween('date', [$start, $end])
-            ->whereIn('movement_type', ['out', 'transfer_out'])->sum('total_cost');
-        $diffs = (float) MonthlyClosing::where('client_id', $clientId)->where('month', $month)->sum('diff_value');
-        $foodCostPct = $purchases > 0 ? round(($dispatched / $purchases) * 100, 1) : 0;
-        return compact('purchases', 'dispatched', 'diffs', 'foodCostPct');
+            ->where('voucher_type', 'dispatch')->where('movement_type', 'out')
+            ->whereIn('warehouse_id', $warehouseIds)->sum('total_cost');
+        $diffs = (float) MonthlyClosing::where('client_id', $clientId)
+            ->whereIn('warehouse_id', $warehouseIds)->where('month', $month)->sum('diff_value');
+        return compact('purchases', 'dispatched', 'diffs');
     }
 
     // ── Shared ──────────────────────────────────────────

@@ -5,13 +5,18 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { PageHeader } from '@/components/ui/AppShell';
 import { useAuthStore } from '@/lib/store';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { ShoppingCart, Truck, AlertTriangle, Package, Store, AlertCircle, TrendingUp, ClipboardList } from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
+import KpiCard from './components/KpiCard';
+import WarehouseTable from './components/WarehouseTable';
+import BranchTable from './components/BranchTable';
+import { DiffPieChart, TopDiffItems, TrendChart } from './components/DashboardCharts';
 
 export default function DashboardPage() {
   const { currentClient } = useAuthStore();
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
 
-  const { data: kpis, isLoading } = useQuery({
+  const { data: kpis, isLoading: kpiLoading } = useQuery({
     queryKey: ['kpis', currentClient?.id, month],
     queryFn: () => api.get('/dashboard/kpis', { params: { month } }).then((r) => r.data),
     enabled: !!currentClient,
@@ -35,26 +40,20 @@ export default function DashboardPage() {
     enabled: !!currentClient,
   });
 
-  const kpiCards = [
-    { label: 'إجمالي المشتريات', value: kpis?.total_purchases, unit: 'ج', color: 'text-blue-600' },
-    { label: 'قيمة المنصرف',     value: kpis?.total_dispatched, unit: 'ج', color: 'text-gray-600' },
-    { label: 'إجمالي الفروق',    value: kpis?.total_diffs,      unit: 'ج', color: (kpis?.total_diffs ?? 0) < 0 ? 'text-red-600' : 'text-green-600' },
-    { label: 'Food Cost %',       value: kpis?.food_cost_pct,   unit: '%', color: (kpis?.food_cost_pct ?? 0) > 35 ? 'text-amber-600' : 'text-green-600' },
-  ];
+  const { data: diffsByWh } = useQuery({
+    queryKey: ['diffs-by-wh', currentClient?.id, month],
+    queryFn: () => api.get('/dashboard/diffs-by-warehouse', { params: { month } }).then((r) => r.data),
+    enabled: !!currentClient,
+  });
+
+  const { data: topItems } = useQuery({
+    queryKey: ['top-diff-items', currentClient?.id, month],
+    queryFn: () => api.get('/dashboard/top-diff-items', { params: { month } }).then((r) => r.data),
+    enabled: !!currentClient,
+  });
 
   const branches = warehouses.filter((w: any) => w.type === 'branch');
   const mainSub = warehouses.filter((w: any) => w.type !== 'branch');
-
-  const totals = mainSub.reduce(
-    (acc: any, w: any) => {
-      acc.opening += w.opening;
-      acc.purchases += w.purchases;
-      acc.diff += w.diff;
-      return acc;
-    },
-    { opening: 0, purchases: 0, diff: 0 }
-  );
-  const branchIn = branches.reduce((s: number, w: any) => s + w.in, 0);
 
   const downloadExport = (url: string, filename: string) => {
     const token = localStorage.getItem('erp_token');
@@ -89,149 +88,129 @@ export default function DashboardPage() {
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6" dir="rtl">
         {/* KPI Cards */}
-        <div className="grid grid-cols-4 gap-4">
-          {kpiCards.map((k) => (
-            <div key={k.label} className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-              <div className="text-xs text-gray-500">{k.label}</div>
-              <div className={`text-2xl font-semibold mt-1 ${k.color}`}>
-                {isLoading ? '...' : (k.value?.toLocaleString('en-US') ?? '—')}
-                <span className="text-sm font-normal text-gray-400 mr-1">{k.unit}</span>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <KpiCard
+            icon={<ShoppingCart size={16} />}
+            iconBg="bg-blue-50" iconColor="text-blue-600"
+            label="إجمالي المشتريات"
+            value={kpis?.total_purchases}
+            unit="ج"
+            change={kpis?.purchases_change}
+            changeLabel="عن السابق"
+            sparklineData={trend?.map((t: any) => ({ value: t.purchases }))?.reverse()}
+            isLoading={kpiLoading}
+          />
+          <KpiCard
+            icon={<Truck size={16} />}
+            iconBg="bg-gray-50" iconColor="text-gray-600"
+            label="قيمة المنصرف"
+            value={kpis?.total_dispatched}
+            unit="ج"
+            change={kpis?.dispatched_change}
+            sparklineData={trend?.map((t: any) => ({ value: t.dispatched }))?.reverse()}
+            isLoading={kpiLoading}
+          />
+          <KpiCard
+            icon={<AlertTriangle size={16} />}
+            iconBg={(kpis?.total_diffs ?? 0) < 0 ? 'bg-red-50' : 'bg-green-50'}
+            iconColor={(kpis?.total_diffs ?? 0) < 0 ? 'text-red-600' : 'text-green-600'}
+            label="إجمالي الفروق"
+            value={kpis?.total_diffs}
+            unit="ج"
+            change={kpis?.diffs_change}
+            sparklineData={trend?.map((t: any) => ({ value: t.diffs }))?.reverse()}
+            isLoading={kpiLoading}
+          />
+          <Card className="border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+            <CardContent className="p-4">
+              <div className="flex items-start justify-between">
+                <div className="w-9 h-9 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600">
+                  <Package size={16} />
+                </div>
               </div>
-            </div>
-          ))}
+              <div className="mt-3">
+                <div className="text-xs text-gray-500">قيمة المخزون</div>
+                <div className="text-xl font-bold mt-0.5 font-mono tracking-tight">
+                  {kpiLoading ? (
+                    <span className="text-gray-300">...</span>
+                  ) : (
+                    <>{((kpis?.total_stock_value_warehouses ?? 0) + (kpis?.total_stock_value_branches ?? 0)).toLocaleString('en-US')} <span className="text-xs font-normal text-gray-400 mr-0.5">ج</span></>
+                  )}
+                </div>
+              </div>
+              <div className="mt-2 pt-2 border-t border-gray-100 flex justify-between text-[11px]">
+                <div className="flex items-center gap-1 text-gray-500">
+                  <Store size={12} />
+                  <span>المخازن</span>
+                  <span className="font-mono font-medium text-gray-700">{kpis?.total_stock_value_warehouses?.toLocaleString('en-US') ?? '—'}</span>
+                </div>
+                <div className="flex items-center gap-1 text-gray-500">
+                  <Store size={12} />
+                  <span>الفروع</span>
+                  <span className="font-mono font-medium text-gray-700">{kpis?.total_stock_value_branches?.toLocaleString('en-US') ?? '—'}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Smart Analytics Widgets */}
-        <div className="grid grid-cols-4 gap-4">
-          <a href="/menu-engineering/analytics" className="block bg-red-50 border border-red-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow">
-            <div className="text-sm text-red-600 font-medium">🚨 إنذار المخزون</div>
-            <div className="text-2xl font-bold text-red-700 mt-1">{smart?.critical_count ?? '...'}</div>
-            <div className="text-xs text-red-400">حرج · {smart?.warning_count ?? 0} إنذار</div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <a href="/menu-engineering/analytics" className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl p-3 shadow-sm hover:shadow-md transition-shadow">
+            <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center text-red-600">
+              <AlertCircle size={16} />
+            </div>
+            <div>
+              <div className="text-[11px] text-red-600 font-medium">إنذار المخزون</div>
+              <div className="text-lg font-bold text-red-700">{smart?.critical_count ?? '...'}</div>
+              <div className="text-[10px] text-red-400">حرج · {smart?.warning_count ?? 0} إنذار</div>
+            </div>
           </a>
-          <a href="/menu-engineering/analytics" className="block bg-orange-50 border border-orange-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow">
-            <div className="text-sm text-orange-600 font-medium">⚠️ تغيرات أسعار</div>
-            <div className="text-2xl font-bold text-orange-700 mt-1">{smart?.recent_price_changes?.length ?? '...'}</div>
-            <div className="text-xs text-orange-400">آخر تغير</div>
+          <a href="/menu-engineering/analytics" className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-xl p-3 shadow-sm hover:shadow-md transition-shadow">
+            <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center text-orange-600">
+              <TrendingUp size={16} />
+            </div>
+            <div>
+              <div className="text-[11px] text-orange-600 font-medium">تغيرات أسعار</div>
+              <div className="text-lg font-bold text-orange-700">{smart?.recent_price_changes?.length ?? '...'}</div>
+              <div className="text-[10px] text-orange-400">آخر تغير</div>
+            </div>
           </a>
-          <a href="/menu-engineering/analytics" className="block bg-emerald-50 border border-emerald-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow">
-            <div className="text-sm text-emerald-600 font-medium">💰 قيمة المخزون</div>
-            <div className="text-2xl font-bold text-emerald-700 mt-1">{smart?.stock_value ? `${(smart.stock_value / 1000).toFixed(1)}k` : '...'}</div>
-            <div className="text-xs text-emerald-400">جنيه</div>
+          <a href="/menu-engineering/analytics" className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl p-3 shadow-sm hover:shadow-md transition-shadow">
+            <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600">
+              <Package size={16} />
+            </div>
+            <div>
+              <div className="text-[11px] text-emerald-600 font-medium">قيمة المخزون</div>
+              <div className="text-lg font-bold text-emerald-700">{smart?.stock_value ? `${(smart.stock_value / 1000).toFixed(1)}k` : '...'}</div>
+              <div className="text-[10px] text-emerald-400">جنيه</div>
+            </div>
           </a>
-          <a href="/menu-engineering/analytics" className="block bg-blue-50 border border-blue-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow">
-            <div className="text-sm text-blue-600 font-medium">📦 مشتريات الشهر</div>
-            <div className="text-2xl font-bold text-blue-700 mt-1">{smart?.monthly_purchase_count ?? '...'}</div>
-            <div className="text-xs text-blue-400">فاتورة شراء</div>
+          <a href="/menu-engineering/analytics" className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl p-3 shadow-sm hover:shadow-md transition-shadow">
+            <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600">
+              <ClipboardList size={16} />
+            </div>
+            <div>
+              <div className="text-[11px] text-blue-600 font-medium">مشتريات الشهر</div>
+              <div className="text-lg font-bold text-blue-700">{smart?.monthly_purchase_count ?? '...'}</div>
+              <div className="text-[10px] text-blue-400">فاتورة شراء</div>
+            </div>
           </a>
         </div>
 
-        {/* Monthly Trend Chart */}
-        <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-          <h3 className="font-medium text-gray-800 text-sm mb-4">اتجاه شهري (آخر 6 أشهر)</h3>
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={trend ?? []}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} />
-              <Tooltip />
-              <Bar dataKey="purchases" name="مشتريات" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="dispatched" name="منصرف" fill="#6b7280" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="diffs" name="فروق" fill="#ef4444" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Warehouse Summary */}
+        {/* Charts Row */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* المخازن الرئيسية والفرعية */}
-          <div className="bg-white border border-gray-100 rounded-xl shadow-sm">
-            <div className="px-4 py-3 border-b border-gray-100">
-              <h3 className="font-medium text-gray-800 text-sm">ملخص المخازن (رئيسي + فرعي)</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-xs text-gray-400 border-b border-gray-50">
-                    <th className="px-3 py-2 text-right font-normal">الموقع</th>
-                    <th className="px-3 py-2 text-left font-normal">أول المدة</th>
-                    <th className="px-3 py-2 text-left font-normal">مشتريات</th>
-                    <th className="px-3 py-2 text-left font-normal">منصرف</th>
-                    <th className="px-3 py-2 text-left font-normal">الفروق</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {mainSub.map((w: any) => (
-                    <tr key={w.id} className="border-b border-gray-50 last:border-0">
-                      <td className="px-3 py-2.5 font-medium text-gray-800">
-                        {w.name}
-                        <span className={`mr-1 text-[10px] px-1.5 py-0.5 rounded-full ${
-                          w.type === 'main' ? 'bg-blue-100 text-blue-600' : 'bg-amber-100 text-amber-600'
-                        }`}>{w.type === 'main' ? 'رئيسي' : 'فرعي'}</span>
-                      </td>
-                      <td className="px-3 py-2.5 text-left font-mono text-blue-700">{w.opening?.toLocaleString()}</td>
-                      <td className="px-3 py-2.5 text-left font-mono text-green-700">{w.purchases?.toLocaleString()}</td>
-                      <td className="px-3 py-2.5 text-left font-mono text-gray-600">{w.out_qty}</td>
-                      <td className={`px-3 py-2.5 text-left font-mono font-medium ${w.diff < 0 ? 'text-red-600' : w.diff > 0 ? 'text-green-600' : 'text-gray-400'}`}>
-                        {w.diff?.toLocaleString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot className="bg-gray-50 text-xs font-bold">
-                  <tr>
-                    <td className="px-3 py-2">الإجمالي</td>
-                    <td className="px-3 py-2 text-left">{totals.opening.toLocaleString()}</td>
-                    <td className="px-3 py-2 text-left">{totals.purchases.toLocaleString()}</td>
-                    <td className="px-3 py-2 text-left">—</td>
-                    <td className="px-3 py-2 text-left">{totals.diff.toLocaleString()}</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </div>
+          <DiffPieChart data={diffsByWh} isLoading={false} />
+          <TopDiffItems data={topItems} isLoading={false} />
+        </div>
 
-          {/* مشتريات الفروع (الوارد للفروع) */}
-          <div className="bg-white border border-gray-100 rounded-xl shadow-sm">
-            <div className="px-4 py-3 border-b border-gray-100">
-              <h3 className="font-medium text-gray-800 text-sm">مشتريات الفروع (وارد)</h3>
-            </div>
-            {branches.length === 0 ? (
-              <div className="p-8 text-center text-gray-400 text-sm">لا توجد فروع</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-xs text-gray-400 border-b border-gray-50">
-                      <th className="px-3 py-2 text-right font-normal">الفرع</th>
-                      <th className="px-3 py-2 text-left font-normal">إجمالي الوارد</th>
-                      <th className="px-3 py-2 text-left font-normal">المنصرف</th>
-                      <th className="px-3 py-2 text-left font-normal">الفروق</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {branches.map((w: any) => (
-                      <tr key={w.id} className="border-b border-gray-50 last:border-0">
-                        <td className="px-3 py-2.5 font-medium text-orange-800">{w.name}</td>
-                        <td className="px-3 py-2.5 text-left font-mono text-blue-700">{w.in?.toLocaleString()}</td>
-                        <td className="px-3 py-2.5 text-left font-mono text-gray-600">{w.out_qty}</td>
-                        <td className={`px-3 py-2.5 text-left font-mono font-medium ${w.diff < 0 ? 'text-red-600' : w.diff > 0 ? 'text-green-600' : 'text-gray-400'}`}>
-                          {w.diff?.toLocaleString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot className="bg-gray-50 text-xs font-bold">
-                    <tr>
-                      <td className="px-3 py-2">الإجمالي</td>
-                      <td className="px-3 py-2 text-left">{branchIn.toLocaleString()}</td>
-                      <td className="px-3 py-2 text-left">—</td>
-                      <td className="px-3 py-2 text-left">—</td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            )}
-          </div>
+        {/* Trend Chart */}
+        <TrendChart data={trend} isLoading={false} />
+
+        {/* Warehouse + Branch Tables */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <WarehouseTable data={mainSub} isLoading={false} />
+          <BranchTable data={branches} isLoading={false} />
         </div>
       </div>
     </>

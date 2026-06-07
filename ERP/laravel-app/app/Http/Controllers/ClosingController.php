@@ -15,7 +15,8 @@ use App\Services\ActivityLogger;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
-use Maatwebsite\Excel\Facades\Excel;
+use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ClosingController extends Controller
 {
@@ -194,9 +195,11 @@ class ClosingController extends Controller
             $results = $this->calc->generateMonthlyClosing($clientId, $whId, $month);
             return response()->json(['message' => 'تم توليد التقفيل بنجاح', 'count' => count($results)]);
         } catch (\Exception $e) {
+            Log::error('Error generating monthly closing', [
+                'client_id' => $clientId, 'warehouse_id' => $whId, 'month' => $month, 'error' => $e->getMessage()
+            ]);
             return response()->json([
-                'message' => 'خطأ في توليد التقفيل',
-                'error'   => $e->getMessage(),
+                'message' => 'خطأ في توليد التقفيل — تم تسجيل التفاصيل في سجل الأخطاء',
             ], 500);
         }
     }
@@ -240,7 +243,7 @@ class ClosingController extends Controller
         $count = 0;
 
         foreach ($request->lines as $line) {
-            MonthlyClosing::updateOrCreate(
+            $mc = MonthlyClosing::updateOrCreate(
                 [
                     'client_id'    => $clientId,
                     'warehouse_id' => $request->warehouse_id,
@@ -248,11 +251,19 @@ class ClosingController extends Controller
                     'month'        => $request->month,
                 ],
                 [
-                    'physical_count' => $line['qty'] // نتحفظ بالرقم الأصلي هنا
+                    'physical_count' => $line['qty']
                 ]
             );
+            $mc->closing_qty_actual = $line['qty'];
+            $theoretical = max(0, (float) $mc->closing_qty_theoretical);
+            $mc->diff_qty   = round($theoretical - (float) $line['qty'], 3);
+            $avgCost = (float) ($mc->avg_cost > 0 ? $mc->avg_cost : \App\Models\Item::find($line['item_id'])?->default_cost ?? 0);
+            $mc->diff_value = round($mc->diff_qty * $avgCost, 2);
+            $mc->save();
             $count++;
         }
+
+        $this->calc->generateMonthlyClosing($clientId, $request->warehouse_id, $request->month);
 
         return response()->json(['message' => "تم حفظ جرد {$count} صنف بنجاح في موديول الجرد النهائي"]);
     }
@@ -365,16 +376,9 @@ class ClosingController extends Controller
 
         $clientId = $request->user()->current_client_id;
 
-        // 1. تحقق من القفل
-        $locked = MonthlyClosing::where('client_id', $clientId)
-            ->where('warehouse_id', $request->warehouse_id)
-            ->where('item_id', $request->item_id)
-            ->where('month', $request->month)
-            ->value('is_locked');
-
-        if ($locked) {
-            abort(403, 'الشهر مقفول — لا يمكن التعديل');
-        }
+        $this->ensureItemNotLocked(
+            $clientId, $request->warehouse_id, $request->item_id, $request->month
+        );
 
         $updatedOrders = 0;
 
@@ -428,7 +432,7 @@ class ClosingController extends Controller
                 // 5. لو الفاتورة من نوع purchase — نحدث default_cost
                 $order = DispatchOrder::where('client_id', $clientId)->find($line['order_id']);
                 if ($order && $order->type === 'purchase' && $unitCost > 0) {
-                    $item = Item::find($request->item_id);
+                    $item = Item::where('client_id', $clientId)->find($request->item_id);
                     if ($item) {
                         $oldCost = $item->default_cost;
                         $item->default_cost = $unitCost;
@@ -450,35 +454,9 @@ class ClosingController extends Controller
             }
 
             // 6. إعادة توليد التقفيل للصنف + المخزن
-            $summary = $this->calc->itemMonthSummary(
+            $this->regenerateItemClosing(
                 $clientId, $request->warehouse_id, $request->item_id, $request->month
             );
-
-            $closing = MonthlyClosing::where('client_id', $clientId)
-                ->where('warehouse_id', $request->warehouse_id)
-                ->where('item_id', $request->item_id)
-                ->where('month', $request->month)
-                ->first();
-
-            if ($summary['opening_qty'] == 0 && $summary['in_qty'] == 0 && $summary['out_qty'] == 0) {
-                if ($closing) $closing->delete();
-            } else {
-                MonthlyClosing::updateOrCreate(
-                    [
-                        'client_id'    => $clientId,
-                        'warehouse_id' => $request->warehouse_id,
-                        'item_id'      => $request->item_id,
-                        'month'        => $request->month,
-                    ],
-                    array_merge($summary, [
-                        'is_locked'    => $closing?->is_locked ?? false,
-                        'locked_by'    => $closing?->locked_by ?? null,
-                        'locked_at'    => $closing?->locked_at ?? null,
-                        'closing_qty_actual' => $closing?->closing_qty_actual ?? null,
-                        'physical_count'     => $closing?->physical_count ?? null,
-                    ])
-                );
-            }
         });
 
         return response()->json([
@@ -512,7 +490,7 @@ class ClosingController extends Controller
             $order = DispatchOrder::where('client_id', $clientId)->find($entry->ref_id);
             $lines[] = [
                 'order_id'   => $entry->ref_id,
-                'order_ref'  => $order ? ($order->id ? '#' . substr($order->id, 0, 8) : '—') : '—',
+                'order_ref'  => $order ? '#' . substr($order->id, 0, 8) : '—',
                 'type'       => $order?->type ?? $entry->voucher_type,
                 'qty'        => (float) $entry->qty,
                 'total_cost' => (float) $entry->total_cost,
@@ -587,15 +565,9 @@ class ClosingController extends Controller
 
         $clientId = $request->user()->current_client_id;
 
-        $locked = MonthlyClosing::where('client_id', $clientId)
-            ->where('warehouse_id', $request->warehouse_id)
-            ->where('item_id', $request->item_id)
-            ->where('month', $request->month)
-            ->value('is_locked');
-
-        if ($locked) {
-            abort(403, 'الشهر مقفول — لا يمكن التعديل');
-        }
+        $this->ensureItemNotLocked(
+            $clientId, $request->warehouse_id, $request->item_id, $request->month
+        );
 
         $updatedOrders = 0;
 
@@ -645,36 +617,9 @@ class ClosingController extends Controller
                 $updatedOrders++;
             }
 
-            // إعادة توليد التقفيل
-            $summary = $this->calc->itemMonthSummary(
+            $this->regenerateItemClosing(
                 $clientId, $request->warehouse_id, $request->item_id, $request->month
             );
-
-            $closing = MonthlyClosing::where('client_id', $clientId)
-                ->where('warehouse_id', $request->warehouse_id)
-                ->where('item_id', $request->item_id)
-                ->where('month', $request->month)
-                ->first();
-
-            if ($summary['opening_qty'] == 0 && $summary['in_qty'] == 0 && $summary['out_qty'] == 0) {
-                if ($closing) $closing->delete();
-            } else {
-                MonthlyClosing::updateOrCreate(
-                    [
-                        'client_id'    => $clientId,
-                        'warehouse_id' => $request->warehouse_id,
-                        'item_id'      => $request->item_id,
-                        'month'        => $request->month,
-                    ],
-                    array_merge($summary, [
-                        'is_locked'    => $closing?->is_locked ?? false,
-                        'locked_by'    => $closing?->locked_by ?? null,
-                        'locked_at'    => $closing?->locked_at ?? null,
-                        'closing_qty_actual' => $closing?->closing_qty_actual ?? null,
-                        'physical_count'     => $closing?->physical_count ?? null,
-                    ])
-                );
-            }
         });
 
         return response()->json([
@@ -683,7 +628,7 @@ class ClosingController extends Controller
         ]);
     }
 
-    public function export(Request $request)
+    public function export(Request $request): StreamedResponse
     {
         $clientId = $request->user()->current_client_id;
         $month    = $request->month ?? now()->format('Y-m');
@@ -692,7 +637,7 @@ class ClosingController extends Controller
         );
     }
 
-    public function exportPdf(Request $request)
+    public function exportPdf(Request $request): StreamedResponse
     {
         $clientId = $request->user()->current_client_id;
         return app(\App\Services\ReportExportService::class)->exportLocationPdf(
@@ -700,14 +645,14 @@ class ClosingController extends Controller
         );
     }
 
-    public function exportLocationExcel(Request $request)
+    public function exportLocationExcel(Request $request): StreamedResponse
     {
         $clientId   = $request->user()->current_client_id;
         $warehouseId = $request->warehouse_id;
         $month      = $request->month ?? now()->format('Y-m');
 
         if (!$warehouseId) {
-            return response()->json(['message' => 'warehouse_id مطلوب'], 422);
+            abort(422, 'warehouse_id مطلوب');
         }
 
         return app(\App\Services\ReportExportService::class)->exportLocationExcel(
@@ -715,10 +660,54 @@ class ClosingController extends Controller
         );
     }
 
-    public function exportCycle(Request $request)
+    public function exportCycle(Request $request): StreamedResponse
     {
         $clientId = $request->user()->current_client_id;
         $month    = $request->month ?? now()->format('Y-m');
         return app(\App\Services\ComprehensiveExportService::class)->export($clientId, $month);
+    }
+
+    private function ensureItemNotLocked(string $clientId, string $warehouseId, string $itemId, string $month): void
+    {
+        $locked = MonthlyClosing::where('client_id', $clientId)
+            ->where('warehouse_id', $warehouseId)
+            ->where('item_id', $itemId)
+            ->where('month', $month)
+            ->value('is_locked');
+
+        if ($locked) {
+            abort(403, 'الشهر مقفول — لا يمكن التعديل');
+        }
+    }
+
+    private function regenerateItemClosing(string $clientId, string $warehouseId, string $itemId, string $month): void
+    {
+        $summary = $this->calc->itemMonthSummary($clientId, $warehouseId, $itemId, $month);
+
+        $closing = MonthlyClosing::where('client_id', $clientId)
+            ->where('warehouse_id', $warehouseId)
+            ->where('item_id', $itemId)
+            ->where('month', $month)
+            ->first();
+
+        if ($summary['opening_qty'] == 0 && $summary['in_qty'] == 0 && $summary['out_qty'] == 0) {
+            if ($closing) $closing->delete();
+        } else {
+            MonthlyClosing::updateOrCreate(
+                [
+                    'client_id'    => $clientId,
+                    'warehouse_id' => $warehouseId,
+                    'item_id'      => $itemId,
+                    'month'        => $month,
+                ],
+                array_merge($summary, [
+                    'is_locked'    => $closing?->is_locked ?? false,
+                    'locked_by'    => $closing?->locked_by ?? null,
+                    'locked_at'    => $closing?->locked_at ?? null,
+                    'closing_qty_actual' => $closing?->closing_qty_actual ?? null,
+                    'physical_count'     => $closing?->physical_count ?? null,
+                ])
+            );
+        }
     }
 }

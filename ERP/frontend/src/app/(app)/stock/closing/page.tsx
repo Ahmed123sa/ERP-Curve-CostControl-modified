@@ -72,6 +72,7 @@ export default function FinalBalancePage() {
       toast.success('تم حفظ جرد آخر المدة بنجاح ✓');
       qc.invalidateQueries({ queryKey: ['closing-actual', warehouseId, month] });
       qc.invalidateQueries({ queryKey: ['closing'] });
+      qc.invalidateQueries({ queryKey: ['grand-summary'] });
     },
     onError: (e: any) => toast.error(e?.message || 'خطأ في الحفظ')
   });
@@ -90,6 +91,7 @@ export default function FinalBalancePage() {
               onSuccess={() => {
                 qc.invalidateQueries({ queryKey: ['closing-actual', warehouseId, month] });
                 qc.invalidateQueries({ queryKey: ['closing'] });
+                qc.invalidateQueries({ queryKey: ['grand-summary'] });
               }} 
             />
             <button

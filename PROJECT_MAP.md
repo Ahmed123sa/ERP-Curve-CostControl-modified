@@ -410,6 +410,30 @@ Older copy. Do NOT modify. Changes go into `ERP/laravel-app/`.
 - `ERP/README.md` — title + name fix
 - `ERP/backend/database/seeders/DatabaseSeeder.php` — name fix
 
+---
+
+## Surgical Changes Applied (2026-06-06 — Merge Sales Upload into Reconciliation)
+
+### 28. Remove standalone sales-upload page + tab
+- **Files deleted**: `ERP/frontend/src/app/(app)/menu-engineering/sales-upload/page.tsx`
+- **Files edited**: `ERP/frontend/src/app/(app)/menu-engineering/layout.tsx`
+- **Change**: Removed `{ href: '/menu-engineering/sales-upload', label: 'رفع مبيعات' }` tab from layout. Sales upload is now accessible only via the "رفع مبيعات" button inside the reconciliation page modal.
+
+### 29. Backend fix — Unmatched items key collision (duplicate summing)
+- **File**: `ERP/laravel-app/app/Http/Controllers/MenuEngineering/MenuSalesImportController.php` (lines 113, 444)
+- **Root cause**: Both `upload()` and `process()` methods used `$name` as the key for `$unmatchedRows[]`. When two different sizes of the same item appeared (e.g., "بطاطس" كبير vs صغير), the second entry overwrote the first instead of being treated as a separate unmatched item.
+- **Fix**: Changed key from `$name` to `$name . '|' . $sizeVal` (composite key). Also added `qty_sold` accumulation when same key appears again.
+- **Impact**: Items with same name but different sizes now appear as separate rows in the unmatched table. Export keys in frontend changed from `source_name` to composite `source_name|size`.
+
+### 30. Frontend — SearchableSelect + size display in reconciliation modal
+- **File**: `ERP/frontend/src/app/(app)/menu-engineering/reconciliation/page.tsx`
+- **Changes**:
+  1. Replaced native `<select>` with `<SearchableSelect>` for both matched and unmatched recipe linking dropdowns — enables search/filter for large recipe lists.
+  2. Display size next to name: `اسم (حجم)` format in both tables; removed separate "الحجم" column from unmatched table.
+  3. Changed `uploadOverrides` key from `source_name` to composite `source_name|size` to align with backend fix.
+  4. Added `overrideKey()` helper function.
+- **Impact**: Professional searchable dropdown, clearer name display, correct handling of same-name-different-size items.
+
 ### 21. `ProductionPostController` — Post date uses current date instead of month end
 - **File**: `ERP/laravel-app/app/Http/Controllers/Production/ProductionPostController.php:79`
 - **Root cause**: `$postDate = $end->toDateString()` (end of month, e.g., 2026-05-31). When today is before month-end (e.g., May 17), the DispatchOrder gets a future date. The `update()` form on the frontend validates `date <= today`, so editing/updating the posted production order fails with "The date field must be a date before or equal to today."
@@ -493,4 +517,66 @@ Older copy. Do NOT modify. Changes go into `ERP/laravel-app/`.
 - **Impact**:
   - **Future saves**: Items dispatched to branches use their correct source warehouse (`default_warehouse_id`). Branch 'in' movements are always preserved. Closing regenerated for all affected warehouses.
   - **Existing corrections**: User must open each dispatch order previously saved with wrong data and click "حفظ". The `update()` method reverses old wrong entries and recreates them correctly.
-  - **No regression**: Non-dispatch voucher types and non-branch dispatches unchanged (use the existing `else` path).
+   - **No regression**: Non-dispatch voucher types and non-branch dispatches unchanged (use the existing `else` path).
+
+## Surgical Improvements Applied (2026-06-05) — Code Quality & Excel Enhancement
+
+### ReportController.php
+1. **Removed 3 unused imports**: `DispatchLine`, `DispatchOrder`, `DB` — none were referenced in the file.
+2. **String concat → interpolation**: `'A' . $rowIdx` → `"A{$rowIdx}"` (10 occurrences) in `exportDiffs()`.
+3. **Freeze pane B4**: Changed from `A4` to `B4` so the item name column (B) stays visible when scrolling horizontally.
+4. **Page Setup**: Added Landscape orientation, Fit to Width (fitToWidth=1, fitToHeight=0), and print title rows (row 3 repeats at top).
+5. **Conditional Formatting**: Replaced manual cell-by-cell font coloring on diff column (J) with `Conditional` rules — green for >0 (surplus), red for <0 (shortage). Colors update automatically when values change in Excel.
+6. **Alternating Row Colors (zebra)**: Added conditional format `MOD(ROW(),2)=0` with light gray fill (`FFF5F5FA`) across data range.
+7. **Summary Row**: Added row at bottom with bold font, blue-gray fill (`FFE8EEF7`), medium top border, and SUM formulas for columns D-J.
+
+### ClosingController.php
+8. **Removed unused import**: `Maatwebsite\Excel\Facades\Excel` (was never used).
+9. **Added `StreamedResponse` import**: `use Symfony\Component\HttpFoundation\StreamedResponse;`.
+10. **Added return types** to 4 export methods: `export()`, `exportPdf()`, `exportLocationExcel()`, `exportCycle()` — all `: StreamedResponse`.
+11. **Fixed `exportLocationExcel()` error response**: Changed `return response()->json(...)` to `abort(422, ...)` for consistency with StreamedResponse return type.
+12. **Simplified ternary in `cellOrders()`**: `$order ? ($order->id ? '#' . substr(...) : '—') : '—'` → `$order ? '#' . substr(...) : '—'` (inner `$order->id` always truthy).
+13. **Client_id scope fix**: `Item::find($request->item_id)` → `Item::where('client_id', $clientId)->find($request->item_id)` in `editDailyCell()` (prevented cross-tenant data leak).
+14. **Error message hidden**: `generate()` now logs full error via `Log::error()` and returns generic message instead of exposing `$e->getMessage()`.
+15. **Extracted `ensureItemNotLocked()`**: Private method encapsulating the locked-month check (duplicated in `editDailyCell()` and `editCellValue()`).
+16. **Extracted `regenerateItemClosing()`**: Private method encapsulating the item closing regeneration (duplicated identically in `editDailyCell()` and `editCellValue()` — ~25 lines each → single call).
+17. **`editDailyCell()` reduced**: Previously ~135 lines, now ~100 lines after extraction.
+
+---
+
+## Dashboard Improvements Applied (2026-06-05)
+
+### Backend — `DashboardController.php`
+1. **`kpis()` — Removed `food_cost_pct`**: Eliminated entirely from response. `total_stock_value` added as 4th KPI.
+2. **`kpis()` — Change % added**: `purchases_change`, `dispatched_change`, `diffs_change` — % change vs previous month.
+3. **`kpis()` — Diffs filtered to warehouses**: `total_diffs` scoped to `type IN ('main','sub')` only. Branch diffs excluded.
+4. **`monthlyTrend()` — Diffs filtered**: Removed branch closings from trend data.
+5. **`warehouseSummary()` — Branch diff hidden**: Branches now return `diff = '—'` (string dash) instead of numeric.
+6. **New endpoint — `diffsByWarehouse()`**: `GET /api/dashboard/diffs-by-warehouse` — aggregated diffs per warehouse for Pie chart.
+7. **New endpoint — `topDiffItems()`**: `GET /api/dashboard/top-diff-items` — top 10 items by diff value (absolute).
+
+### Backend — `ReportExportService.php`
+8. **`dashboardKpis()` — Aligned with controller**: Diffs filtered to warehouses, `foodCostPct` removed.
+9. **`exportDashboard()` — Removed Food Cost row**: Now exports only 3 KPI rows.
+
+### Backend — Routes (`api.php`)
+10. **Two new routes**: `dashboard/diffs-by-warehouse` and `dashboard/top-diff-items` added under `permission:dashboard` middleware.
+
+### Frontend — New Components (`dashboard/components/`)
+11. **`KpiCard.tsx`**: Reusable card with lucide icon in colored capsule, % change badge (▲/▼), optional sparkline AreaChart (recharts), loading state.
+12. **`DashboardCharts.tsx`**: Contains `DiffPieChart` (donut pie by warehouse), `TopDiffItems` (horizontal progress bars per item), `TrendChart` (LineChart with 3 series — purchases/dispatched/diffs).
+13. **`WarehouseTable.tsx`**: Clean table with `DiffBadge` component (green/amber/red based on thresholds).
+14. **`BranchTable.tsx`**: Branch table with `'—'` for diff, colored badges for numeric diffs.
+
+### Frontend — `dashboard/page.tsx`
+15. **Removed**: Food Cost % card, old inline KPI cards, old BarChart, old inline tables.
+16. **Added**: 4 `KpiCard` instances with lucide icons (ShoppingCart, ArrowUpDown, AlertTriangle, Package) + sparklines + change badges.
+17. **Added**: Smart Analytics widgets redesigned with icon capsules.
+18. **Added**: `DiffPieChart` + `TopDiffItems` row (2-column grid).
+19. **Added**: `TrendChart` (LineChart) full-width.
+20. **Added**: `WarehouseTable` + `BranchTable` row (2-column grid).
+21. **Fixed**: `layout.tsx` — `Geist` font replaced with `Inter` (Geist not available in this Next.js version).
+
+### Dependencies Installed
+22. `lucide-react` (npm) — icon library.
+23. `shadcn/ui@4.9.0` — initialized with `npx shadcn@4.9.0 init -d --force`. Components: `card`, `badge`, `tabs`, `progress`, `separator`, `button`.
