@@ -204,35 +204,102 @@ export default function ReconciliationPage() {
       }
       setSalesMap(newSalesMap);
 
-      const exportRows: any[] = [];
+      const exportRows = buildUploadExportData();
+      setUploadExportData(exportRows);
+      setUploadStep('done');
+    } catch (e: any) {
+      console.error(e);
+    }
+    setUploadConfirmLoading(false);
+  };
+
+  const buildUploadExportData = (): any[] => {
+    const rows: any[] = [];
+    const preview = uploadPreview ?? [];
+    const unmatched = uploadUnmatched ?? [];
+    for (const p of preview) {
+      const key = overrideKey(p.source_name, p.size || '');
+      const rid = uploadOverrides[key] || p.recipe_id;
+      const recipe = uploadAllRecipes.find((r: any) => r.id === rid);
+      const isHalf = !!uploadHalfCats[p.category];
+      rows.push({
+        category: p.category || '',
+        item: recipe?.name || p.source_name,
+        size: p.size || '',
+        qty: isHalf ? (p.qty_sold / 2) : p.qty_sold,
+      });
+    }
+    for (const u of unmatched) {
+      const key = overrideKey(u.source_name, u.size || '');
+      const overrideRid = uploadOverrides[key];
+      if (overrideRid) {
+        const recipe = uploadAllRecipes.find((r: any) => r.id === overrideRid);
+        const isHalf = !!uploadHalfCats[u.category];
+        rows.push({
+          category: u.category || '',
+          item: recipe?.name || u.source_name,
+          size: u.size || '',
+          qty: isHalf ? (u.qty_sold / 2) : u.qty_sold,
+        });
+      }
+    }
+    return rows;
+  };
+
+  const handleExportFromReview = () => {
+    const rows = buildUploadExportData();
+    if (!rows.length) return;
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'مبيعات');
+    const month = saleDate ? saleDate.slice(0, 7) : new Date().toISOString().slice(0, 7);
+    const fileName = branchName ? `${branchName}_${month}.xlsx` : `مبيعات_${month}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+  };
+
+  const handleDirectParse = async () => {
+    if (!uploadPreview || !uploadPreview.length || !branchId) return;
+    setUploadConfirmLoading(true);
+    try {
+      const items: any[] = [];
       for (const p of uploadPreview) {
         const key = overrideKey(p.source_name, p.size || '');
         const rid = uploadOverrides[key] || p.recipe_id;
-        const recipe = uploadAllRecipes.find((r: any) => r.id === rid);
-        const isHalf = !!uploadHalfCats[p.category];
-        exportRows.push({
-          category: p.category || '',
-          item: recipe?.name || p.source_name,
-          size: p.size || '',
-          qty: isHalf ? (p.qty_sold / 2) : p.qty_sold,
-        });
+        items.push({ recipe_id: rid, qty_sold: p.qty_sold, category: p.category || '', source_name: p.source_name || '' });
       }
       for (const u of uploadUnmatched) {
         const key = overrideKey(u.source_name, u.size || '');
         const overrideRid = uploadOverrides[key];
         if (overrideRid) {
-          const recipe = uploadAllRecipes.find((r: any) => r.id === overrideRid);
-          const isHalf = !!uploadHalfCats[u.category];
-          exportRows.push({
-            category: u.category || '',
-            item: recipe?.name || u.source_name,
-            size: u.size || '',
-            qty: isHalf ? (u.qty_sold / 2) : u.qty_sold,
-          });
+          items.push({ recipe_id: overrideRid, qty_sold: u.qty_sold, category: u.category || '', source_name: u.source_name || '' });
         }
       }
-      setUploadExportData(exportRows);
-      setUploadStep('done');
+      await api.post('/menu-engineering/confirm-sales', {
+        branch_id: branchId,
+        sale_date: saleDate,
+        items,
+        half_categories: uploadHalfCats,
+      });
+      // Update salesMap
+      const newSalesMap: Record<string, string> = { ...salesMap };
+      for (const p of uploadPreview) {
+        const key = overrideKey(p.source_name, p.size || '');
+        const rid = uploadOverrides[key] || p.recipe_id;
+        const isHalf = !!uploadHalfCats[p.category];
+        const qty = isHalf ? (p.qty_sold / 2) : p.qty_sold;
+        newSalesMap[rid] = String(qty);
+      }
+      for (const u of uploadUnmatched) {
+        const key = overrideKey(u.source_name, u.size || '');
+        const overrideRid = uploadOverrides[key];
+        if (overrideRid) {
+          const isHalf = !!uploadHalfCats[u.category];
+          const qty = isHalf ? (u.qty_sold / 2) : u.qty_sold;
+          newSalesMap[overrideRid] = String(qty);
+        }
+      }
+      setSalesMap(newSalesMap);
+      resetUpload();
     } catch (e: any) {
       console.error(e);
     }
@@ -872,9 +939,11 @@ export default function ReconciliationPage() {
                       </div>
                     </div>
                   )}
-                  <div className="flex justify-center gap-3 pt-2">
+                  <div className="flex justify-center gap-3 pt-2 flex-wrap">
+                    <button onClick={handleDirectParse} disabled={uploadConfirmLoading} className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">{uploadConfirmLoading ? '...' : 'بارسنج مباشر'}</button>
                     <button onClick={handleConfirm} disabled={uploadConfirmLoading} className="px-6 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50">{uploadConfirmLoading ? '...' : 'تأكيد وحفظ المبيعات'}</button>
-                    <button onClick={() => { setUploadStep('file'); setUploadPreview(null); setUploadUnmatched([]); setUploadOverrides({}); setUploadHalfCats({}); }} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">رجوع</button>
+                    <button onClick={handleExportFromReview} className="px-4 py-2 text-sm bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 border border-indigo-200">تصدير Excel</button>
+                    <button onClick={() => { setUploadStep('file'); setUploadPreview(null); setUploadUnmatched([]); setUploadOverrides({}); setUploadHalfCats({}); }} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 border rounded-lg">رجوع</button>
                   </div>
                 </div>
               )}
