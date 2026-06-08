@@ -6,6 +6,7 @@ use App\Models\Client;
 use App\Models\Item;
 use App\Models\MonthlyClosing;
 use App\Models\Production\DailyProduction;
+use App\Models\Production\ProcessingBatchOutput;
 use App\Models\Production\Recipe;
 use App\Models\StockLedger;
 use App\Models\Warehouse;
@@ -99,10 +100,12 @@ class ComprehensiveExportService
     // ─── Production Sheet ─────────────────────────────────
     private function buildProductionSheet($sheet, string $clientId, string $month, Carbon $dt, int $daysInMonth, int $dayCols, $client)
     {
-        $recipes = Recipe::where('client_id', $clientId)
+        $recipes = Recipe::withoutGlobalScope('client')
+            ->where('client_id', $clientId)
             ->with('outputItem:id,name,unit')
             ->get();
-        $prodEntries = DailyProduction::where('client_id', $clientId)
+        $prodEntries = DailyProduction::withoutGlobalScope('client')
+            ->where('client_id', $clientId)
             ->whereYear('date', $dt->year)->whereMonth('date', $dt->month)
             ->get()
             ->groupBy('recipe_id');
@@ -121,7 +124,8 @@ class ComprehensiveExportService
             ->pluck('item_id')->filter()->unique()->toArray();
 
         // Stock-produced items: items produced via StockLedger but not in DailyProduction
-        $stockProdIds = StockLedger::where('client_id', $clientId)
+        $stockProdIds = StockLedger::withoutGlobalScope('client')
+            ->where('client_id', $clientId)
             ->where('voucher_type', 'production')
             ->where('movement_type', 'in')
             ->whereBetween('date', [$dt->toDateString(), $dt->copy()->endOfMonth()->toDateString()])
@@ -131,7 +135,8 @@ class ComprehensiveExportService
         $stockProdItems = $stockProdIds->isNotEmpty()
             ? Item::whereIn('id', $stockProdIds)->where('client_id', $clientId)->get()->keyBy('id')
             : collect();
-        $stockProdLedger = StockLedger::where('client_id', $clientId)
+        $stockProdLedger = StockLedger::withoutGlobalScope('client')
+            ->where('client_id', $clientId)
             ->where('voucher_type', 'production')
             ->where('movement_type', 'in')
             ->whereBetween('date', [$dt->toDateString(), $dt->copy()->endOfMonth()->toDateString()])
@@ -280,6 +285,48 @@ class ComprehensiveExportService
             $rowIdx++;
         }
 
+        // Processing batch outputs (items produced via processing batches)
+        $processingOutputs = ProcessingBatchOutput::with('day')
+            ->whereHas('day', function ($q) use ($clientId, $dt, $daysInMonth) {
+                $q->withoutGlobalScope('client')
+                    ->where('client_id', $clientId)
+                    ->whereBetween('date', [$dt->toDateString(), $dt->copy()->day($daysInMonth)->toDateString()]);
+            })->get();
+        $processingByItem = $processingOutputs->groupBy('item_id');
+        $processingItemIds = $processingByItem->keys();
+        $processingItems = $processingItemIds->isNotEmpty()
+            ? Item::whereIn('id', $processingItemIds)->where('client_id', $clientId)->get()->keyBy('id')
+            : collect();
+        foreach ($processingItems as $item) {
+            $entries = $processingByItem->get($item->id, collect());
+            $dailyQty = [];
+            $totalQty = 0;
+            for ($d = 1; $d <= $dayCols; $d++) {
+                if ($d > $daysInMonth) {
+                    $dailyQty[$d] = 0;
+
+                    continue;
+                }
+                $dateStr = $dt->copy()->day($d)->toDateString();
+                $qty = (float) $entries->filter(fn ($o) => $o->day && $o->day->date->format('Y-m-d') === $dateStr)->sum('qty');
+                $dailyQty[$d] = $qty;
+                $totalQty += $qty;
+            }
+            $rowData = [$item->name, $item->unit ?? ''];
+            for ($d = 1; $d <= $dayCols; $d++) {
+                $rowData[] = $dailyQty[$d] ?: 0;
+            }
+            $rowData[] = $totalQty;
+            $rowData[] = 0;
+            $rowData[] = 0;
+
+            $this->writeDataRow($sheet, $rowIdx, $rowData);
+            $sheet->setCellValue(Coordinate::stringFromColumnIndex(1 + $totalCol).$rowIdx,
+                '=SUM('.Coordinate::stringFromColumnIndex(3)."{$rowIdx}:".Coordinate::stringFromColumnIndex(2 + $dayCols)."{$rowIdx})");
+
+            $rowIdx++;
+        }
+
         // Totals row
         $prevRowIdx = $rowIdx - 1;
         $totalRow = $rowIdx;
@@ -308,17 +355,20 @@ class ComprehensiveExportService
     // ─── Warehouse Receipt Sheet ──────────────────────────
     private function buildWarehouseSheet($sheet, string $clientId, $wh, string $month, Carbon $dt, int $daysInMonth, int $dayCols, $items, $client)
     {
-        $closings = MonthlyClosing::where('client_id', $clientId)
+        $closings = MonthlyClosing::withoutGlobalScope('client')
+            ->where('client_id', $clientId)
             ->where('warehouse_id', $wh->id)->where('month', $month)
             ->get()->keyBy('item_id');
 
         // Fallback opening: fetch previous month's closings for items without current month data
         $prevMonth = $dt->copy()->subMonth()->format('Y-m');
-        $prevClosings = MonthlyClosing::where('client_id', $clientId)
+        $prevClosings = MonthlyClosing::withoutGlobalScope('client')
+            ->where('client_id', $clientId)
             ->where('warehouse_id', $wh->id)->where('month', $prevMonth)
             ->get()->keyBy('item_id');
 
-        $dailyLedger = StockLedger::where('stock_ledger.client_id', $clientId)
+        $dailyLedger = StockLedger::withoutGlobalScope('client')
+            ->where('stock_ledger.client_id', $clientId)
             ->where('stock_ledger.warehouse_id', $wh->id)
             ->whereBetween('stock_ledger.date', [$dt->toDateString(), $dt->copy()->endOfMonth()->toDateString()])
             ->where('stock_ledger.movement_type', 'in')
@@ -420,12 +470,13 @@ class ComprehensiveExportService
             if ($c) {
                 $opening = (float) $c->opening_qty;
                 $avgCost = (float) $c->avg_cost;
-                $endingBalance = $c->closing_qty_actual !== null ? (float) $c->closing_qty_actual : (float) $c->closing_qty_theoretical;
+                $rawActual = $c->getRawOriginal('closing_qty_actual');
+                $endingBalance = $rawActual !== null ? (float) $c->closing_qty_actual : (float) $c->closing_qty_theoretical;
                 $openingVal = (float) $c->opening_value;
                 $inVal = (float) $c->in_value;
                 $closingVal = (float) $c->closing_value;
                 $inQty = (float) $c->in_qty;
-                $actualReceived = $c->closing_qty_actual !== null ? (float) $c->closing_qty_actual : null;
+                $actualReceived = $rawActual !== null ? (float) $c->closing_qty_actual : null;
             } else {
                 // Fallback: use previous month's closing as opening
                 $pc = $prevClosings->get($item->id);
@@ -576,13 +627,15 @@ class ComprehensiveExportService
             $perItem[$iid]['cost'][$day] = ($perItem[$iid]['cost'][$day] ?? 0) + (float) $entry->total_cost;
         }
 
-        $closings = MonthlyClosing::where('client_id', $clientId)
+        $closings = MonthlyClosing::withoutGlobalScope('client')
+            ->where('client_id', $clientId)
             ->where('warehouse_id', $br->id)->where('month', $month)
             ->get()->keyBy('item_id');
 
         // Fallback opening
         $prevMonth = $dt->copy()->subMonth()->format('Y-m');
-        $prevClosings = MonthlyClosing::where('client_id', $clientId)
+        $prevClosings = MonthlyClosing::withoutGlobalScope('client')
+            ->where('client_id', $clientId)
             ->where('warehouse_id', $br->id)->where('month', $prevMonth)
             ->get()->keyBy('item_id');
 
@@ -659,7 +712,8 @@ class ComprehensiveExportService
                 $closingTheoretical = (float) $c->closing_qty_theoretical;
                 $inVal = (float) $c->in_value;
                 // For branches, AN shows actual physical count if available
-                $endingBalance = $c->closing_qty_actual !== null ? (float) $c->closing_qty_actual : (float) $c->closing_qty_theoretical;
+                $rawActual = $c->getRawOriginal('closing_qty_actual');
+                $endingBalance = $rawActual !== null ? (float) $c->closing_qty_actual : (float) $c->closing_qty_theoretical;
             } else {
                 $pc = $prevClosings->get($item->id);
                 if ($pc) {
@@ -759,7 +813,8 @@ class ComprehensiveExportService
     private function buildClosingSheet($sheet, $spreadsheet, string $clientId, string $month,
         $items, $mainSub, $branches, $whSheetNames, $brSheetNames, Carbon $dt, int $daysInMonth, int $dayCols, $client)
     {
-        $closings = MonthlyClosing::where('client_id', $clientId)
+        $closings = MonthlyClosing::withoutGlobalScope('client')
+            ->where('client_id', $clientId)
             ->where('month', $month)->get()->groupBy('item_id');
 
         $headersRow2 = ['', ''];
@@ -978,7 +1033,7 @@ class ComprehensiveExportService
         $mainSub = $warehouses->whereIn('type', ['main', 'sub'])->values();
         $branches = $warehouses->where('type', 'branch')->values();
         $items = Item::where('client_id', $clientId)->where('is_active', true)->orderBy('sort_order')->orderBy('name')->get();
-        $closings = MonthlyClosing::where('client_id', $clientId)->where('month', $month)->get()->groupBy('item_id');
+        $closings = MonthlyClosing::withoutGlobalScope('client')->where('client_id', $clientId)->where('month', $month)->get()->groupBy('item_id');
 
         $spreadsheet = new Spreadsheet;
         $spreadsheet->getDefaultStyle()->getFont()->setName('DejaVu Sans')->setSize(9);
@@ -1092,7 +1147,8 @@ class ComprehensiveExportService
             // Actual per warehouse
             foreach ($mainSub as $wh) {
                 $c = $itemClosings->where('warehouse_id', $wh->id)->first();
-                $actual = ($c && $c->closing_qty_actual !== null) ? (float) $c->closing_qty_actual : '';
+                $rawActual = $c ? $c->getRawOriginal('closing_qty_actual') : null;
+                $actual = ($c && $rawActual !== null) ? (float) $c->closing_qty_actual : '';
                 $rowData[] = $actual !== '' ? $actual : '';
             }
             // Diff (empty, formula fills it)
