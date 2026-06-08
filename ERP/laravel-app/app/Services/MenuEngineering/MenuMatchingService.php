@@ -9,6 +9,7 @@ use Illuminate\Support\Collection;
 class MenuMatchingService
 {
     const HALF_KEYWORDS = ['50/50', '50%', 'نص', 'نصف', 'half'];
+    const SIZE_KEYWORDS = ['كبير', 'وسط', 'صغير'];
 
     public function findRecipe(
         string $name,
@@ -20,7 +21,7 @@ class MenuMatchingService
     ): ?array {
         $norm = $this->normalize($name);
 
-        if (!empty($sizeVal) && in_array($sizeVal, ['كبير', 'وسط', 'صغير'])) {
+        if (!empty($sizeVal) && in_array($sizeVal, self::SIZE_KEYWORDS)) {
             if (isset($sizeMap[$norm][$sizeVal])) {
                 $rid = $sizeMap[$norm][$sizeVal];
                 $r = $recipes->firstWhere('id', $rid);
@@ -40,6 +41,9 @@ class MenuMatchingService
         $bestContainsLen = 0;
         $isNameContainsRecipe = false;
         foreach ($allNames as $rid => $rNorm) {
+            if (!empty($sizeVal) && $this->getSizeSuffix($rNorm) !== null && $this->getSizeSuffix($rNorm) !== $sizeVal) {
+                continue;
+            }
             if (mb_strpos($norm, $rNorm) !== false && mb_strlen($rNorm) > $bestContainsLen) {
                 $bestContainsId = $rid;
                 $bestContainsLen = mb_strlen($rNorm);
@@ -48,6 +52,9 @@ class MenuMatchingService
         }
         if (!$bestContainsId) {
             foreach ($allNames as $rid => $rNorm) {
+                if (!empty($sizeVal) && $this->getSizeSuffix($rNorm) !== null && $this->getSizeSuffix($rNorm) !== $sizeVal) {
+                    continue;
+                }
                 if (mb_strpos($rNorm, $norm) !== false && mb_strlen($rNorm) > $bestContainsLen) {
                     $bestContainsId = $rid;
                     $bestContainsLen = mb_strlen($rNorm);
@@ -67,6 +74,9 @@ class MenuMatchingService
         $bestId = null;
         $bestScore = 0;
         foreach ($allNames as $rid => $rNorm) {
+            if (!empty($sizeVal) && $this->getSizeSuffix($rNorm) !== null && $this->getSizeSuffix($rNorm) !== $sizeVal) {
+                continue;
+            }
             similar_text($norm, $rNorm, $pct);
             if ($pct >= 80 && $pct > $bestScore) {
                 $bestScore = $pct;
@@ -86,7 +96,19 @@ class MenuMatchingService
         return null;
     }
 
-    public function findSavedMapping(string $clientId, string $sourceName): ?array
+    private function getSizeSuffix(string $norm): ?string
+    {
+        $parts = explode(' ', trim($norm));
+        if (count($parts) >= 2) {
+            $last = end($parts);
+            if (in_array($last, self::SIZE_KEYWORDS)) {
+                return $last;
+            }
+        }
+        return null;
+    }
+
+    public function findSavedMapping(string $clientId, string $sourceName, string $sizeVal = ''): ?array
     {
         $mapping = ItemMapping::where('client_id', $clientId)
             ->where('source_name', $sourceName)
@@ -97,6 +119,14 @@ class MenuMatchingService
         if ($mapping && $mapping->item_id) {
             $recipe = MenuRecipe::find($mapping->item_id);
             if ($recipe) {
+                // If the mapped recipe has a size suffix that differs from requested size, skip
+                if (!empty($sizeVal)) {
+                    $recipeNorm = $this->normalize($recipe->name);
+                    $recipeSize = $this->getSizeSuffix($recipeNorm);
+                    if ($recipeSize !== null && $recipeSize !== $sizeVal) {
+                        return null;
+                    }
+                }
                 $mapping->increment('usage_count');
                 return [
                     'recipe_id' => $recipe->id,
@@ -132,7 +162,7 @@ class MenuMatchingService
             $parts = explode(' ', trim($r->name));
             if (count($parts) >= 2) {
                 $last = end($parts);
-                if (in_array($last, ['كبير', 'وسط', 'صغير'])) {
+                if (in_array($last, self::SIZE_KEYWORDS)) {
                     $base = $this->normalize(mb_substr(trim($r->name), 0, -(mb_strlen($last) + 1)));
                     $sizeMap[$base][$last] = $r->id;
                 }

@@ -1,18 +1,24 @@
 <?php
+
 namespace App\Services;
 
+use App\Models\Client;
 use App\Models\Item;
-use App\Models\Warehouse;
 use App\Models\MonthlyClosing;
-use App\Models\StockLedger;
-use App\Models\DispatchOrder;
 use App\Models\Production\DailyProduction;
 use App\Models\Production\Recipe;
+use App\Models\StockLedger;
+use App\Models\Warehouse;
 use Carbon\Carbon;
-use PhpOffice\PhpSpreadsheet\Spreadsheet;
-use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Shared\Date;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class ComprehensiveExportService
 {
@@ -20,17 +26,23 @@ class ComprehensiveExportService
     {
         ini_set('memory_limit', '1024M');
         set_time_limit(600);
-        $dt = Carbon::parse($month . '-01');
+        $dt = Carbon::parse($month.'-01');
         $daysInMonth = $dt->daysInMonth;
         $dayCols = 31; // Fixed 31 day columns to match reference file & keep cross-sheet refs stable
         $start = $dt->toDateString();
         $end = $dt->copy()->endOfMonth()->toDateString();
+
+        $client = Client::find($clientId);
+        if (! $client) {
+            abort(404, 'Client not found');
+        }
+
         $warehouses = Warehouse::where('client_id', $clientId)->where('is_active', true)->get();
         $mainSub = $warehouses->whereIn('type', ['main', 'sub'])->values();
         $branches = $warehouses->where('type', 'branch')->values();
         $items = Item::where('client_id', $clientId)->where('is_active', true)->orderBy('sort_order')->orderBy('name')->get();
 
-        $spreadsheet = new Spreadsheet();
+        $spreadsheet = new Spreadsheet;
         $spreadsheet->getDefaultStyle()->getFont()->setName('DejaVu Sans')->setSize(9);
 
         $whSheetNames = [];
@@ -38,7 +50,7 @@ class ComprehensiveExportService
         // Sheet 1: Daily Production
         $productionSheetName = 'الانتاج اليومي';
         $prodSheet = $spreadsheet->getActiveSheet()->setRightToLeft(true)->setTitle($productionSheetName);
-        $this->buildProductionSheet($prodSheet, $clientId, $month, $dt, $daysInMonth, $dayCols);
+        $this->buildProductionSheet($prodSheet, $clientId, $month, $dt, $daysInMonth, $dayCols, $client);
 
         // Warehouse Receipt Sheets
         $whSheetIdx = 1;
@@ -50,7 +62,7 @@ class ComprehensiveExportService
             } else {
                 $sheet = $spreadsheet->getSheet($whSheetIdx - 1)->setRightToLeft(true)->setTitle($name);
             }
-            $this->buildWarehouseSheet($sheet, $clientId, $wh, $month, $dt, $daysInMonth, $dayCols, $items);
+            $this->buildWarehouseSheet($sheet, $clientId, $wh, $month, $dt, $daysInMonth, $dayCols, $items, $client);
         }
 
         // Branch Consumption Sheets
@@ -58,14 +70,14 @@ class ComprehensiveExportService
             $name = mb_substr("منصرف {$br->name}", 0, 31);
             $brSheetNames[$br->id] = $name;
             $sheet = $spreadsheet->createSheet()->setRightToLeft(true)->setTitle($name);
-            $this->buildBranchSheet($sheet, $clientId, $br, $month, $dt, $daysInMonth, $dayCols, $items);
+            $this->buildBranchSheet($sheet, $clientId, $br, $month, $dt, $daysInMonth, $dayCols, $items, $client);
         }
 
         // Closing Raw Materials Sheet
         $closingSheetName = 'تقفيل خامات';
         $sheet = $spreadsheet->createSheet()->setRightToLeft(true)->setTitle($closingSheetName);
         $this->buildClosingSheet($sheet, $spreadsheet, $clientId, $month, $items, $mainSub, $branches,
-            $whSheetNames, $brSheetNames, $dt, $daysInMonth, $dayCols);
+            $whSheetNames, $brSheetNames, $dt, $daysInMonth, $dayCols, $client);
 
         if ($spreadsheet->getSheetCount() > 1) {
             $defaultSheet = $spreadsheet->getSheetByName('Worksheet');
@@ -76,6 +88,7 @@ class ComprehensiveExportService
 
         $writer = new Xlsx($spreadsheet);
         $writer->setPreCalculateFormulas(false);
+
         return response()->streamDownload(function () use ($writer) {
             $writer->save('php://output');
         }, "الدورة_الكاملة_{$month}.xlsx", [
@@ -84,7 +97,7 @@ class ComprehensiveExportService
     }
 
     // ─── Production Sheet ─────────────────────────────────
-    private function buildProductionSheet($sheet, string $clientId, string $month, Carbon $dt, int $daysInMonth, int $dayCols)
+    private function buildProductionSheet($sheet, string $clientId, string $month, Carbon $dt, int $daysInMonth, int $dayCols, $client)
     {
         $recipes = Recipe::where('client_id', $clientId)
             ->with('outputItem:id,name,unit')
@@ -97,13 +110,45 @@ class ComprehensiveExportService
         // Manual items: entries whose recipe_id is actually an Item ID (not a Recipe)
         $recipeIds = $recipes->pluck('id')->toArray();
         $manualItemIds = collect($prodEntries->keys())
-            ->reject(fn($rid) => in_array($rid, $recipeIds))
+            ->reject(fn ($rid) => in_array($rid, $recipeIds))
             ->values();
         $manualItems = $manualItemIds->isNotEmpty()
             ? Item::whereIn('id', $manualItemIds)->where('client_id', $clientId)->get()->keyBy('id')
             : collect();
 
+        // Items already covered by recipes that have production entries
+        $recipeItemIdsWithProd = $recipes->filter(fn ($r) => $prodEntries->has($r->id))
+            ->pluck('item_id')->filter()->unique()->toArray();
+
+        // Stock-produced items: items produced via StockLedger but not in DailyProduction
+        $stockProdIds = StockLedger::where('client_id', $clientId)
+            ->where('voucher_type', 'production')
+            ->where('movement_type', 'in')
+            ->whereBetween('date', [$dt->toDateString(), $dt->copy()->endOfMonth()->toDateString()])
+            ->whereNotIn('item_id', $recipeItemIdsWithProd)
+            ->whereNotIn('item_id', $manualItemIds->toArray())
+            ->distinct()->pluck('item_id');
+        $stockProdItems = $stockProdIds->isNotEmpty()
+            ? Item::whereIn('id', $stockProdIds)->where('client_id', $clientId)->get()->keyBy('id')
+            : collect();
+        $stockProdLedger = StockLedger::where('client_id', $clientId)
+            ->where('voucher_type', 'production')
+            ->where('movement_type', 'in')
+            ->whereBetween('date', [$dt->toDateString(), $dt->copy()->endOfMonth()->toDateString()])
+            ->whereIn('item_id', $stockProdIds)
+            ->get()
+            ->groupBy('item_id');
+
+        // Branding header
+        $hdrRows = 2;
+        $lastColInx = 2 + $dayCols + 2;
+        $this->writeHeaderWithLogo($sheet, $client, $lastColInx, 'الانتاج اليومي', $month);
+
         // Columns: A=الصنف, B=الوحدة, C onwards = days (31 cols), then الإجمالي, سعر البيع, القيمة
+        $h1Row = 1 + $hdrRows;
+        $h2Row = 2 + $hdrRows;
+        $dataStart = 3 + $hdrRows;
+
         $headers1 = ['الصنف', 'الوحدة'];
         $headers2 = ['', ''];
         for ($d = 1; $d <= $dayCols; $d++) {
@@ -117,22 +162,27 @@ class ComprehensiveExportService
         $headers1[] = 'القيمة';
         $headers2[] = '';
 
-        $this->writeRow($sheet, 1, $headers1, true);
-        $this->writeRow($sheet, 2, $headers2, true);
-        $dataStart = 3;
+        $this->writeRow($sheet, $h1Row, $headers1, true);
+        $this->writeRow($sheet, $h2Row, $headers2, true);
 
         $totalCol = 2 + $dayCols;
         $priceCol = $totalCol + 1;
         $valueCol = $totalCol + 2;
-        $lastColInx = 2 + $dayCols + 2;
 
         $rowIdx = $dataStart;
+
+        // Recipes section
+        $recipesStart = $rowIdx;
         foreach ($recipes as $recipe) {
             $entries = $prodEntries->get($recipe->id, collect());
             $dailyQty = [];
             $totalQty = 0;
             for ($d = 1; $d <= $dayCols; $d++) {
-                if ($d > $daysInMonth) { $dailyQty[$d] = 0; continue; }
+                if ($d > $daysInMonth) {
+                    $dailyQty[$d] = 0;
+
+                    continue;
+                }
                 $dateStr = $dt->copy()->day($d)->toDateString();
                 $qty = (float) $entries->where('date', $dateStr)->sum('qty');
                 $dailyQty[$d] = $qty;
@@ -151,11 +201,11 @@ class ComprehensiveExportService
 
             $firstDayCol = Coordinate::stringFromColumnIndex(3);
             $lastDayCol = Coordinate::stringFromColumnIndex(2 + $dayCols);
-            $totalRef = Coordinate::stringFromColumnIndex(1 + $totalCol) . $rowIdx;
+            $totalRef = Coordinate::stringFromColumnIndex(1 + $totalCol).$rowIdx;
             $sheet->setCellValue($totalRef, "=SUM({$firstDayCol}{$rowIdx}:{$lastDayCol}{$rowIdx})");
 
-            $priceRef = Coordinate::stringFromColumnIndex(1 + $priceCol) . $rowIdx;
-            $valueRef = Coordinate::stringFromColumnIndex(1 + $valueCol) . $rowIdx;
+            $priceRef = Coordinate::stringFromColumnIndex(1 + $priceCol).$rowIdx;
+            $valueRef = Coordinate::stringFromColumnIndex(1 + $valueCol).$rowIdx;
             $sheet->setCellValue($valueRef, "={$totalRef}*{$priceRef}");
 
             $rowIdx++;
@@ -167,7 +217,11 @@ class ComprehensiveExportService
             $dailyQty = [];
             $totalQty = 0;
             for ($d = 1; $d <= $dayCols; $d++) {
-                if ($d > $daysInMonth) { $dailyQty[$d] = 0; continue; }
+                if ($d > $daysInMonth) {
+                    $dailyQty[$d] = 0;
+
+                    continue;
+                }
                 $dateStr = $dt->copy()->day($d)->toDateString();
                 $qty = (float) $entries->where('date', $dateStr)->sum('qty');
                 $dailyQty[$d] = $qty;
@@ -185,7 +239,42 @@ class ComprehensiveExportService
 
             $firstDayCol = Coordinate::stringFromColumnIndex(3);
             $lastDayCol = Coordinate::stringFromColumnIndex(2 + $dayCols);
-            $totalRef = Coordinate::stringFromColumnIndex(1 + $totalCol) . $rowIdx;
+            $totalRef = Coordinate::stringFromColumnIndex(1 + $totalCol).$rowIdx;
+            $sheet->setCellValue($totalRef, "=SUM({$firstDayCol}{$rowIdx}:{$lastDayCol}{$rowIdx})");
+
+            $rowIdx++;
+        }
+
+        // Stock-produced items (produced via StockLedger but not in DailyProduction)
+        $stockStart = $rowIdx;
+        foreach ($stockProdItems as $item) {
+            $entries = $stockProdLedger->get($item->id, collect());
+            $dailyQty = [];
+            $totalQty = 0;
+            for ($d = 1; $d <= $dayCols; $d++) {
+                if ($d > $daysInMonth) {
+                    $dailyQty[$d] = 0;
+
+                    continue;
+                }
+                $dateStr = $dt->copy()->day($d)->toDateString();
+                $qty = (float) $entries->where('date', $dateStr)->sum('qty');
+                $dailyQty[$d] = $qty;
+                $totalQty += $qty;
+            }
+            $rowData = [$item->name, $item->unit ?? ''];
+            for ($d = 1; $d <= $dayCols; $d++) {
+                $rowData[] = $dailyQty[$d] ?: 0;
+            }
+            $rowData[] = $totalQty;
+            $rowData[] = 0;
+            $rowData[] = 0;
+
+            $this->writeDataRow($sheet, $rowIdx, $rowData);
+
+            $firstDayCol = Coordinate::stringFromColumnIndex(3);
+            $lastDayCol = Coordinate::stringFromColumnIndex(2 + $dayCols);
+            $totalRef = Coordinate::stringFromColumnIndex(1 + $totalCol).$rowIdx;
             $sheet->setCellValue($totalRef, "=SUM({$firstDayCol}{$rowIdx}:{$lastDayCol}{$rowIdx})");
 
             $rowIdx++;
@@ -199,15 +288,15 @@ class ComprehensiveExportService
             $col = Coordinate::stringFromColumnIndex(2 + $d);
             $sheet->setCellValue("{$col}{$totalRow}", "=SUM({$col}{$dataStart}:{$col}{$prevRowIdx})");
         }
-        $totalColRef = Coordinate::stringFromColumnIndex(1 + $totalCol) . $totalRow;
+        $totalColRef = Coordinate::stringFromColumnIndex(1 + $totalCol).$totalRow;
         $fdc = Coordinate::stringFromColumnIndex(3);
         $ldc = Coordinate::stringFromColumnIndex(2 + $dayCols);
         $sheet->setCellValue($totalColRef, "=SUM({$fdc}{$totalRow}:{$ldc}{$totalRow})");
-        $valueTotalRef = Coordinate::stringFromColumnIndex(1 + $valueCol) . $totalRow;
+        $valueTotalRef = Coordinate::stringFromColumnIndex(1 + $valueCol).$totalRow;
         $evc = Coordinate::stringFromColumnIndex(1 + $valueCol);
         $sheet->setCellValue($valueTotalRef, "=SUM({$evc}{$dataStart}:{$evc}{$prevRowIdx})");
 
-        $sheet->freezePane('C3');
+        $sheet->freezePane('C'.$dataStart);
         $sheet->getColumnDimension('A')->setWidth(24);
         $sheet->getColumnDimension('B')->setWidth(8);
         for ($c = 3; $c <= $lastColInx; $c++) {
@@ -217,10 +306,16 @@ class ComprehensiveExportService
     }
 
     // ─── Warehouse Receipt Sheet ──────────────────────────
-    private function buildWarehouseSheet($sheet, string $clientId, $wh, string $month, Carbon $dt, int $daysInMonth, int $dayCols, $items)
+    private function buildWarehouseSheet($sheet, string $clientId, $wh, string $month, Carbon $dt, int $daysInMonth, int $dayCols, $items, $client)
     {
         $closings = MonthlyClosing::where('client_id', $clientId)
             ->where('warehouse_id', $wh->id)->where('month', $month)
+            ->get()->keyBy('item_id');
+
+        // Fallback opening: fetch previous month's closings for items without current month data
+        $prevMonth = $dt->copy()->subMonth()->format('Y-m');
+        $prevClosings = MonthlyClosing::where('client_id', $clientId)
+            ->where('warehouse_id', $wh->id)->where('month', $prevMonth)
             ->get()->keyBy('item_id');
 
         $dailyLedger = StockLedger::where('stock_ledger.client_id', $clientId)
@@ -268,13 +363,21 @@ class ComprehensiveExportService
         $atCol = $akCol + 9;
         $totalCols = $atCol;
 
-        // Row 1: title
-        $this->writeRow($sheet, 1,
+        $hdrRows = 2;
+        $this->writeHeaderWithLogo($sheet, $client, $totalCols, "وارد {$wh->name}", $month);
+
+        // Row 1: title (now at row 3)
+        $r1 = 1 + $hdrRows;
+        $r2 = 2 + $hdrRows;
+        $r3 = 3 + $hdrRows;
+        $dataStart = 4 + $hdrRows;
+
+        $this->writeRow($sheet, $r1,
             array_merge([$wh->name, 'النسخه الاصليه'], array_fill(2, $totalCols - 2, '')),
             true, false);
 
         // Row 2: day-of-week labels
-        $row2 = ['برنامج المخزن عن شهر' . $monthNum, '', '', 'رصيد اول الشهر', ''];
+        $row2 = ['برنامج المخزن عن شهر'.$monthNum, '', '', 'رصيد اول الشهر', ''];
         for ($d = 1; $d <= $dayCols; $d++) {
             $row2[] = $dayNamesArr[$d];
         }
@@ -289,7 +392,7 @@ class ComprehensiveExportService
         array_splice($row2, $arCol - 1, 1, 'قيمة المستلم الفعلي');
         array_splice($row2, $asCol - 1, 1, 'average');
         array_splice($row2, $atCol - 1, 1, 'cost');
-        $this->writeRow($sheet, 2, $row2, true, false);
+        $this->writeRow($sheet, $r2, $row2, true, false);
 
         // Row 3: column sub-headers + serial dates
         $row3 = ['اسم الصنف', 'الوحده', 'اجمالي المستلم', '', ''];
@@ -307,27 +410,48 @@ class ComprehensiveExportService
         array_splice($row3, $arCol - 1, 1, 'قيمة المستلم الفعلي');
         array_splice($row3, $asCol - 1, 1, 'average');
         array_splice($row3, $atCol - 1, 1, 'cost');
-        $this->writeRow($sheet, 3, $row3, true, false);
+        $this->writeRow($sheet, $r3, $row3, true, false);
 
-        $dataStart = 4;
-        $sheet->setCellValue('A4', 'الصنف');
+        $sheet->setCellValue('A'.$dataStart, 'الصنف');
 
         $rowIdx = $dataStart;
         foreach ($items as $item) {
             $c = $closings->get($item->id);
-            $opening = $c ? (float) $c->opening_qty : 0;
-            $avgCost = $c ? (float) $c->avg_cost : 0;
-            $closingTheoretical = $c ? (float) $c->closing_qty_theoretical : 0;
-            $openingVal = $c ? (float) $c->opening_value : 0;
-            $inVal = $c ? (float) $c->in_value : 0;
-            $closingVal = $c ? (float) $c->closing_value : 0;
-            $inQty = $c ? (float) $c->in_qty : 0;
+            if ($c) {
+                $opening = (float) $c->opening_qty;
+                $avgCost = (float) $c->avg_cost;
+                $endingBalance = $c->closing_qty_actual !== null ? (float) $c->closing_qty_actual : (float) $c->closing_qty_theoretical;
+                $openingVal = (float) $c->opening_value;
+                $inVal = (float) $c->in_value;
+                $closingVal = (float) $c->closing_value;
+                $inQty = (float) $c->in_qty;
+                $actualReceived = $c->closing_qty_actual !== null ? (float) $c->closing_qty_actual : null;
+            } else {
+                // Fallback: use previous month's closing as opening
+                $pc = $prevClosings->get($item->id);
+                if ($pc) {
+                    $opening = (float) $pc->closing_qty_theoretical;
+                    $avgCost = (float) $pc->avg_cost;
+                    $openingVal = (float) $pc->closing_value;
+                } else {
+                    $opening = 0;
+                    $avgCost = 0;
+                    $openingVal = 0;
+                }
+                $endingBalance = 0;
+                $inVal = 0;
+                $closingVal = 0;
+                $inQty = 0;
+                $actualReceived = null;
+            }
             $itemDays = isset($perItem[$item->id]) ? $perItem[$item->id]['qty'] : [];
             $itemCosts = isset($perItem[$item->id]) ? $perItem[$item->id]['cost'] : [];
             $totalDaily = array_sum($itemDays);
             $totalCost = array_sum($itemCosts);
 
-            if ($totalCost == 0 && $inVal > 0) $totalCost = $inVal;
+            if ($totalCost == 0 && $inVal > 0) {
+                $totalCost = $inVal;
+            }
 
             // A=item name, B=unit, C=formula(=D+AK), D=opening, E=empty
             $rowData = [$item->name, $item->unit, ''];
@@ -345,14 +469,14 @@ class ComprehensiveExportService
             $rowData[] = $avgCost > 0 ? round($avgCost, 3) : 0;
             // AM = purchases value
             $rowData[] = round($totalDaily * ($avgCost > 0 ? $avgCost : 0), 2);
-            // AN = closing
-            $rowData[] = $closingTheoretical;
-            // AO = actual received
-            $rowData[] = '';
+            // AN = ending balance (actual preferred)
+            $rowData[] = $endingBalance;
+            // AO = actual received (closing_qty_actual)
+            $rowData[] = $actualReceived !== null ? $actualReceived : '';
             // AP = opening value
             $rowData[] = $opening > 0 ? round($opening * ($avgCost > 0 ? $avgCost : 0), 2) : 0;
-            // AQ = closing value
-            $rowData[] = $closingTheoretical > 0 ? round($closingTheoretical * ($avgCost > 0 ? $avgCost : 0), 2) : 0;
+            // AQ = ending balance value
+            $rowData[] = $endingBalance > 0 ? round($endingBalance * ($avgCost > 0 ? $avgCost : 0), 2) : 0;
             // AR = actual received value
             $rowData[] = '';
             // AS = average (formula =IF(AT=0,0,AT/AK))
@@ -363,24 +487,24 @@ class ComprehensiveExportService
             $this->writeDataRow($sheet, $rowIdx, $rowData);
 
             // Formulas
-            $cRef = Coordinate::stringFromColumnIndex(3) . $rowIdx;
-            $dRef = Coordinate::stringFromColumnIndex(4) . $rowIdx;
-            $akRef = Coordinate::stringFromColumnIndex($akCol) . $rowIdx;
-            $alRef = Coordinate::stringFromColumnIndex($alCol) . $rowIdx;
-            $aoRef = Coordinate::stringFromColumnIndex($aoCol) . $rowIdx;
-            $arRef = Coordinate::stringFromColumnIndex($arCol) . $rowIdx;
-            $asRef = Coordinate::stringFromColumnIndex($asCol) . $rowIdx;
-            $atRef = Coordinate::stringFromColumnIndex($atCol) . $rowIdx;
-            $amRef = Coordinate::stringFromColumnIndex($amCol) . $rowIdx;
-            $anRef = Coordinate::stringFromColumnIndex($anCol) . $rowIdx;
-            $apRef = Coordinate::stringFromColumnIndex($apCol) . $rowIdx;
-            $aqRef = Coordinate::stringFromColumnIndex($aqCol) . $rowIdx;
+            $cRef = Coordinate::stringFromColumnIndex(3).$rowIdx;
+            $dRef = Coordinate::stringFromColumnIndex(4).$rowIdx;
+            $akRef = Coordinate::stringFromColumnIndex($akCol).$rowIdx;
+            $alRef = Coordinate::stringFromColumnIndex($alCol).$rowIdx;
+            $aoRef = Coordinate::stringFromColumnIndex($aoCol).$rowIdx;
+            $arRef = Coordinate::stringFromColumnIndex($arCol).$rowIdx;
+            $asRef = Coordinate::stringFromColumnIndex($asCol).$rowIdx;
+            $atRef = Coordinate::stringFromColumnIndex($atCol).$rowIdx;
+            $amRef = Coordinate::stringFromColumnIndex($amCol).$rowIdx;
+            $anRef = Coordinate::stringFromColumnIndex($anCol).$rowIdx;
+            $apRef = Coordinate::stringFromColumnIndex($apCol).$rowIdx;
+            $aqRef = Coordinate::stringFromColumnIndex($aqCol).$rowIdx;
 
             // C = D + AK
             $sheet->setCellValue($cRef, "={$dRef}+{$akRef}");
             // AK = SUM(F:AJ) — always 31 day columns
-            $firstDayRef = Coordinate::stringFromColumnIndex($dayStart) . $rowIdx;
-            $lastDayRef = Coordinate::stringFromColumnIndex($dayStart + $dayCols - 1) . $rowIdx;
+            $firstDayRef = Coordinate::stringFromColumnIndex($dayStart).$rowIdx;
+            $lastDayRef = Coordinate::stringFromColumnIndex($dayStart + $dayCols - 1).$rowIdx;
             $sheet->setCellValue($akRef, "=SUM({$firstDayRef}:{$lastDayRef})");
             // AM = AK * AL
             $sheet->setCellValue($amRef, "={$akRef}*{$alRef}");
@@ -419,7 +543,7 @@ class ComprehensiveExportService
             $sheet->setCellValue("{$colL}{$sumRow}", "=SUM({$colL}{$dataStart}:{$colL}{$prevRowIdx})");
         }
 
-        $sheet->freezePane('C4');
+        $sheet->freezePane('C'.$dataStart);
         $sheet->getColumnDimension('A')->setWidth(28);
         $sheet->getColumnDimension('B')->setWidth(8);
         $sheet->getColumnDimension('C')->setWidth(10);
@@ -430,7 +554,7 @@ class ComprehensiveExportService
     }
 
     // ─── Branch Consumption Sheet ─────────────────────────
-    private function buildBranchSheet($sheet, string $clientId, $br, string $month, Carbon $dt, int $daysInMonth, int $dayCols, $items)
+    private function buildBranchSheet($sheet, string $clientId, $br, string $month, Carbon $dt, int $daysInMonth, int $dayCols, $items, $client)
     {
         $dailyLedger = StockLedger::withoutGlobalScope('client')
             ->where('stock_ledger.client_id', $clientId)
@@ -439,7 +563,7 @@ class ComprehensiveExportService
             ->where('stock_ledger.movement_type', 'in')
             ->join('dispatch_orders', function ($j) {
                 $j->on('stock_ledger.ref_id', '=', 'dispatch_orders.id')
-                  ->where('stock_ledger.ref_type', '=', 'dispatch_order');
+                    ->where('stock_ledger.ref_type', '=', 'dispatch_order');
             })
             ->whereIn('dispatch_orders.type', ['dispatch', 'purchase'])
             ->get(['stock_ledger.item_id', 'stock_ledger.date', 'stock_ledger.qty', 'stock_ledger.unit_cost', 'stock_ledger.total_cost']);
@@ -454,6 +578,12 @@ class ComprehensiveExportService
 
         $closings = MonthlyClosing::where('client_id', $clientId)
             ->where('warehouse_id', $br->id)->where('month', $month)
+            ->get()->keyBy('item_id');
+
+        // Fallback opening
+        $prevMonth = $dt->copy()->subMonth()->format('Y-m');
+        $prevClosings = MonthlyClosing::where('client_id', $clientId)
+            ->where('warehouse_id', $br->id)->where('month', $prevMonth)
             ->get()->keyBy('item_id');
 
         $monthNum = (int) Carbon::parse($month)->format('n');
@@ -481,23 +611,31 @@ class ComprehensiveExportService
         $atCol = $akCol + 9;
         $totalCols = $atCol;
 
+        $hdrRows = 2;
+        $this->writeHeaderWithLogo($sheet, $client, $totalCols, "منصرف {$br->name}", $month);
+
+        $r1 = 1 + $hdrRows;
+        $r2 = 2 + $hdrRows;
+        $r3 = 3 + $hdrRows;
+        $dataStart = 4 + $hdrRows;
+
         // Row 1: title
-        $this->writeRow($sheet, 1,
+        $this->writeRow($sheet, $r1,
             array_merge([$br->name, 'النسخه الاصليه'], array_fill(2, $totalCols - 2, '')),
             true, false);
 
         // Row 2: labels
-        $row2 = ['برنامج المخزن عن شهر' . $monthNum, '', '', 'رصيد اول الشهر', ''];
+        $row2 = ['برنامج المخزن عن شهر'.$monthNum, '', '', 'رصيد اول الشهر', ''];
         for ($d = 1; $d <= $dayCols; $d++) {
             $row2[] = $dayNamesArr[$d];
         }
         $row2 = array_merge($row2, array_fill(0, 10, ''));
         $labels = ['اجمالي المستلم', 'سعر', 'قيمة المستلم', 'اخر المده', 'المستلم الفعلي',
-                    'قيمة اول المدة', 'قيمة اخر المدة', 'قيمة المستلم الفعلي', 'average', 'cost'];
+            'قيمة اول المدة', 'قيمة اخر المدة', 'قيمة المستلم الفعلي', 'average', 'cost'];
         for ($i = 0; $i < 10; $i++) {
             array_splice($row2, $akCol - 1 + $i, 1, $labels[$i]);
         }
-        $this->writeRow($sheet, 2, $row2, true, false);
+        $this->writeRow($sheet, $r2, $row2, true, false);
 
         // Row 3: sub-headers
         $row3 = ['اسم الصنف', 'الوحده', 'اجمالي المستلم', '', ''];
@@ -508,23 +646,40 @@ class ComprehensiveExportService
         for ($i = 0; $i < 10; $i++) {
             array_splice($row3, $akCol - 1 + $i, 1, $labels[$i]);
         }
-        $this->writeRow($sheet, 3, $row3, true, false);
+        $this->writeRow($sheet, $r3, $row3, true, false);
 
-        $dataStart = 4;
-        $sheet->setCellValue('A4', 'الصنف');
+        $sheet->setCellValue('A'.$dataStart, 'الصنف');
 
         $rowIdx = $dataStart;
         foreach ($items as $item) {
             $c = $closings->get($item->id);
-            $opening = $c ? (float) $c->opening_qty : 0;
-            $avgCost = $c ? (float) $c->avg_cost : 0;
-            $closingTheoretical = $c ? (float) $c->closing_qty_theoretical : 0;
+            if ($c) {
+                $opening = (float) $c->opening_qty;
+                $avgCost = (float) $c->avg_cost;
+                $closingTheoretical = (float) $c->closing_qty_theoretical;
+                $inVal = (float) $c->in_value;
+                // For branches, AN shows actual physical count if available
+                $endingBalance = $c->closing_qty_actual !== null ? (float) $c->closing_qty_actual : (float) $c->closing_qty_theoretical;
+            } else {
+                $pc = $prevClosings->get($item->id);
+                if ($pc) {
+                    $opening = (float) $pc->closing_qty_theoretical;
+                    $avgCost = (float) $pc->avg_cost;
+                } else {
+                    $opening = 0;
+                    $avgCost = 0;
+                }
+                $closingTheoretical = 0;
+                $inVal = 0;
+                $endingBalance = 0;
+            }
             $itemDays = isset($perItem[$item->id]) ? $perItem[$item->id]['qty'] : [];
             $itemCosts = isset($perItem[$item->id]) ? $perItem[$item->id]['cost'] : [];
             $totalDaily = array_sum($itemDays);
             $totalCost = array_sum($itemCosts);
-            $inVal = $c ? (float) $c->in_value : 0;
-            if ($totalCost == 0 && $inVal > 0) $totalCost = $inVal;
+            if ($totalCost == 0 && $inVal > 0) {
+                $totalCost = $inVal;
+            }
 
             $rowData = [$item->name, $item->unit, ''];
             $rowData[] = $opening;
@@ -535,7 +690,7 @@ class ComprehensiveExportService
             $rowData[] = round($totalDaily, 3);
             $rowData[] = $avgCost > 0 ? round($avgCost, 3) : 0;
             $rowData[] = round($totalDaily * ($avgCost > 0 ? $avgCost : 0), 2);
-            $rowData[] = $closingTheoretical;
+            $rowData[] = $endingBalance;
             $rowData[] = '';
             $rowData[] = $opening > 0 ? round($opening * ($avgCost > 0 ? $avgCost : 0), 2) : 0;
             $rowData[] = $closingTheoretical > 0 ? round($closingTheoretical * ($avgCost > 0 ? $avgCost : 0), 2) : 0;
@@ -545,22 +700,22 @@ class ComprehensiveExportService
 
             $this->writeDataRow($sheet, $rowIdx, $rowData);
 
-            $cRef = Coordinate::stringFromColumnIndex(3) . $rowIdx;
-            $dRef = Coordinate::stringFromColumnIndex(4) . $rowIdx;
-            $akRef = Coordinate::stringFromColumnIndex($akCol) . $rowIdx;
-            $alRef = Coordinate::stringFromColumnIndex($alCol) . $rowIdx;
-            $aoRef = Coordinate::stringFromColumnIndex($aoCol) . $rowIdx;
-            $arRef = Coordinate::stringFromColumnIndex($arCol) . $rowIdx;
-            $asRef = Coordinate::stringFromColumnIndex($asCol) . $rowIdx;
-            $atRef = Coordinate::stringFromColumnIndex($atCol) . $rowIdx;
-            $amRef = Coordinate::stringFromColumnIndex($amCol) . $rowIdx;
-            $anRef = Coordinate::stringFromColumnIndex($anCol) . $rowIdx;
-            $apRef = Coordinate::stringFromColumnIndex($apCol) . $rowIdx;
-            $aqRef = Coordinate::stringFromColumnIndex($aqCol) . $rowIdx;
+            $cRef = Coordinate::stringFromColumnIndex(3).$rowIdx;
+            $dRef = Coordinate::stringFromColumnIndex(4).$rowIdx;
+            $akRef = Coordinate::stringFromColumnIndex($akCol).$rowIdx;
+            $alRef = Coordinate::stringFromColumnIndex($alCol).$rowIdx;
+            $aoRef = Coordinate::stringFromColumnIndex($aoCol).$rowIdx;
+            $arRef = Coordinate::stringFromColumnIndex($arCol).$rowIdx;
+            $asRef = Coordinate::stringFromColumnIndex($asCol).$rowIdx;
+            $atRef = Coordinate::stringFromColumnIndex($atCol).$rowIdx;
+            $amRef = Coordinate::stringFromColumnIndex($amCol).$rowIdx;
+            $anRef = Coordinate::stringFromColumnIndex($anCol).$rowIdx;
+            $apRef = Coordinate::stringFromColumnIndex($apCol).$rowIdx;
+            $aqRef = Coordinate::stringFromColumnIndex($aqCol).$rowIdx;
 
             $sheet->setCellValue($cRef, "={$dRef}+{$akRef}");
-            $firstDayRef = Coordinate::stringFromColumnIndex($dayStart) . $rowIdx;
-            $lastDayRef = Coordinate::stringFromColumnIndex($dayStart + $dayCols - 1) . $rowIdx;
+            $firstDayRef = Coordinate::stringFromColumnIndex($dayStart).$rowIdx;
+            $lastDayRef = Coordinate::stringFromColumnIndex($dayStart + $dayCols - 1).$rowIdx;
             $sheet->setCellValue($akRef, "=SUM({$firstDayRef}:{$lastDayRef})");
             $sheet->setCellValue($amRef, "={$akRef}*{$alRef}");
             $sheet->setCellValue($aoRef, "={$dRef}+{$akRef}-{$anRef}");
@@ -590,7 +745,7 @@ class ComprehensiveExportService
             $sheet->setCellValue("{$colL}{$sumRow}", "=SUM({$colL}{$dataStart}:{$colL}{$prevRowIdx})");
         }
 
-        $sheet->freezePane('C4');
+        $sheet->freezePane('C'.$dataStart);
         $sheet->getColumnDimension('A')->setWidth(28);
         $sheet->getColumnDimension('B')->setWidth(8);
         $sheet->getColumnDimension('C')->setWidth(10);
@@ -602,13 +757,18 @@ class ComprehensiveExportService
 
     // ─── Closing Raw Materials Sheet ─────────────────────
     private function buildClosingSheet($sheet, $spreadsheet, string $clientId, string $month,
-        $items, $mainSub, $branches, $whSheetNames, $brSheetNames, Carbon $dt, int $daysInMonth, int $dayCols)
+        $items, $mainSub, $branches, $whSheetNames, $brSheetNames, Carbon $dt, int $daysInMonth, int $dayCols, $client)
     {
         $closings = MonthlyClosing::where('client_id', $clientId)
             ->where('month', $month)->get()->groupBy('item_id');
 
         $headersRow2 = ['', ''];
         $headersRow3 = ['الصنف', ''];
+
+        // Helper to sanitize sheet names for Excel formula references
+        $esc = function ($name) {
+            return str_replace("'", "''", $name);
+        };
 
         // Opening: warehouses only (main/sub, NOT branches)
         $openingCols = [];
@@ -644,7 +804,9 @@ class ComprehensiveExportService
         }
 
         // Fixed columns
-        $theoreticalIdx = count($headersRow3); $headersRow3[] = 'اخر المده'; $headersRow2[] = '';
+        $theoreticalIdx = count($headersRow3);
+        $headersRow3[] = 'اخر المده';
+        $headersRow2[] = '';
         // Actual per warehouse
         $actualCols = [];
         foreach ($mainSub as $wh) {
@@ -653,17 +815,30 @@ class ComprehensiveExportService
             $headersRow3[] = "رصيد فعلي {$wh->name}";
             $headersRow2[] = 'رصيد الفعلى';
         }
-        $diffIdx = count($headersRow3);        $headersRow3[] = 'فرق'; $headersRow2[] = 'فرق';
-        $priceIdx = count($headersRow3);       $headersRow3[] = 'سعر'; $headersRow2[] = '';
-        $valueIdx = count($headersRow3);       $headersRow3[] = 'قيمة'; $headersRow2[] = '';
+        $diffIdx = count($headersRow3);
+        $headersRow3[] = 'فرق';
+        $headersRow2[] = 'فرق';
+        $priceIdx = count($headersRow3);
+        $headersRow3[] = 'سعر';
+        $headersRow2[] = '';
+        $valueIdx = count($headersRow3);
+        $headersRow3[] = 'قيمة';
+        $headersRow2[] = '';
         $colCount = count($headersRow3);
 
+        $hdrRows = 2;
+        $this->writeHeaderWithLogo($sheet, $client, $colCount, 'تقفيل الخامات', $month);
+
+        $r1 = 1 + $hdrRows;
+        $r2 = 2 + $hdrRows;
+        $r3 = 3 + $hdrRows;
+        $dataStart = 4 + $hdrRows;
+
         $row2 = array_pad($headersRow2, $colCount, '');
-        $this->writeRow($sheet, 1, ['تقفيل الخامات', '', "شهر {$month}"], true);
-        $this->writeRow($sheet, 2, $row2, true);
-        $this->writeRow($sheet, 3, $headersRow3, true);
-        $dataStart = 4;
-        $sheet->setCellValue('A4', 'الصنف');
+        $this->writeRow($sheet, $r1, ['تقفيل الخامات', '', "شهر {$month}"], true);
+        $this->writeRow($sheet, $r2, $row2, true);
+        $this->writeRow($sheet, $r3, $headersRow3, true);
+        $sheet->setCellValue('A'.$dataStart, 'الصنف');
 
         // Track the main warehouse ID for cross-reference
         $mainWh = $mainSub->firstWhere('type', 'main');
@@ -680,7 +855,7 @@ class ComprehensiveExportService
 
             // Opening per warehouse (cross-sheet ='وارد {name}'!D{row})
             foreach ($mainSub as $wh) {
-                $sn = $whSheetNames[$wh->id] ?? ('وارد ' . $wh->name);
+                $sn = $esc($whSheetNames[$wh->id] ?? ('وارد '.$wh->name));
                 $c = $itemClosings->where('warehouse_id', $wh->id)->first();
                 $op = $c ? (float) $c->opening_qty : 0;
                 $rowData[] = "='{$sn}'!D{$rowIdx}";
@@ -689,7 +864,7 @@ class ComprehensiveExportService
 
             // Receipts per warehouse (cross-sheet ='وارد {name}'!AK{row})
             foreach ($mainSub as $wh) {
-                $sn = $whSheetNames[$wh->id] ?? ('وارد ' . $wh->name);
+                $sn = $esc($whSheetNames[$wh->id] ?? ('وارد '.$wh->name));
                 $c = $itemClosings->where('warehouse_id', $wh->id)->first();
                 $in = $c ? (float) $c->in_qty : 0;
                 $rowData[] = "='{$sn}'!AK{$rowIdx}";
@@ -698,7 +873,7 @@ class ComprehensiveExportService
 
             // Consumption per branch (cross-sheet ='منصرف {name}'!AK{row})
             foreach ($branches as $br) {
-                $sn = $brSheetNames[$br->id] ?? ('منصرف ' . $br->name);
+                $sn = $esc($brSheetNames[$br->id] ?? ('منصرف '.$br->name));
                 $c = $itemClosings->where('warehouse_id', $br->id)->first();
                 $brIn = $c ? (float) $c->in_qty : 0;
                 $rowData[] = "='{$sn}'!AK{$rowIdx}";
@@ -707,11 +882,13 @@ class ComprehensiveExportService
 
             // Get avg cost
             $avgCost = 0;
-            $mainSheetName = $mainWhId ? ($whSheetNames[$mainWhId] ?? null) : null;
+            $mainSheetName = $mainWhId ? $esc($whSheetNames[$mainWhId] ?? '') : null;
             foreach ($mainSub as $wh) {
                 $c = $itemClosings->where('warehouse_id', $wh->id)->first();
                 if ($c) {
-                    if ($avgCost === 0) $avgCost = (float) $c->avg_cost;
+                    if ($avgCost === 0) {
+                        $avgCost = (float) $c->avg_cost;
+                    }
                 }
             }
             $price = $avgCost > 0 ? $avgCost : (float) ($item->default_cost ?? 0);
@@ -720,7 +897,7 @@ class ComprehensiveExportService
             $rowData[] = '';
             // Actual per warehouse (cross-sheet ='وارد {name}'!AN{row})
             foreach ($mainSub as $wh) {
-                $sn = $whSheetNames[$wh->id] ?? ('وارد ' . $wh->name);
+                $sn = $esc($whSheetNames[$wh->id] ?? ('وارد '.$wh->name));
                 $rowData[] = "='{$sn}'!AN{$rowIdx}";
             }
             // Diff (placeholder for formula)
@@ -739,44 +916,44 @@ class ComprehensiveExportService
             // Build formulas
             $openingRefs = [];
             foreach ($mainSub as $wh) {
-                $sn = $whSheetNames[$wh->id] ?? ('وارد ' . $wh->name);
+                $sn = $esc($whSheetNames[$wh->id] ?? ('وارد '.$wh->name));
                 $openingRefs[] = "='{$sn}'!D{$rowIdx}";
             }
             $receiptRefs = [];
             foreach ($mainSub as $wh) {
-                $sn = $whSheetNames[$wh->id] ?? ('وارد ' . $wh->name);
+                $sn = $esc($whSheetNames[$wh->id] ?? ('وارد '.$wh->name));
                 $receiptRefs[] = "='{$sn}'!AK{$rowIdx}";
             }
             $consumptionRefs = [];
             foreach ($branches as $br) {
-                $sn = $brSheetNames[$br->id] ?? ('منصرف ' . $br->name);
+                $sn = $esc($brSheetNames[$br->id] ?? ('منصرف '.$br->name));
                 $consumptionRefs[] = "='{$sn}'!AK{$rowIdx}";
             }
 
             // N = (Σ openings + Σ receipts - Σ consumption)
-            $nRef = Coordinate::stringFromColumnIndex(1 + $theoreticalIdx) . $rowIdx;
+            $nRef = Coordinate::stringFromColumnIndex(1 + $theoreticalIdx).$rowIdx;
             $allSumParts = array_merge($openingRefs, $receiptRefs);
             $allFormula = implode('+', $allSumParts);
-            if (!empty($consumptionRefs)) {
-                $allFormula .= '-(' . implode('+', $consumptionRefs) . ')';
+            if (! empty($consumptionRefs)) {
+                $allFormula .= '-('.implode('+', $consumptionRefs).')';
             }
             $sheet->setCellValue($nRef, "={$allFormula}");
 
             // Diff = IF(SUM(actuals)>0, SUM(actuals)-N, "")
-            $firstActualRef = Coordinate::stringFromColumnIndex(1 + $actualCols[0]) . $rowIdx;
-            $lastActualRef = Coordinate::stringFromColumnIndex(1 + end($actualCols)) . $rowIdx;
-            $dRef = Coordinate::stringFromColumnIndex(1 + $diffIdx) . $rowIdx;
+            $firstActualRef = Coordinate::stringFromColumnIndex(1 + $actualCols[0]).$rowIdx;
+            $lastActualRef = Coordinate::stringFromColumnIndex(1 + end($actualCols)).$rowIdx;
+            $dRef = Coordinate::stringFromColumnIndex(1 + $diffIdx).$rowIdx;
             $sheet->setCellValue($dRef, "=IF(SUM({$firstActualRef}:{$lastActualRef})>0,SUM({$firstActualRef}:{$lastActualRef})-{$nRef},\"\")");
 
             // Value = price * theoretical
-            $yRef = Coordinate::stringFromColumnIndex(1 + $priceIdx) . $rowIdx;
-            $zRef = Coordinate::stringFromColumnIndex(1 + $valueIdx) . $rowIdx;
+            $yRef = Coordinate::stringFromColumnIndex(1 + $priceIdx).$rowIdx;
+            $zRef = Coordinate::stringFromColumnIndex(1 + $valueIdx).$rowIdx;
             $sheet->setCellValue($zRef, "={$yRef}*{$nRef}");
 
             $rowIdx++;
         }
 
-        $sheet->freezePane('C3');
+        $sheet->freezePane('C'.$dataStart);
         $sheet->getColumnDimension('A')->setWidth(26);
         $sheet->getColumnDimension('B')->setWidth(8);
         for ($c = 3; $c <= $colCount; $c++) {
@@ -790,14 +967,20 @@ class ComprehensiveExportService
     {
         ini_set('memory_limit', '512M');
         set_time_limit(300);
-        $dt = Carbon::parse($month . '-01');
+        $dt = Carbon::parse($month.'-01');
+
+        $client = Client::find($clientId);
+        if (! $client) {
+            abort(404, 'Client not found');
+        }
+
         $warehouses = Warehouse::where('client_id', $clientId)->where('is_active', true)->get();
         $mainSub = $warehouses->whereIn('type', ['main', 'sub'])->values();
         $branches = $warehouses->where('type', 'branch')->values();
         $items = Item::where('client_id', $clientId)->where('is_active', true)->orderBy('sort_order')->orderBy('name')->get();
         $closings = MonthlyClosing::where('client_id', $clientId)->where('month', $month)->get()->groupBy('item_id');
 
-        $spreadsheet = new Spreadsheet();
+        $spreadsheet = new Spreadsheet;
         $spreadsheet->getDefaultStyle()->getFont()->setName('DejaVu Sans')->setSize(9);
         $sheet = $spreadsheet->getActiveSheet()->setRightToLeft(true);
 
@@ -822,22 +1005,33 @@ class ComprehensiveExportService
             $headerGroup2[] = 'المنصرف';
         }
 
-        $headers[] = 'اخر المده'; $headerGroup2[] = '';
+        $headers[] = 'اخر المده';
+        $headerGroup2[] = '';
         foreach ($mainSub as $wh) {
             $headers[] = "رصيد فعلي {$wh->name}";
             $headerGroup2[] = 'رصيد الفعلى';
         }
-        $headers[] = 'فرق'; $headerGroup2[] = 'فرق';
-        $headers[] = 'سعر'; $headerGroup2[] = '';
-        $headers[] = 'قيمة'; $headerGroup2[] = '';
+        $headers[] = 'فرق';
+        $headerGroup2[] = 'فرق';
+        $headers[] = 'سعر';
+        $headerGroup2[] = '';
+        $headers[] = 'قيمة';
+        $headerGroup2[] = '';
         $colCount = count($headers);
 
-        $this->writeRow($sheet, 1, ['تقفيل الخامات', '', "شهر {$month}"], true);
+        $hdrRows = 2;
+        $this->writeHeaderWithLogo($sheet, $client, $colCount, 'تقفيل خامات', $month);
+
+        $r1 = 1 + $hdrRows;
+        $r2 = 2 + $hdrRows;
+        $r3 = 3 + $hdrRows;
+        $dataStart = 4 + $hdrRows;
+
+        $this->writeRow($sheet, $r1, ['تقفيل الخامات', '', "شهر {$month}"], true);
         $row2 = array_pad($headerGroup2, $colCount, '');
-        $this->writeRow($sheet, 2, $row2, true);
-        $this->writeRow($sheet, 3, $headers, true);
-        $dataStart = 4;
-        $sheet->setCellValue('A4', 'الصنف');
+        $this->writeRow($sheet, $r2, $row2, true);
+        $this->writeRow($sheet, $r3, $headers, true);
+        $sheet->setCellValue('A'.$dataStart, 'الصنف');
 
         // Column indices (0-based)
         $openingCount = count($mainSub);
@@ -876,7 +1070,9 @@ class ComprehensiveExportService
             foreach ($branches as $br) {
                 $c = $itemClosings->where('warehouse_id', $br->id)->first();
                 $con = $c ? ((float) $c->internal_in_qty - (float) $c->internal_out_qty) : 0;
-                if ($con < 0) $con = 0;
+                if ($con < 0) {
+                    $con = 0;
+                }
                 $rowData[] = $con;
             }
 
@@ -915,7 +1111,7 @@ class ComprehensiveExportService
             $firstConsumeCol = Coordinate::stringFromColumnIndex(1 + $consumptionStart);
             $lastConsumeCol = Coordinate::stringFromColumnIndex(1 + $consumptionStart + $consumptionCount - 1);
 
-            $nRef = Coordinate::stringFromColumnIndex(1 + $theoreticalIdx) . $rowIdx;
+            $nRef = Coordinate::stringFromColumnIndex(1 + $theoreticalIdx).$rowIdx;
 
             if ($consumptionCount > 0) {
                 $formula = "=SUM({$firstAllCol}{$rowIdx}:{$lastAllCol}{$rowIdx})-SUM({$firstConsumeCol}{$rowIdx}:{$lastConsumeCol}{$rowIdx})";
@@ -925,20 +1121,20 @@ class ComprehensiveExportService
             $sheet->setCellValue($nRef, $formula);
 
             // Diff = IF(SUM(actuals)>0, SUM(actuals)-N, "")
-            $firstActualRef = Coordinate::stringFromColumnIndex(1 + $actualCols[0]) . $rowIdx;
-            $lastActualRef = Coordinate::stringFromColumnIndex(1 + end($actualCols)) . $rowIdx;
-            $dRef = Coordinate::stringFromColumnIndex(1 + $diffIdx) . $rowIdx;
+            $firstActualRef = Coordinate::stringFromColumnIndex(1 + $actualCols[0]).$rowIdx;
+            $lastActualRef = Coordinate::stringFromColumnIndex(1 + end($actualCols)).$rowIdx;
+            $dRef = Coordinate::stringFromColumnIndex(1 + $diffIdx).$rowIdx;
             $sheet->setCellValue($dRef, "=IF(SUM({$firstActualRef}:{$lastActualRef})>0,SUM({$firstActualRef}:{$lastActualRef})-{$nRef},\"\")");
 
             // Value = price * N
-            $yRef = Coordinate::stringFromColumnIndex(1 + $priceIdx) . $rowIdx;
-            $zRef = Coordinate::stringFromColumnIndex(1 + $valueIdx) . $rowIdx;
+            $yRef = Coordinate::stringFromColumnIndex(1 + $priceIdx).$rowIdx;
+            $zRef = Coordinate::stringFromColumnIndex(1 + $valueIdx).$rowIdx;
             $sheet->setCellValue($zRef, "={$yRef}*{$nRef}");
 
             $rowIdx++;
         }
 
-        $sheet->freezePane('C4');
+        $sheet->freezePane('C'.$dataStart);
         $sheet->getColumnDimension('A')->setWidth(28);
         for ($c = 2; $c <= $colCount; $c++) {
             $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($c))->setWidth(11);
@@ -947,6 +1143,7 @@ class ComprehensiveExportService
 
         $writer = new Xlsx($spreadsheet);
         $writer->setPreCalculateFormulas(false);
+
         return response()->streamDownload(function () use ($writer) {
             $writer->save('php://output');
         }, "تقفيل_خامات_{$month}.xlsx", [
@@ -954,63 +1151,117 @@ class ComprehensiveExportService
         ]);
     }
 
+    // ─── Branding Header ──────────────────────────────────
+    private function writeHeaderWithLogo($sheet, $client, int $colCount, string $sheetLabel, string $month)
+    {
+        // Row 1: Logo + Client info
+        $sheet->mergeCells(Coordinate::stringFromColumnIndex(1).'1:'.
+            Coordinate::stringFromColumnIndex($colCount).'1');
+        $sheet->setCellValue('A1', "{$client->name} | {$sheetLabel} | {$month}");
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14)->getColor()->setARGB('FF1e3a5f');
+        $sheet->getStyle('A1')->getAlignment()
+            ->setHorizontal(Alignment::HORIZONTAL_CENTER)
+            ->setVertical(Alignment::VERTICAL_CENTER);
+        $sheet->getRowDimension(1)->setRowHeight(30);
+
+        // Insert client logo if available
+        if ($client->logo && Storage::disk('public')->exists($client->logo)) {
+            $drawing = new Drawing;
+            $drawing->setPath(Storage::disk('public')->path($client->logo));
+            $drawing->setHeight(40);
+            $drawing->setCoordinates('A1');
+            $drawing->setOffsetX(5);
+            $drawing->setOffsetY(2);
+            $drawing->setWorksheet($sheet);
+        }
+
+        // Row 2: Provider subtitle
+        $sheet->mergeCells(Coordinate::stringFromColumnIndex(1).'2:'.
+            Coordinate::stringFromColumnIndex($colCount).'2');
+        $sheet->setCellValue('A2', 'Curve Cost Control System - Ahmed Ali');
+        $sheet->getStyle('A2')->getFont()->setItalic(true)->setSize(10)->getColor()->setARGB('FF666666');
+        $sheet->getStyle('A2')->getAlignment()
+            ->setHorizontal(Alignment::HORIZONTAL_CENTER)
+            ->setVertical(Alignment::VERTICAL_CENTER);
+        $sheet->getRowDimension(2)->setRowHeight(20);
+    }
+
     // ─── Helpers ──────────────────────────────────────────
     private function writeRow($sheet, int $row, array $data, bool $isHeader = false, bool $isBold = false)
     {
+        $lastCol = count($data);
+        $range = Coordinate::stringFromColumnIndex(1).$row.':'.
+                 Coordinate::stringFromColumnIndex($lastCol).$row;
+
         foreach ($data as $ci => $val) {
-            $cellRef = Coordinate::stringFromColumnIndex($ci + 1) . $row;
+            $cellRef = Coordinate::stringFromColumnIndex($ci + 1).$row;
             $sheet->setCellValue($cellRef, $val);
-            $style = $sheet->getStyle($cellRef);
-            $style->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER);
-            $style->getAlignment()->setVertical(\PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_CENTER);
-            $style->getBorders()->getAllBorders()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN);
-            $style->getBorders()->getAllBorders()->getColor()->setARGB('FFCCCCCC');
-            if ($isHeader) {
-                $style->getFont()->setBold(true)->setSize(10)->getColor()->setARGB('FFFFFFFF');
-                $style->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                    ->getStartColor()->setARGB('FF1e3a5f');
-            } elseif ($isBold) {
-                $style->getFont()->setBold(true)->setSize(10)->getColor()->setARGB('FF1e3a5f');
-                $style->getFill()->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                    ->getStartColor()->setARGB('FFEFF6FF');
-            }
-            if ($ci === 0 && !$isHeader) {
-                $style->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_RIGHT);
-                $style->getFont()->setBold(true);
-            }
+        }
+
+        $style = $sheet->getStyle($range);
+        $style->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $style->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
+        $style->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+        $style->getBorders()->getAllBorders()->getColor()->setARGB('FFCCCCCC');
+        if ($isHeader) {
+            $style->getFont()->setBold(true)->setSize(10)->getColor()->setARGB('FFFFFFFF');
+            $style->getFill()->setFillType(Fill::FILL_SOLID)
+                ->getStartColor()->setARGB('FF1e3a5f');
+        } elseif ($isBold) {
+            $style->getFont()->setBold(true)->setSize(10)->getColor()->setARGB('FF1e3a5f');
+            $style->getFill()->setFillType(Fill::FILL_SOLID)
+                ->getStartColor()->setARGB('FFEFF6FF');
+        }
+        if (! $isHeader) {
+            $cellRef = Coordinate::stringFromColumnIndex(1).$row;
+            $sheet->getStyle($cellRef)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+            $sheet->getStyle($cellRef)->getFont()->setBold(true);
         }
     }
 
     private function writeDataRow($sheet, int $row, array $data)
     {
+        $lastCol = count($data);
+        $range = Coordinate::stringFromColumnIndex(1).$row.':'.
+                 Coordinate::stringFromColumnIndex($lastCol).$row;
+
         foreach ($data as $ci => $val) {
-            $cellRef = Coordinate::stringFromColumnIndex($ci + 1) . $row;
+            $cellRef = Coordinate::stringFromColumnIndex($ci + 1).$row;
             $sheet->setCellValue($cellRef, $val);
-            $style = $sheet->getStyle($cellRef);
-            $style->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER);
-            $style->getAlignment()->setVertical(\PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_CENTER);
-            $style->getBorders()->getAllBorders()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN);
-            $style->getBorders()->getAllBorders()->getColor()->setARGB('FFCCCCCC');
-            if ($ci === 0) {
-                $style->getAlignment()->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_RIGHT);
-                $style->getFont()->setBold(true)->setSize(10);
-            } elseif ($ci === 1) {
-                $style->getFont()->getColor()->setARGB('FF888888');
-            }
-            if (is_string($val) && str_starts_with($val, '=')) {
-            } elseif (is_numeric($val) && $val < 0) {
-                $style->getFont()->getColor()->setARGB('FFDC2626');
+        }
+
+        $style = $sheet->getStyle($range);
+        $style->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $style->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
+        $style->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+        $style->getBorders()->getAllBorders()->getColor()->setARGB('FFCCCCCC');
+
+        // First cell (item name) right-aligned bold
+        $sheet->getStyle(Coordinate::stringFromColumnIndex(1).$row)
+            ->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+        $sheet->getStyle(Coordinate::stringFromColumnIndex(1).$row)
+            ->getFont()->setBold(true)->setSize(10);
+
+        // Second cell (unit) subdued color
+        $sheet->getStyle(Coordinate::stringFromColumnIndex(2).$row)
+            ->getFont()->getColor()->setARGB('FF888888');
+
+        // Negative values in red
+        foreach ($data as $ci => $val) {
+            if (is_numeric($val) && (float) $val < 0) {
+                $cellRef = Coordinate::stringFromColumnIndex($ci + 1).$row;
+                $sheet->getStyle($cellRef)->getFont()->getColor()->setARGB('FFDC2626');
             }
         }
     }
 
     private function addFooter($sheet, int $footerRow, int $colCount)
     {
-        $sheet->mergeCells(Coordinate::stringFromColumnIndex(1) . $footerRow . ':' .
-            Coordinate::stringFromColumnIndex($colCount) . $footerRow);
-        $sheet->setCellValue('A' . $footerRow, 'تم التصدير بواسطة Curve Cost Control System - Ahmed Ali');
-        $sheet->getStyle('A' . $footerRow)->getFont()->setItalic(true)->setSize(9)->getColor()->setARGB('FF999999');
-        $sheet->getStyle('A' . $footerRow)->getAlignment()
-            ->setHorizontal(\PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER);
+        $sheet->mergeCells(Coordinate::stringFromColumnIndex(1).$footerRow.':'.
+            Coordinate::stringFromColumnIndex($colCount).$footerRow);
+        $sheet->setCellValue('A'.$footerRow, 'تم التصدير بواسطة Curve Cost Control System - Ahmed Ali');
+        $sheet->getStyle('A'.$footerRow)->getFont()->setItalic(true)->setSize(9)->getColor()->setARGB('FF999999');
+        $sheet->getStyle('A'.$footerRow)->getAlignment()
+            ->setHorizontal(Alignment::HORIZONTAL_CENTER);
     }
 }

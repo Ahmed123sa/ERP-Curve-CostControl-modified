@@ -125,7 +125,7 @@ class MenuSalesImportController extends Controller
             }
 
             // Try saved mapping first
-            $savedMapping = $this->matchingService->findSavedMapping($clientId, $name);
+            $savedMapping = $this->matchingService->findSavedMapping($clientId, $name, $sizeVal);
             if ($savedMapping) {
                 $rid = $savedMapping['recipe_id'];
                 $compositeKey = $rid . '|' . $currentCat;
@@ -320,7 +320,7 @@ class MenuSalesImportController extends Controller
             }
 
             // Try saved mapping first
-            $savedMapping = $this->matchingService->findSavedMapping($clientId, $name);
+            $savedMapping = $this->matchingService->findSavedMapping($clientId, $name, $sizeVal);
             if ($savedMapping) {
                 $rid = $savedMapping['recipe_id'];
                 $compositeKey = $rid . '|' . $currentCat;
