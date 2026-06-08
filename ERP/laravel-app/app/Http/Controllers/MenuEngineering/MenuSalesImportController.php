@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Http\Controllers\MenuEngineering;
 
 use App\Http\Controllers\Controller;
@@ -13,9 +14,13 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
 class MenuSalesImportController extends Controller
 {
     const NAME_COL = 38;
+
     const QTY_COL = 10;
+
     const SIZE_COL = 28;
+
     const CAT_COL = 32;
+
     const HEADER_ROWS = 9;
 
     const HEADER_KEYWORDS = [
@@ -68,7 +73,7 @@ class MenuSalesImportController extends Controller
                 $hasNameLike = false;
                 foreach ($nameColInfo['sample_values'] ?? [] as $sv) {
                     $svClean = str_replace(',', '', $sv);
-                    if (!is_numeric($svClean) && preg_match('/\p{L}/u', $svClean)) {
+                    if (! is_numeric($svClean) && preg_match('/\p{L}/u', $svClean)) {
                         $hasNameLike = true;
                         break;
                     }
@@ -99,9 +104,9 @@ class MenuSalesImportController extends Controller
 
         foreach ($rows as $rIdx => $row) {
             $catVal = $catCol !== null ? trim($row[$catCol] ?? '') : '';
-            if (!empty($catVal)) {
+            if (! empty($catVal)) {
                 $currentCat = $catVal;
-                if (!isset($seenCats[$currentCat])) {
+                if (! isset($seenCats[$currentCat])) {
                     $seenCats[$currentCat] = true;
                     $halfCategories[$currentCat] = $this->matchingService->isHalfCategory($currentCat);
                 }
@@ -120,7 +125,7 @@ class MenuSalesImportController extends Controller
             }
 
             $matchName = $name;
-            if (!empty($currentCat) && !empty($halfCategories[$currentCat])) {
+            if (! empty($currentCat) && ! empty($halfCategories[$currentCat])) {
                 $matchName = $this->matchingService->stripHalfPrefix($matchName);
             }
 
@@ -128,7 +133,7 @@ class MenuSalesImportController extends Controller
             $savedMapping = $this->matchingService->findSavedMapping($clientId, $name, $sizeVal);
             if ($savedMapping) {
                 $rid = $savedMapping['recipe_id'];
-                $compositeKey = $rid . '|' . $currentCat;
+                $compositeKey = $rid.'|'.$currentCat;
                 if (isset($matchedItems[$compositeKey])) {
                     $matchedItems[$compositeKey]['qty_sold'] += $qty;
                 } else {
@@ -142,6 +147,7 @@ class MenuSalesImportController extends Controller
                         'confidence' => $savedMapping['confidence'],
                     ];
                 }
+
                 continue;
             }
 
@@ -156,7 +162,7 @@ class MenuSalesImportController extends Controller
 
             if ($matched) {
                 $rid = $matched['id'];
-                $compositeKey = $rid . '|' . $currentCat;
+                $compositeKey = $rid.'|'.$currentCat;
                 if (isset($matchedItems[$compositeKey])) {
                     $matchedItems[$compositeKey]['qty_sold'] += $qty;
                 } else {
@@ -171,7 +177,7 @@ class MenuSalesImportController extends Controller
                     ];
                 }
             } else {
-                $unmatchedKey = $name . '|' . $sizeVal . '|' . $currentCat;
+                $unmatchedKey = $name.'|'.$sizeVal.'|'.$currentCat;
                 if (isset($unmatchedRows[$unmatchedKey])) {
                     $unmatchedRows[$unmatchedKey]['qty_sold'] += $qty;
                 } else {
@@ -201,7 +207,7 @@ class MenuSalesImportController extends Controller
             'matched_count' => count($preview),
             'unmatched_count' => count($unmatchedRows),
             'total_data_rows' => count($rows) - $headerRows,
-            'all_recipes' => $recipes->map(fn($r) => ['id' => $r->id, 'name' => $r->name]),
+            'all_recipes' => $recipes->map(fn ($r) => ['id' => $r->id, 'name' => $r->name]),
             'categories' => $categories,
         ]);
     }
@@ -297,9 +303,9 @@ class MenuSalesImportController extends Controller
             // Category detection from catCol if specified
             if ($catCol !== null) {
                 $catVal = trim($row[$catCol] ?? '');
-                if (!empty($catVal)) {
+                if (! empty($catVal)) {
                     $currentCat = $catVal;
-                    if (!isset($seenCats[$currentCat])) {
+                    if (! isset($seenCats[$currentCat])) {
                         $seenCats[$currentCat] = true;
                         $halfCategories[$currentCat] = $this->matchingService->isHalfCategory($currentCat);
                     }
@@ -315,7 +321,7 @@ class MenuSalesImportController extends Controller
             }
 
             $matchName = $name;
-            if (!empty($currentCat) && !empty($halfCategories[$currentCat])) {
+            if (! empty($currentCat) && ! empty($halfCategories[$currentCat])) {
                 $matchName = $this->matchingService->stripHalfPrefix($matchName);
             }
 
@@ -323,7 +329,7 @@ class MenuSalesImportController extends Controller
             $savedMapping = $this->matchingService->findSavedMapping($clientId, $name, $sizeVal);
             if ($savedMapping) {
                 $rid = $savedMapping['recipe_id'];
-                $compositeKey = $rid . '|' . $currentCat;
+                $compositeKey = $rid.'|'.$currentCat;
                 if (isset($matchedItems[$compositeKey])) {
                     $matchedItems[$compositeKey]['qty_sold'] += $qty;
                 } else {
@@ -337,6 +343,7 @@ class MenuSalesImportController extends Controller
                         'confidence' => $savedMapping['confidence'],
                     ];
                 }
+
                 continue;
             }
 
@@ -351,7 +358,7 @@ class MenuSalesImportController extends Controller
 
             if ($matched) {
                 $rid = $matched['id'];
-                $compositeKey = $rid . '|' . $currentCat;
+                $compositeKey = $rid.'|'.$currentCat;
                 if (isset($matchedItems[$compositeKey])) {
                     $matchedItems[$compositeKey]['qty_sold'] += $qty;
                 } else {
@@ -366,7 +373,7 @@ class MenuSalesImportController extends Controller
                     ];
                 }
             } else {
-                $unmatchedKey = $name . '|' . $sizeVal . '|' . $currentCat;
+                $unmatchedKey = $name.'|'.$sizeVal.'|'.$currentCat;
                 if (isset($unmatchedRows[$unmatchedKey])) {
                     $unmatchedRows[$unmatchedKey]['qty_sold'] += $qty;
                 } else {
@@ -440,7 +447,7 @@ class MenuSalesImportController extends Controller
             'matched_count' => count($preview),
             'unmatched_count' => count($unmatchedRows),
             'total_data_rows' => count($rows) - $headerRows,
-            'all_recipes' => $recipes->map(fn($r) => ['id' => $r->id, 'name' => $r->name]),
+            'all_recipes' => $recipes->map(fn ($r) => ['id' => $r->id, 'name' => $r->name]),
             'categories' => $categories,
         ]);
     }
@@ -468,7 +475,7 @@ class MenuSalesImportController extends Controller
         foreach ($request->items as $item) {
             $qty = (float) $item['qty_sold'];
             $cat = $item['category'] ?? '';
-            if (!empty($cat) && !empty($halfCategories[$cat])) {
+            if (! empty($cat) && ! empty($halfCategories[$cat])) {
                 $qty = round($qty / 2, 3);
             }
 
@@ -484,7 +491,7 @@ class MenuSalesImportController extends Controller
             $count++;
 
             // Save persistent mapping for future auto-matching
-            if (!empty($item['source_name']) && !empty($item['recipe_id'])) {
+            if (! empty($item['source_name']) && ! empty($item['recipe_id'])) {
                 $this->matchingService->saveMapping(
                     clientId: $clientId,
                     sourceName: $item['source_name'],
@@ -512,7 +519,7 @@ class MenuSalesImportController extends Controller
             ->get(['id', 'name']);
 
         $categories = [];
-        if (!empty($session->half_categories)) {
+        if (! empty($session->half_categories)) {
             foreach ($session->half_categories as $cat => $isHalf) {
                 $categories[] = ['name' => $cat, 'half' => $isHalf];
             }
@@ -525,7 +532,7 @@ class MenuSalesImportController extends Controller
             'matched_count' => count($preview),
             'unmatched_count' => count($unmatched),
             'total_data_rows' => $session->total_rows,
-            'all_recipes' => $recipes->map(fn($r) => ['id' => $r->id, 'name' => $r->name]),
+            'all_recipes' => $recipes->map(fn ($r) => ['id' => $r->id, 'name' => $r->name]),
             'categories' => $categories,
         ]);
     }
@@ -571,7 +578,7 @@ class MenuSalesImportController extends Controller
         foreach ($session->items->whereNotNull('recipe_id') as $item) {
             $qty = (float) $item->qty_sold;
             $cat = $item->category ?? '';
-            if (!empty($cat) && !empty($halfCategories[$cat])) {
+            if (! empty($cat) && ! empty($halfCategories[$cat])) {
                 $qty = round($qty / 2, 3);
             }
 
@@ -586,7 +593,7 @@ class MenuSalesImportController extends Controller
             ]);
             $count++;
 
-            if (!empty($item->source_name) && !empty($item->recipe_id)) {
+            if (! empty($item->source_name) && ! empty($item->recipe_id)) {
                 $this->matchingService->saveMapping(
                     clientId: $clientId,
                     sourceName: $item->source_name,
@@ -637,7 +644,7 @@ class MenuSalesImportController extends Controller
             for ($i = 0; $i < $scanDepth; $i++) {
                 if (isset($rows[$i][$col])) {
                     $val = trim((string) $rows[$i][$col]);
-                    if (!empty($val)) {
+                    if (! empty($val)) {
                         $colCandidates[$col][] = $val;
                         $normVal = $this->matchingService->normalize($val);
                         if (isset($allKeywords[$normVal])) {
@@ -670,7 +677,7 @@ class MenuSalesImportController extends Controller
             $candidates = [];
             foreach ($colCandidates[$col] as $v) {
                 $norm = $this->matchingService->normalize($v);
-                if (!isset($seen[$norm])) {
+                if (! isset($seen[$norm])) {
                     $seen[$norm] = true;
                     $candidates[] = $v;
                 }
@@ -681,17 +688,17 @@ class MenuSalesImportController extends Controller
                 for ($d = 1; $d <= 3; $d++) {
                     $up = $headerRowIdx - $d;
                     $down = $headerRowIdx + $d;
-                    if ($up >= 0 && !empty(trim((string) ($rows[$up][$col] ?? '')))) {
+                    if ($up >= 0 && ! empty(trim((string) ($rows[$up][$col] ?? '')))) {
                         $header = trim((string) $rows[$up][$col]);
                         break;
                     }
-                    if ($down < $totalRows && !empty(trim((string) ($rows[$down][$col] ?? '')))) {
+                    if ($down < $totalRows && ! empty(trim((string) ($rows[$down][$col] ?? '')))) {
                         $header = trim((string) $rows[$down][$col]);
                         break;
                     }
                 }
             }
-            if (empty($header) && !empty($candidates)) {
+            if (empty($header) && ! empty($candidates)) {
                 $header = $candidates[0];
             }
 
@@ -703,7 +710,7 @@ class MenuSalesImportController extends Controller
             for ($i = $dataStart; $i < min($dataStart + 10, $totalRows); $i++) {
                 if (isset($rows[$i][$col])) {
                     $val = trim((string) $rows[$i][$col]);
-                    if (!empty($val)) {
+                    if (! empty($val)) {
                         $sampleValues[] = mb_substr($val, 0, 50);
                         $cleanVal = str_replace(',', '', $val);
                         if (is_numeric($cleanVal)) {
@@ -735,7 +742,9 @@ class MenuSalesImportController extends Controller
 
         $suggestedMapping = $this->autoDetectMapping($columns);
         $dataStart = $headerRowIdx + 1;
-        if ($dataStart < 1) $dataStart = 1;
+        if ($dataStart < 1) {
+            $dataStart = 1;
+        }
         $suggestedMapping['header_rows'] = $dataStart;
 
         return [
@@ -787,13 +796,13 @@ class MenuSalesImportController extends Controller
 
             // Type-based scoring fallback
             $nameOrCatMatch = isset($keywordScores['name'][$col['index']]) || isset($keywordScores['category'][$col['index']]);
-            if ($type === 'text' && !$nameOrCatMatch) {
+            if ($type === 'text' && ! $nameOrCatMatch) {
                 $keywordScores['name'][$col['index']] = ($keywordScores['name'][$col['index']] ?? 0) + 1;
             }
-            if ($type === 'text' && !isset($keywordScores['qty'][$col['index']]) && $col['index'] !== ($mapping['name_col'] ?? -1)) {
+            if ($type === 'text' && ! isset($keywordScores['qty'][$col['index']]) && $col['index'] !== ($mapping['name_col'] ?? -1)) {
                 $keywordScores['category'][$col['index']] = ($keywordScores['category'][$col['index']] ?? 0) + 1;
             }
-            if ($type === 'numeric' && !isset($keywordScores['qty'][$col['index']])) {
+            if ($type === 'numeric' && ! isset($keywordScores['qty'][$col['index']])) {
                 $keywordScores['qty'][$col['index']] = ($keywordScores['qty'][$col['index']] ?? 0) + 1;
             }
         }
@@ -804,7 +813,7 @@ class MenuSalesImportController extends Controller
         }
 
         foreach (['name', 'qty', 'size', 'category'] as $field) {
-            if (!empty($keywordScores[$field])) {
+            if (! empty($keywordScores[$field])) {
                 arsort($keywordScores[$field]);
                 $colIdx = (int) array_key_first($keywordScores[$field]);
                 // Avoid blank columns for name/qty (merged headers shift the keyword cell)
@@ -817,7 +826,7 @@ class MenuSalesImportController extends Controller
                             break;
                         }
                     }
-                    if (!$found) {
+                    if (! $found) {
                         continue;
                     }
                 }
@@ -830,7 +839,88 @@ class MenuSalesImportController extends Controller
                     next($keywordScores[$field]);
                     $colIdx = (int) array_key_first($keywordScores[$field]);
                 }
-                $mapping[$field . '_col'] = $colIdx;
+                $mapping[$field.'_col'] = $colIdx;
+            }
+        }
+
+        // Refinement: if detected name_col's samples don't actually look like product names
+        // (e.g. formula/currency output from merged cells), scan adjacent columns for the real one
+        if ($mapping['name_col'] !== null && isset($colByIndex[$mapping['name_col']])) {
+            $nc = $colByIndex[$mapping['name_col']];
+            $looksLegit = false;
+            foreach ($nc['sample_values'] ?? [] as $sv) {
+                $svClean = str_replace(',', '', $sv);
+                if (! is_numeric($svClean) && preg_match('/\p{L}/u', $svClean) && ! preg_match('/\d+\.\d+.*\(\d+\)/', $svClean)) {
+                    $looksLegit = true;
+                    break;
+                }
+            }
+            if (! $looksLegit && $nc['type'] !== 'blank') {
+                $keywordNameCol = null;
+                if (! empty($keywordScores['name'])) {
+                    $keywordNameCol = (int) array_key_first($keywordScores['name']);
+                }
+                $anchor = $keywordNameCol ?? $mapping['name_col'];
+                $nameOffset = null;
+                for ($offset = -3; $offset <= 3; $offset++) {
+                    if ($offset === 0) {
+                        continue;
+                    }
+                    $scanIdx = $anchor + $offset;
+                    if (! isset($colByIndex[$scanIdx]) || $colByIndex[$scanIdx]['type'] !== 'text') {
+                        continue;
+                    }
+                    $looksLikeName = false;
+                    foreach ($colByIndex[$scanIdx]['sample_values'] ?? [] as $sv) {
+                        $svClean = str_replace(',', '', $sv);
+                        if (! is_numeric($svClean) && preg_match('/\p{L}/u', $svClean) && ! preg_match('/\d+\.\d+.*\(\d+\)/', $svClean)) {
+                            $looksLikeName = true;
+                            break;
+                        }
+                    }
+                    if ($looksLikeName) {
+                        $nameOffset = $scanIdx - $anchor;
+                        $mapping['name_col'] = $scanIdx;
+                        break;
+                    }
+                }
+                if ($nameOffset !== null && $mapping['qty_col'] !== null) {
+                    $shiftedQty = $mapping['qty_col'] + $nameOffset;
+                    if (isset($colByIndex[$shiftedQty]) && $colByIndex[$shiftedQty]['type'] === 'numeric') {
+                        $mapping['qty_col'] = $shiftedQty;
+                    }
+                }
+            }
+            if ($nc['type'] === 'blank') {
+                $nameOffset = null;
+                for ($offset = -3; $offset <= 3; $offset++) {
+                    if ($offset === 0) {
+                        continue;
+                    }
+                    $scanIdx = $mapping['name_col'] + $offset;
+                    if (! isset($colByIndex[$scanIdx]) || $colByIndex[$scanIdx]['type'] !== 'text') {
+                        continue;
+                    }
+                    $looksLikeName = false;
+                    foreach ($colByIndex[$scanIdx]['sample_values'] ?? [] as $sv) {
+                        $svClean = str_replace(',', '', $sv);
+                        if (! is_numeric($svClean) && preg_match('/\p{L}/u', $svClean)) {
+                            $looksLikeName = true;
+                            break;
+                        }
+                    }
+                    if ($looksLikeName) {
+                        $nameOffset = $scanIdx - $mapping['name_col'];
+                        $mapping['name_col'] = $scanIdx;
+                        break;
+                    }
+                }
+                if ($nameOffset !== null && $mapping['qty_col'] !== null) {
+                    $shiftedQty = $mapping['qty_col'] + $nameOffset;
+                    if (isset($colByIndex[$shiftedQty]) && $colByIndex[$shiftedQty]['type'] === 'numeric') {
+                        $mapping['qty_col'] = $shiftedQty;
+                    }
+                }
             }
         }
 
@@ -841,7 +931,7 @@ class MenuSalesImportController extends Controller
                     $looksLikeName = false;
                     foreach ($col['sample_values'] ?? [] as $sv) {
                         $svClean = str_replace(',', '', $sv);
-                        if (!is_numeric($svClean) && preg_match('/\p{L}/u', $svClean)) {
+                        if (! is_numeric($svClean) && preg_match('/\p{L}/u', $svClean)) {
                             $looksLikeName = true;
                             break;
                         }
@@ -853,7 +943,7 @@ class MenuSalesImportController extends Controller
                 }
             }
         }
-        if ($mapping['name_col'] === null && !empty($columns)) {
+        if ($mapping['name_col'] === null && ! empty($columns)) {
             $mapping['name_col'] = $columns[0]['index'];
         }
 
