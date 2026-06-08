@@ -78,6 +78,15 @@ export default function MenuEngineeringPage() {
     enabled: level === 'items' || level === 'sheet',
   });
 
+  const { data: orphanedData } = useQuery({
+    queryKey: ['menu-orphaned-count', selectedBranch?.id],
+    queryFn: () => api.get('/menu-engineering/recipes/orphaned-count', {
+      params: { branch_id: selectedBranch?.id || undefined },
+    }).then((r) => r.data),
+    enabled: !!selectedBranch?.id,
+  });
+  const orphanedCount = orphanedData?.count ?? 0;
+
   // ── Mutations ──
   const createMenuMutation = useMutation({
     mutationFn: (data: any) => api.post('/menu-engineering/menus', data),
@@ -702,6 +711,17 @@ export default function MenuEngineeringPage() {
   const renderItems = () => (
     <div>
       <button onClick={() => setLevel('categories')} className="text-xs text-blue-600 hover:underline mb-3 block">→ العودة للتصنيفات</button>
+
+      {/* Orphaned recipes warning */}
+      {orphanedCount > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 text-sm text-amber-800 flex items-center gap-2">
+          <span className="text-lg">⚠️</span>
+          <span>
+            هناك <strong>{orphanedCount}</strong> وصفة بدون قائمة (menu_id = null) — قد لا تظهر في القائمة أعلاه.
+            يمكنك تحريرها لربطها بقائمة.
+          </span>
+        </div>
+      )}
 
       {/* Header */}
       <div className="flex items-center justify-between mb-4">

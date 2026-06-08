@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Http\Controllers\MenuEngineering;
 
 use App\Http\Controllers\Controller;
@@ -39,27 +40,27 @@ class MenuRecipeController extends Controller
             $query->with('items.ingredient:id,name');
         }
 
-        $recipes = $query->orderBy('created_at', 'desc')->get()->map(fn($r) => [
-            'id'                => $r->id,
-            'name'              => $r->name,
-            'code'              => $r->code,
-            'category'          => $r->category,
-            'branch_id'         => $r->branch_id,
-            'menu_id'           => $r->menu_id,
-            'status'            => $r->status,
-            'version'           => $r->version,
-            'portions'          => (float) $r->portions,
-            'selling_price'     => (float) ($r->selling_price ?? 0),
-            'items_count'       => (int) $r->items_count,
-            'total_cost'        => $r->total_cost,
-            'cost_per_portion'  => $r->cost_per_portion,
+        $recipes = $query->orderBy('created_at', 'desc')->get()->map(fn ($r) => [
+            'id' => $r->id,
+            'name' => $r->name,
+            'code' => $r->code,
+            'category' => $r->category,
+            'branch_id' => $r->branch_id,
+            'menu_id' => $r->menu_id,
+            'status' => $r->status,
+            'version' => $r->version,
+            'portions' => (float) $r->portions,
+            'selling_price' => (float) ($r->selling_price ?? 0),
+            'items_count' => (int) $r->items_count,
+            'total_cost' => $r->total_cost,
+            'cost_per_portion' => $r->cost_per_portion,
             'exclude_from_reconciliation' => (bool) $r->exclude_from_reconciliation,
             'exclude_from_menu' => (bool) $r->exclude_from_menu,
-            'items'             => $withItems ? $r->items->map(fn($i) => [
-                'ingredient_id'   => $i->ingredient_id,
+            'items' => $withItems ? $r->items->map(fn ($i) => [
+                'ingredient_id' => $i->ingredient_id,
                 'ingredient_name' => $i->ingredient?->name ?? '—',
-                'qty'             => (float) $i->qty,
-                'purchase_unit'   => $i->purchase_unit,
+                'qty' => (float) $i->qty,
+                'purchase_unit' => $i->purchase_unit,
             ]) : [],
         ]);
 
@@ -108,44 +109,44 @@ class MenuRecipeController extends Controller
             ->with('items.ingredient:id,name,unit,default_cost')
             ->findOrFail($id);
 
-        $items = $recipe->items->map(fn($i) => [
-            'id'                 => $i->id,
-            'ingredient_id'      => $i->ingredient_id,
-            'ingredient_name'    => $i->ingredient?->name ?? '—',
-            'ingredient_unit'    => $i->ingredient?->unit ?? 'each',
-            'qty'                => (float) $i->qty,
-            'weight_g'           => $i->weight_g ? (float) $i->weight_g : null,
-            'volume_ml'          => $i->volume_ml ? (float) $i->volume_ml : null,
-            'purchase_unit'      => $i->purchase_unit,
-            'purchase_unit_price'=> (float) $i->purchase_unit_price,
-            'recipe_unit'        => $i->recipe_unit,
-            'conversion_factor'  => (float) $i->conversion_factor,
-            'yield_pct'          => (float) $i->yield_pct,
-            'ep_cost'            => (float) $i->ep_cost,
-            'line_total'         => (float) $i->line_total,
-            'sort_order'         => (int) $i->sort_order,
+        $items = $recipe->items->map(fn ($i) => [
+            'id' => $i->id,
+            'ingredient_id' => $i->ingredient_id,
+            'ingredient_name' => $i->ingredient?->name ?? '—',
+            'ingredient_unit' => $i->ingredient?->unit ?? 'each',
+            'qty' => (float) $i->qty,
+            'weight_g' => $i->weight_g ? (float) $i->weight_g : null,
+            'volume_ml' => $i->volume_ml ? (float) $i->volume_ml : null,
+            'purchase_unit' => $i->purchase_unit,
+            'purchase_unit_price' => (float) $i->purchase_unit_price,
+            'recipe_unit' => $i->recipe_unit,
+            'conversion_factor' => (float) $i->conversion_factor,
+            'yield_pct' => (float) $i->yield_pct,
+            'ep_cost' => (float) $i->ep_cost,
+            'line_total' => (float) $i->line_total,
+            'sort_order' => (int) $i->sort_order,
         ]);
 
         $totals = $this->calc->calculateRecipeTotals($recipe);
 
         return response()->json([
             'data' => [
-                'id'                => $recipe->id,
-                'name'              => $recipe->name,
-                'code'              => $recipe->code,
-                'category'          => $recipe->category,
-                'branch_id'         => $recipe->branch_id,
-                'menu_id'           => $recipe->menu_id,
-                'recipe_type'       => $recipe->recipe_type,
-                'portions'          => (float) $recipe->portions,
-                'selling_price'     => (float) ($recipe->selling_price ?? 0),
+                'id' => $recipe->id,
+                'name' => $recipe->name,
+                'code' => $recipe->code,
+                'category' => $recipe->category,
+                'branch_id' => $recipe->branch_id,
+                'menu_id' => $recipe->menu_id,
+                'recipe_type' => $recipe->recipe_type,
+                'portions' => (float) $recipe->portions,
+                'selling_price' => (float) ($recipe->selling_price ?? 0),
                 'target_food_cost_pct' => (float) ($recipe->target_food_cost_pct ?? 30),
                 'prep_instructions' => $recipe->prep_instructions,
-                'status'            => $recipe->status,
-                'version'           => $recipe->version,
+                'status' => $recipe->status,
+                'version' => $recipe->version,
                 'exclude_from_reconciliation' => (bool) $recipe->exclude_from_reconciliation,
                 'exclude_from_menu' => (bool) $recipe->exclude_from_menu,
-                'items'             => $items,
+                'items' => $items,
             ],
             'totals' => $totals,
         ]);
@@ -198,7 +199,25 @@ class MenuRecipeController extends Controller
         $recipe = MenuRecipe::where('client_id', $request->user()->current_client_id)
             ->findOrFail($id);
         $recipe->delete();
+
         return response()->json(['message' => 'deleted']);
+    }
+
+    public function orphanedCount(Request $request): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+        $branchId = $request->branch_id;
+
+        if (! $branchId) {
+            return response()->json(['count' => 0]);
+        }
+
+        $count = MenuRecipe::where('client_id', $clientId)
+            ->where('branch_id', $branchId)
+            ->whereNull('menu_id')
+            ->count();
+
+        return response()->json(['count' => $count]);
     }
 
     public function copy(Request $request, string $id): JsonResponse
@@ -351,12 +370,13 @@ class MenuRecipeController extends Controller
         $recipe = MenuRecipe::where('client_id', $request->user()->current_client_id)
             ->findOrFail($id);
         $versions = $recipe->versions()->orderBy('version_number', 'desc')->get()
-            ->map(fn($v) => [
+            ->map(fn ($v) => [
                 'id' => $v->id,
                 'version_number' => $v->version_number,
                 'notes' => $v->notes,
                 'created_at' => $v->created_at,
             ]);
+
         return response()->json($versions);
     }
 
@@ -400,14 +420,14 @@ class MenuRecipeController extends Controller
                 ->get();
 
             foreach ($recipes as $recipe) {
-                $newName = $recipe->name . ' (نسخة)';
+                $newName = $recipe->name.' (نسخة)';
                 $suffix = 2;
                 while (MenuRecipe::where('client_id', $clientId)
                     ->where('menu_id', $recipe->menu_id)
                     ->where('branch_id', $recipe->branch_id)
                     ->where('name', $newName)->exists()
                 ) {
-                    $newName = $recipe->name . ' (نسخة ' . $suffix . ')';
+                    $newName = $recipe->name.' (نسخة '.$suffix.')';
                     $suffix++;
                 }
 
@@ -493,7 +513,9 @@ class MenuRecipeController extends Controller
             foreach ($validRecipeIds as $recipeId) {
                 $exists = MenuRecipeItem::where('recipe_id', $recipeId)
                     ->where('ingredient_id', $data['ingredient_id'])->exists();
-                if ($exists) continue;
+                if ($exists) {
+                    continue;
+                }
 
                 $maxSort = MenuRecipeItem::where('recipe_id', $recipeId)->max('sort_order') ?? 0;
 
@@ -553,7 +575,9 @@ class MenuRecipeController extends Controller
             foreach ($validRecipeIds as $recipeId) {
                 $oldItem = MenuRecipeItem::where('recipe_id', $recipeId)
                     ->where('ingredient_id', $data['old_ingredient_id'])->first();
-                if (!$oldItem) continue;
+                if (! $oldItem) {
+                    continue;
+                }
 
                 $existingItem = MenuRecipeItem::where('recipe_id', $recipeId)
                     ->where('ingredient_id', $data['new_ingredient_id'])->first();
