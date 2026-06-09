@@ -23,6 +23,7 @@ const PERMISSION_MAP: Record<string, string> = {
   '/stock/opening': 'stock.opening',
   '/stock/closing': 'stock.closing',
   '/menu-engineering': 'menu-engineering',
+  '/ocr': 'menu-engineering',
   '/reports/financial-details': 'reports.financial',
   '/reports/diffs': 'reports.diffs',
   '/reports/cost': 'reports.food-cost',
@@ -86,6 +87,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       section: 'هندسة القائمة',
       items: [
         { href: '/menu-engineering', icon: '📝',  label: 'Menu Engineering' },
+        { href: '/ocr',              icon: '🔍',  label: 'قارئ OCR' },
       ].filter((i) => hasPerm(i.href)),
     },
     {

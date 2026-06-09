@@ -20,6 +20,7 @@ use App\Http\Controllers\MenuEngineering\MenuIngredientController;
 use App\Http\Controllers\MenuEngineering\MenuRecipeController;
 use App\Http\Controllers\MenuEngineering\MenuReconciliationController;
 use App\Http\Controllers\MenuEngineering\MenuReportController;
+use App\Http\Controllers\MenuEngineering\MenuOcrController;
 use App\Http\Controllers\MenuEngineering\MenuSalesImportController;
 use App\Http\Controllers\MenuEngineering\MenuUnitConversionController;
 use App\Http\Controllers\MenuEngineering\SmartAnalyticsController;
@@ -272,6 +273,12 @@ osts']);
             Route::get('/cost-impact', [SmartAnalyticsController::class, 'costImpact']);
             Route::get('/cost-contribution', [SmartAnalyticsController::class, 'costContribution']);
             Route::get('/stock-value', [SmartAnalyticsController::class, 'stockValue']);
+        });
+
+        // OCR
+        Route::prefix('ocr')->group(function () {
+            Route::get('/items', [MenuOcrController::class, 'items']);
+            Route::post('/match', [MenuOcrController::class, 'match']);
         });
     });
 
