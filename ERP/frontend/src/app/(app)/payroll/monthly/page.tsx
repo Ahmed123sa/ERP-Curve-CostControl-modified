@@ -137,7 +137,7 @@ export default function PayrollMonthlyPage() {
     updateCellMut.mutate({ detailId, field: 'rest_days_taken', value: currentVal ? 0 : 1 });
   };
 
-  const handleExportExcel = async (payrollId: string) => {
+  const handleExportExcel = async (payrollId: string, clientName: string, month: number, year: number) => {
     try {
       const res = await api.get(`/payroll/monthly/${payrollId}/export-excel`, {
         responseType: 'blob',
@@ -145,7 +145,7 @@ export default function PayrollMonthlyPage() {
       const url = URL.createObjectURL(res.data);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `مرتبات_${payrollId}.xlsx`;
+      link.download = `مرتبات_${clientName}_${month}_${year}.xlsx`;
       link.click();
       URL.revokeObjectURL(url);
       toast.success('جاري التصدير...');
@@ -264,7 +264,7 @@ export default function PayrollMonthlyPage() {
                             <button onClick={() => openPayroll(p.id)} className="text-blue-600 hover:text-blue-800 text-xs">عرض</button>
                             {p.status === 'draft' && <button onClick={() => approveMut.mutate(p.id)} className="text-green-600 hover:text-green-800 text-xs">اعتماد</button>}
                             {p.status === 'draft' && <button onClick={() => { if (confirm('حذف مسودة هذا الشهر؟')) deleteMut.mutate(p.id); }} className="text-red-500 hover:text-red-700 text-xs">حذف</button>}
-                            <button onClick={() => handleExportExcel(p.id)} className="text-gray-600 hover:text-gray-800 text-xs">إكسل</button>
+                            <button onClick={() => handleExportExcel(p.id, p.client_name, p.month, p.year)} className="text-gray-600 hover:text-gray-800 text-xs">إكسل</button>
                           </td>
                         </tr>
                       );
@@ -298,7 +298,7 @@ export default function PayrollMonthlyPage() {
                 {currentPayroll.status === 'draft' && (
                   <button onClick={() => approveMut.mutate(currentPayroll.id)} className="px-3 py-1 bg-green-600 text-white text-xs rounded-lg hover:bg-green-700">اعتماد</button>
                 )}
-                <button onClick={() => handleExportExcel(currentPayroll.id)} className="px-3 py-1 bg-gray-100 text-gray-700 text-xs rounded-lg hover:bg-gray-200">إكسل</button>
+                <button onClick={() => handleExportExcel(currentPayroll.id, currentPayroll.client_name, currentPayroll.month, currentPayroll.year)} className="px-3 py-1 bg-gray-100 text-gray-700 text-xs rounded-lg hover:bg-gray-200">إكسل</button>
               </div>
             </div>
 

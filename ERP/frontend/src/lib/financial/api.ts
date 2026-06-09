@@ -68,6 +68,9 @@ export const financialApi = {
   updateClosingDetailFormula: (detailId: string, formula: any) =>
     api.put(`/financial/closing-reports/details/${detailId}/formula`, { formula }).then((r) => r.data),
 
+  resetClosingDetailToAuto: (detailId: string) =>
+    api.post(`/financial/closing-reports/details/${detailId}/reset-auto`).then((r) => r.data),
+
   exportClosingExcel: (reportId: string) =>
     api.get(`/financial/closing-reports/${reportId}/export-excel`, { responseType: 'blob' }).then((r) => r.data),
 
@@ -82,6 +85,15 @@ export const financialApi = {
 
   getDetailEntries: (detailId: string) =>
     api.get(`/financial/closing-reports/details/${detailId}/entries`).then((r) => r.data),
+
+  linkAdvances: (reportId: string) =>
+    api.get(`/financial/closing-reports/${reportId}/link-advances`).then((r) => r.data),
+
+  linkSalaries: (reportId: string) =>
+    api.get(`/financial/closing-reports/${reportId}/link-salaries`).then((r) => r.data),
+
+  applyLinkValue: (detailId: string, value: number) =>
+    api.post(`/financial/closing-reports/details/${detailId}/apply-link-value`, { value }).then((r) => r.data),
 
   // Advances
   employees: () =>

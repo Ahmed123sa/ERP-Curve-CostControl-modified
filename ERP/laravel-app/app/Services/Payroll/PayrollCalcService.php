@@ -117,14 +117,14 @@ class PayrollCalcService
                 ]);
             }
 
-            return $payroll->fresh()->load('details.employee', 'details.bonusItems');
+        return $payroll->fresh()->load('client', 'details.employee', 'details.bonusItems');
         });
     }
 
     public function list(string $clientId): array
     {
         return PayrollMonthly::where('client_id', $clientId)
-            ->with('details.employee', 'details.bonusItems')
+            ->with('client', 'details.employee', 'details.bonusItems')
             ->orderBy('year', 'desc')
             ->orderBy('month', 'desc')
             ->get()
@@ -134,7 +134,7 @@ class PayrollCalcService
     public function show(string $clientId, string $id): PayrollMonthly
     {
         return PayrollMonthly::where('client_id', $clientId)
-            ->with('details.employee', 'details.bonusItems')
+            ->with('client', 'details.employee', 'details.bonusItems')
             ->findOrFail($id);
     }
 
@@ -142,7 +142,7 @@ class PayrollCalcService
     {
         $payroll = PayrollMonthly::where('client_id', $clientId)->findOrFail($id);
         $payroll->update(['status' => 'approved']);
-        return $payroll->fresh()->load('details.employee', 'details.bonusItems');
+        return $payroll->fresh()->load('client', 'details.employee', 'details.bonusItems');
     }
 
     public function updateBonus(string $clientId, string $detailId, array $bonusItems): PayrollMonthlyDetail

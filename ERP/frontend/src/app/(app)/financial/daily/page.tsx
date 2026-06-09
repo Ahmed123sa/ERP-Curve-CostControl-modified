@@ -363,7 +363,8 @@ export default function FinancialDailyPage() {
                 .then((r) => {
                   const url = window.URL.createObjectURL(new Blob([r.data]));
                   const a = document.createElement('a'); a.href = url;
-                  a.download = `اليومية_${month}_يوم${selectedDay}.xlsx`; a.click();
+                  const [y2, m2] = month.split('-');
+                  a.download = `مالي_${m2}_${y2}_يوم${selectedDay}.xlsx`; a.click();
                   window.URL.revokeObjectURL(url);
                   toast.success('تم التصدير');
                 })
@@ -377,7 +378,8 @@ export default function FinancialDailyPage() {
                 .then((r) => {
                   const url = window.URL.createObjectURL(new Blob([r.data]));
                   const a = document.createElement('a'); a.href = url;
-                  a.download = `اليوميات_${month}.xlsx`; a.click();
+                  const [y, m] = month.split('-');
+                  a.download = `مالي_${m}_${y}.xlsx`; a.click();
                   window.URL.revokeObjectURL(url);
                   toast.success('تم التصدير');
                 })

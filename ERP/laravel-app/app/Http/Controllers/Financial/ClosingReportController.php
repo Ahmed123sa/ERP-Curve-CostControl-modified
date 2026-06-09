@@ -75,6 +75,15 @@ class ClosingReportController extends Controller
         return response()->json(['detail' => $detail, 'message' => 'تم التحديث']);
     }
 
+    public function resetDetailToAuto(Request $request, string $detailId): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+
+        $detail = $this->service->resetDetailToAuto($clientId, $detailId);
+
+        return response()->json(['detail' => $detail, 'message' => 'تم إعادة التعيين التلقائي']);
+    }
+
     public function addDetailItem(Request $request, string $detailId): JsonResponse
     {
         $clientId = $request->user()->current_client_id;
@@ -103,18 +112,20 @@ class ClosingReportController extends Controller
     {
         $clientId = $request->user()->current_client_id;
 
-        return $this->service->exportExcel($clientId, $id);
+        $detailIds = $request->query('detail_ids');
+        $detailIds = $detailIds ? explode(',', $detailIds) : [];
+
+        return $this->service->exportExcel($clientId, $id, $detailIds);
     }
 
     public function exportPdf(Request $request, string $id)
     {
         $clientId = $request->user()->current_client_id;
 
-        $report = \App\Models\Financial\FinancialClosingReport::where('client_id', $clientId)
-            ->with('details')
-            ->findOrFail($id);
+        $detailIds = $request->query('detail_ids');
+        $detailIds = $detailIds ? explode(',', $detailIds) : [];
 
-        return response()->json(['message' => 'جاري التصدير...']);
+        return $this->service->exportPdf($clientId, $id, $detailIds);
     }
 
     public function addDetail(Request $request, string $reportId): JsonResponse
@@ -163,6 +174,39 @@ class ClosingReportController extends Controller
         $entries = $this->service->getDetailEntries($clientId, $detailId);
 
         return response()->json(['entries' => $entries]);
+    }
+
+    // ====== Link Advances & Salaries ======
+
+    public function linkAdvances(Request $request, string $id): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+
+        $data = $this->service->getLinkAdvances($clientId, $id);
+
+        return response()->json($data);
+    }
+
+    public function linkSalaries(Request $request, string $id): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+
+        $data = $this->service->getLinkSalaries($clientId, $id);
+
+        return response()->json($data);
+    }
+
+    public function applyLinkValue(Request $request, string $detailId): JsonResponse
+    {
+        $clientId = $request->user()->current_client_id;
+
+        $data = $request->validate([
+            'value' => 'required|numeric|min:0',
+        ]);
+
+        $detail = $this->service->applyLinkValue($clientId, $detailId, $data['value']);
+
+        return response()->json(['detail' => $detail, 'message' => 'تم تطبيق القيمة']);
     }
 
     // ====== Approval Workflow ======

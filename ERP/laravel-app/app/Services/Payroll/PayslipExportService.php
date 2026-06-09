@@ -2,13 +2,16 @@
 
 namespace App\Services\Payroll;
 
+use App\Models\Client;
 use App\Models\Payroll\PayrollMonthly;
+use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
 
 class PayslipExportService
 {
@@ -22,30 +25,52 @@ class PayslipExportService
         $year = $payroll->year;
         $details = $payroll->details;
 
+        $client = Client::find($clientId);
+        $clientName = $client ? $client->name : '';
+        $sysName = config('app.name', 'ERP CostControl');
+
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
-        $sheet->setTitle('الرواتب');
+        $sheet->setTitle("مرتبات {$month} {$year}");
         $sheet->setRightToLeft(true);
 
-        // Title
+        // Row 1: Logo + System Name + Client Name
         $sheet->mergeCells('A1:N1');
-        $sheet->setCellValue('A1', "كشف الرواتب — {$month}/{$year}");
-        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
-        $sheet->getStyle('A1')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->setCellValue('A1', $sysName . ' | ' . $clientName);
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14)->setName('Arial')->getColor()->setARGB('FF2F5496');
+        $sheet->getStyle('A1')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER);
+        $sheet->getRowDimension(1)->setRowHeight(40);
 
-        // Headers row 2
+        // Logo (after mergeCells)
+        if ($client && $client->logo && Storage::disk('public')->exists($client->logo)) {
+            $drawing = new Drawing();
+            $drawing->setPath(Storage::disk('public')->path($client->logo));
+            $drawing->setHeight(40);
+            $drawing->setCoordinates('A1');
+            $drawing->setOffsetX(5);
+            $drawing->setOffsetY(2);
+            $drawing->setWorksheet($sheet);
+        }
+
+        // Row 2: Title
+        $sheet->mergeCells('A2:N2');
+        $sheet->setCellValue('A2', "مرتبات {$month}/{$year}");
+        $sheet->getStyle('A2')->getFont()->setBold(true)->setSize(13)->setName('Arial')->getColor()->setARGB('FF1e3a5f');
+        $sheet->getStyle('A2')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+
+        // Row 3: Headers
         $headers = ['م', 'الاسم', 'الوظيفة', 'المرتب الأساسي', 'أيام العمل', 'أجر اليوم',
             'خصم غياب', 'إضافي راحات', 'تطبيق', 'أوفر تايم', 'المكافآت', 'السلفة',
             'إجمالي الخصم', 'صافي المرتب'];
 
         foreach ($headers as $i => $h) {
             $col = Coordinate::stringFromColumnIndex($i + 1);
-            $sheet->setCellValue($col . '2', $h);
+            $sheet->setCellValue($col . '3', $h);
         }
 
-        $headerRange = 'A2:' . Coordinate::stringFromColumnIndex(count($headers)) . '2';
-        $sheet->getStyle($headerRange)->getFont()->setBold(true);
-        $sheet->getStyle($headerRange)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FFE8E8E8');
+        $headerRange = 'A3:' . Coordinate::stringFromColumnIndex(count($headers)) . '3';
+        $sheet->getStyle($headerRange)->getFont()->setBold(true)->setSize(11)->setName('Arial')->getColor()->setARGB('FFFFFFFF');
+        $sheet->getStyle($headerRange)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF2F5496');
         $sheet->getStyle($headerRange)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
         $colWidths = [5, 20, 15, 12, 10, 10, 12, 12, 12, 10, 12, 10, 12, 12];
@@ -53,7 +78,7 @@ class PayslipExportService
             $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($i + 1))->setWidth($w);
         }
 
-        $row = 3;
+        $row = 4;
         $totals = array_fill(0, count($headers), 0);
         foreach ($details as $i => $d) {
             $col = 1;
@@ -105,13 +130,13 @@ class PayslipExportService
             $styleArray = [
                 'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['argb' => 'FFCCCCCC']]],
             ];
-            $sheet->getStyle('A2:' . Coordinate::stringFromColumnIndex(count($headers)) . $dataEnd)->applyFromArray($styleArray);
+            $sheet->getStyle('A3:' . Coordinate::stringFromColumnIndex(count($headers)) . $dataEnd)->applyFromArray($styleArray);
         }
 
         $writer = new Xlsx($spreadsheet);
         return response()->streamDownload(function () use ($writer) {
             $writer->save('php://output');
-        }, "كشف_الرواتب_{$month}_{$year}.xlsx",
+        }, "مرتبات_{$clientName}_{$month}_{$year}.xlsx",
             ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']
         );
     }

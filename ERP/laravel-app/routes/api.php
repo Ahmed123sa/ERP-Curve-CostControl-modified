@@ -312,9 +312,13 @@ osts']);
         Route::delete('/closing-reports/details/{detailId}', [ClosingReportController::class, 'deleteDetail']);
         Route::put('/closing-reports/details/{detailId}/formula', [ClosingReportController::class, 'updateFormula']);
         Route::put('/closing-reports/details/{detailId}', [ClosingReportController::class, 'updateDetail']);
+        Route::post('/closing-reports/details/{detailId}/reset-auto', [ClosingReportController::class, 'resetDetailToAuto']);
         Route::post('/closing-reports/details/{detailId}/items', [ClosingReportController::class, 'addDetailItem']);
         Route::delete('/closing-reports/details/items/{itemId}', [ClosingReportController::class, 'deleteDetailItem']);
         Route::get('/closing-reports/details/{detailId}/entries', [ClosingReportController::class, 'getDetailEntries']);
+        Route::get('/closing-reports/{id}/link-advances', [ClosingReportController::class, 'linkAdvances']);
+        Route::get('/closing-reports/{id}/link-salaries', [ClosingReportController::class, 'linkSalaries']);
+        Route::post('/closing-reports/details/{detailId}/apply-link-value', [ClosingReportController::class, 'applyLinkValue']);
     });
 
     Route::prefix('financial')->middleware('permission:financial.advances')->group(function () {

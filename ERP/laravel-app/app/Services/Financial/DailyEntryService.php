@@ -2,17 +2,20 @@
 
 namespace App\Services\Financial;
 
+use App\Models\Client;
 use App\Models\Financial\FinancialDailyEntry;
 use App\Models\Financial\FinancialDailyEntryDetail;
 use App\Models\Financial\FinancialExpenseCategory;
 use App\Models\Item;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
 
 class DailyEntryService
 {
@@ -97,6 +100,9 @@ class DailyEntryService
     {
         [$year, $monthNum] = explode('-', $month);
         $dateStr = sprintf('%s-%02d-%02d', $year, $monthNum, $day);
+
+        $client = Client::find($clientId);
+        $clientName = $client ? $client->name : '';
 
         $entry = FinancialDailyEntry::where('client_id', $clientId)
             ->whereDate('date', $dateStr)
@@ -239,7 +245,7 @@ class DailyEntryService
         $writer = new Xlsx($spreadsheet);
         return response()->streamDownload(function () use ($writer) {
             $writer->save('php://output');
-        }, "اليومية_{$month}_{$day}.xlsx", ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
+        }, "مالي_{$clientName}_{$monthNum}_{$day}.xlsx", ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
     }
 
     public function exportExcel(string $clientId, string $month): \Symfony\Component\HttpFoundation\StreamedResponse
@@ -274,7 +280,11 @@ class DailyEntryService
         $grandExpenses = 0;
         $grandCatTotals = [];
 
-        $startRow = 6;
+        $client = Client::find($clientId);
+        $clientName = $client ? $client->name : '';
+        $sysName = config('app.name', 'ERP CostControl');
+
+        $startRow = 8;
         $dataEndRow = $startRow + $globalMaxDetails - 1;
         $sumRow = $dataEndRow + 1;
 
@@ -290,24 +300,52 @@ class DailyEntryService
             $colHeaderFont = ['bold' => true, 'size' => 10, 'color' => ['argb' => 'FFFFFFFF']];
             $normalFont = ['size' => 10];
 
-            // Row 1: Title
-            $sheet->mergeCells('A1:' . Coordinate::stringFromColumnIndex(3 + count($categories) * 2 + 2) . '1');
-            $sheet->setCellValue('A1', "اليومية المالية لشهر {$monthNum}");
-            $sheet->getStyle('A1')->getFont()->applyFromArray($titleFont);
-            $sheet->getStyle('A1')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-            $sheet->getRowDimension(1)->setRowHeight(30);
+            $totalCols = 3 + count($categories) * 2 + 2;
+            $lastColLetter = Coordinate::stringFromColumnIndex($totalCols);
 
-            // Row 2: Month/Client
-            $sheet->mergeCells('A2:' . Coordinate::stringFromColumnIndex(3 + count($categories) * 2 + 2) . '2');
-            $sheet->setCellValue('A2', "{$monthNum}/{$year}");
-            $sheet->getStyle('A2')->getFont()->applyFromArray($subFont);
+            // Row 1: Logo + System Name
+            $sheet->mergeCells('A1:E1');
+            $sheet->setCellValue('A1', $sysName);
+            $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14)->setName('Arial')->getColor()->setARGB('FF2F5496');
+            $sheet->getStyle('A1')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER);
+            $sheet->getRowDimension(1)->setRowHeight(40);
+
+            // Logo (after mergeCells)
+            if ($client && $client->logo && Storage::disk('public')->exists($client->logo)) {
+                $drawing = new Drawing();
+                $drawing->setPath(Storage::disk('public')->path($client->logo));
+                $drawing->setHeight(40);
+                $drawing->setCoordinates('A1');
+                $drawing->setOffsetX(5);
+                $drawing->setOffsetY(2);
+                $drawing->setWorksheet($sheet);
+            }
+
+            // Row 2: Client Name
+            $sheet->mergeCells('A2:E2');
+            $sheet->setCellValue('A2', $clientName);
+            $sheet->getStyle('A2')->getFont()->setBold(true)->setSize(12)->setName('Arial')->getColor()->setARGB('FF1e3a5f');
             $sheet->getStyle('A2')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            $sheet->getRowDimension(2)->setRowHeight(26);
 
-            // Row 3: Day date banner
-            $sheet->mergeCells('A3:' . Coordinate::stringFromColumnIndex(3 + count($categories) * 2 + 2) . '3');
-            $sheet->setCellValue('A3', "اليوم: {$day} / {$monthNum} / {$year}");
-            $sheet->getStyle('A3')->getFont()->setBold(true)->setSize(12)->getColor()->setARGB('FF1e3a5f');
-            $sheet->getStyle('A3')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+            // Row 3: Title
+            $sheet->mergeCells('A3:E3');
+            $sheet->setCellValue('A3', "اليومية المالية لشهر {$monthNum}");
+            $sheet->getStyle('A3')->getFont()->applyFromArray($titleFont);
+            $sheet->getStyle('A3')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            $sheet->getRowDimension(3)->setRowHeight(30);
+
+            // Row 4: Month/Client
+            $sheet->mergeCells('A4:E4');
+            $sheet->setCellValue('A4', "{$monthNum}/{$year}");
+            $sheet->getStyle('A4')->getFont()->applyFromArray($subFont);
+            $sheet->getStyle('A4')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+
+            // Row 5: Day date banner
+            $sheet->mergeCells('A5:E5');
+            $sheet->setCellValue('A5', "اليوم: {$day} / {$monthNum} / {$year}");
+            $sheet->getStyle('A5')->getFont()->setBold(true)->setSize(12)->getColor()->setARGB('FF1e3a5f');
+            $sheet->getStyle('A5')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
 
             // Header styling
             $headerFill = ['fillType' => Fill::FILL_SOLID, 'startColor' => ['argb' => 'FF1e3a5f']];
@@ -315,19 +353,21 @@ class DailyEntryService
                 'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_MEDIUM, 'color' => ['argb' => 'FF2d4a7a']]],
             ];
 
-            // Columns layout:
-            // A(1)=اليوم, B(2)=التاريخ, C(3)=المبيعات, D-E=cat1, F-G=cat2, ..., last-1=إجمالي المصروفات, last=الصافي
-            $catStarts = []; // column index (1-based) for each category's المبلغ column
+            // Columns layout shifted to rows 7-8 (with new header rows 1-5)
+            $catStarts = [];
             $col = 1;
-            $sheet->setCellValue(Coordinate::stringFromColumnIndex($col) . '5', 'اليوم');
+            $sheet->setCellValue(Coordinate::stringFromColumnIndex($col) . '7', 'اليوم');
+            $sheet->getStyle(Coordinate::stringFromColumnIndex($col) . '7')->getFont()->applyFromArray($colHeaderFont);
             $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($col))->setWidth(8);
             $col++;
-            $sheet->setCellValue(Coordinate::stringFromColumnIndex($col) . '5', 'التاريخ');
+            $sheet->setCellValue(Coordinate::stringFromColumnIndex($col) . '7', 'التاريخ');
+            $sheet->getStyle(Coordinate::stringFromColumnIndex($col) . '7')->getFont()->applyFromArray($colHeaderFont);
             $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($col))->setWidth(14);
             $col++;
 
             $salesCol = $col;
-            $sheet->setCellValue(Coordinate::stringFromColumnIndex($col) . '5', 'المبيعات');
+            $sheet->setCellValue(Coordinate::stringFromColumnIndex($col) . '7', 'المبيعات');
+            $sheet->getStyle(Coordinate::stringFromColumnIndex($col) . '7')->getFont()->applyFromArray($colHeaderFont);
             $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($col))->setWidth(16);
             $salesColLetter = Coordinate::stringFromColumnIndex($col);
             $col++;
@@ -336,42 +376,44 @@ class DailyEntryService
             foreach ($categories as $cat) {
                 $catStarts[] = $col;
                 $colLetter = Coordinate::stringFromColumnIndex($col);
-                $sheet->setCellValue($colLetter . '5', $cat->name);
-                $sheet->mergeCells($colLetter . '5:' . Coordinate::stringFromColumnIndex($col + 1) . '5');
-                $sheet->getStyle($colLetter . '5')->getFont()->applyFromArray($colHeaderFont);
-                $sheet->getStyle($colLetter . '5')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+                $sheet->setCellValue($colLetter . '7', $cat->name);
+                $sheet->mergeCells($colLetter . '7:' . Coordinate::stringFromColumnIndex($col + 1) . '7');
+                $sheet->getStyle($colLetter . '7')->getFont()->applyFromArray($colHeaderFont);
+                $sheet->getStyle($colLetter . '7')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
                 $sheet->getColumnDimension($colLetter)->setWidth(14);
                 $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($col + 1))->setWidth(18);
-                $sheet->setCellValue($colLetter . '6', 'المبلغ');
-                $sheet->getStyle($colLetter . '6')->getFont()->setSize(9)->getColor()->setARGB('FF666666');
-                $sheet->getStyle($colLetter . '6')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-                $sheet->setCellValue(Coordinate::stringFromColumnIndex($col + 1) . '6', 'البيان');
-                $sheet->getStyle(Coordinate::stringFromColumnIndex($col + 1) . '6')->getFont()->setSize(9)->getColor()->setARGB('FF666666');
-                $sheet->getStyle(Coordinate::stringFromColumnIndex($col + 1) . '6')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+                $sheet->setCellValue($colLetter . '8', 'المبلغ');
+                $sheet->getStyle($colLetter . '8')->getFont()->setSize(9)->getColor()->setARGB('FF666666');
+                $sheet->getStyle($colLetter . '8')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+                $sheet->setCellValue(Coordinate::stringFromColumnIndex($col + 1) . '8', 'البيان');
+                $sheet->getStyle(Coordinate::stringFromColumnIndex($col + 1) . '8')->getFont()->setSize(9)->getColor()->setARGB('FF666666');
+                $sheet->getStyle(Coordinate::stringFromColumnIndex($col + 1) . '8')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
                 $col += 2;
             }
 
             $expCol = $col;
             $expColLetter = Coordinate::stringFromColumnIndex($col);
-            $sheet->setCellValue($expColLetter . '5', 'إجمالي المصروفات');
-            $sheet->getStyle($expColLetter . '5')->getFont()->setBold(true)->setSize(10)->getColor()->setARGB('FFCC0000');
-            $sheet->getStyle($expColLetter . '5')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            $sheet->setCellValue($expColLetter . '7', 'إجمالي المصروفات');
+            $sheet->getStyle($expColLetter . '7')->getFont()->setBold(true)->setSize(10)->getColor()->setARGB('FFCC0000');
+            $sheet->getStyle($expColLetter . '7')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
             $sheet->getColumnDimension($expColLetter)->setWidth(16);
             $col++;
 
             $netCol = $col;
             $netColLetter = Coordinate::stringFromColumnIndex($col);
-            $sheet->setCellValue($netColLetter . '5', 'الصافي');
-            $sheet->getStyle($netColLetter . '5')->getFont()->setBold(true)->setSize(10);
-            $sheet->getStyle($netColLetter . '5')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            $sheet->setCellValue($netColLetter . '7', 'الصافي');
+            $sheet->getStyle($netColLetter . '7')->getFont()->setBold(true)->setSize(10);
+            $sheet->getStyle($netColLetter . '7')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
             $sheet->getColumnDimension($netColLetter)->setWidth(16);
             $lastCol = $col;
 
-            // Style headers row 5-6
-            $sheet->getStyle('A5:' . Coordinate::stringFromColumnIndex($lastCol) . '6')
+            // Style headers row 7-8
+            $sheet->getStyle('A7:' . Coordinate::stringFromColumnIndex($lastCol) . '8')
                 ->getFill()->applyFromArray($headerFill);
-            $sheet->getStyle('A5:' . Coordinate::stringFromColumnIndex($lastCol) . '6')
+            $sheet->getStyle('A7:' . Coordinate::stringFromColumnIndex($lastCol) . '8')
                 ->applyFromArray($headerBorder);
+            $sheet->getStyle('A7:' . Coordinate::stringFromColumnIndex($lastCol) . '7')
+                ->applyFromArray(['font' => ['color' => ['argb' => 'FFFFFFFF']]]);
 
             // Write data rows
             $details = $entry ? $entry->details : collect([]);
@@ -432,6 +474,35 @@ class DailyEntryService
             $sheet->getStyle($netColLetter . $sumRow)->getFont()->setBold(true);
             $sheet->getStyle($netColLetter . $sumRow)->getNumberFormat()->setFormatCode('#,##0.00');
 
+            // Compact summary after sum row
+            $summH = $sumRow + 2;
+            $sheet->mergeCells('A' . $summH . ':C' . $summH);
+            $sheet->setCellValue('A' . $summH, 'ملخص اليوم');
+            $sheet->getStyle('A' . $summH)->getFont()->setBold(true)->setSize(11);
+            $sheet->getStyle('A' . $summH)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FFF2F2F2');
+            $sheet->getStyle('A' . $summH)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+
+            $r = $summH + 1;
+            $sheet->setCellValue('A' . $r, 'المبيعات');
+            $sheet->getStyle('A' . $r)->getFont()->setSize(10);
+            $sheet->setCellValue('B' . $r, "={$salesColLetter}{$sumRow}");
+            $sheet->getStyle('B' . $r)->getFont()->setBold(true)->setSize(10);
+            $sheet->getStyle('B' . $r)->getNumberFormat()->setFormatCode('#,##0.00');
+
+            $r++;
+            $sheet->setCellValue('A' . $r, 'إجمالي المصروفات');
+            $sheet->getStyle('A' . $r)->getFont()->setSize(10);
+            $sheet->setCellValue('B' . $r, "={$expColLetter}{$sumRow}");
+            $sheet->getStyle('B' . $r)->getFont()->setBold(true)->setSize(10)->getColor()->setARGB('FFCC0000');
+            $sheet->getStyle('B' . $r)->getNumberFormat()->setFormatCode('#,##0.00');
+
+            $r++;
+            $sheet->setCellValue('A' . $r, 'صافي اليومية');
+            $sheet->getStyle('A' . $r)->getFont()->setSize(10);
+            $sheet->setCellValue('B' . $r, "={$netColLetter}{$sumRow}");
+            $sheet->getStyle('B' . $r)->getFont()->setBold(true)->setSize(10)->getColor()->setARGB('FF008000');
+            $sheet->getStyle('B' . $r)->getNumberFormat()->setFormatCode('#,##0.00');
+
             // Borders for data area (including sum row)
             $styleArray = [
                 'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['argb' => 'FFCCCCCC']]],
@@ -454,14 +525,42 @@ class DailyEntryService
         $summary->setTitle('مجمع');
         $summary->setRightToLeft(true);
 
-        // Title
-        $summary->mergeCells('A1:' . Coordinate::stringFromColumnIndex(3 + count($categories) + 2) . '1');
-        $summary->setCellValue('A1', "ملخص اليوميات المالية لشهر {$monthNum}");
-        $summary->getStyle('A1')->getFont()->setBold(true)->setSize(14)->getColor()->setARGB('FF1e3a5f');
-        $summary->getStyle('A1')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $summary->getRowDimension(1)->setRowHeight(30);
+        $summaryCols = 3 + count($categories) + 2;
+        $summaryLastColLetter = Coordinate::stringFromColumnIndex($summaryCols);
 
-        $hRow = 3;
+        // Row 1: Logo + System Name
+        $summary->mergeCells('A1:E1');
+        $summary->setCellValue('A1', $sysName);
+        $summary->getStyle('A1')->getFont()->setBold(true)->setSize(14)->setName('Arial')->getColor()->setARGB('FF2F5496');
+        $summary->getStyle('A1')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER);
+        $summary->getRowDimension(1)->setRowHeight(40);
+
+        // Logo
+        if ($client && $client->logo && Storage::disk('public')->exists($client->logo)) {
+            $drawing = new Drawing();
+            $drawing->setPath(Storage::disk('public')->path($client->logo));
+            $drawing->setHeight(40);
+            $drawing->setCoordinates('A1');
+            $drawing->setOffsetX(5);
+            $drawing->setOffsetY(2);
+            $drawing->setWorksheet($summary);
+        }
+
+        // Row 2: Client Name
+        $summary->mergeCells('A2:E2');
+        $summary->setCellValue('A2', $clientName);
+        $summary->getStyle('A2')->getFont()->setBold(true)->setSize(12)->setName('Arial')->getColor()->setARGB('FF1e3a5f');
+        $summary->getStyle('A2')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $summary->getRowDimension(2)->setRowHeight(26);
+
+        // Row 3: Title
+        $summary->mergeCells('A3:E3');
+        $summary->setCellValue('A3', "ملخص اليوميات المالية لشهر {$monthNum}");
+        $summary->getStyle('A3')->getFont()->setBold(true)->setSize(14)->getColor()->setARGB('FF1e3a5f');
+        $summary->getStyle('A3')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $summary->getRowDimension(3)->setRowHeight(30);
+
+        $hRow = 5;
 
         // Column A (1): اليوم
         $summary->setCellValue('A' . $hRow, 'اليوم');
@@ -575,7 +674,7 @@ class DailyEntryService
         $writer = new Xlsx($spreadsheet);
         return response()->streamDownload(function () use ($writer) {
             $writer->save('php://output');
-        }, "اليوميات_{$month}.xlsx", ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
+        }, "مالي_{$clientName}_{$monthNum}_{$year}.xlsx", ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
     }
 
     public function exportWarehouseIncoming(string $clientId, string $month, ?int $day = null): \Symfony\Component\HttpFoundation\StreamedResponse

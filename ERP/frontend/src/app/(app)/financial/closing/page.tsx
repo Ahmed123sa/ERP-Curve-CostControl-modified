@@ -3,8 +3,8 @@ import { useState, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { financialApi } from '@/lib/financial/api';
 import { PageHeader } from '@/components/ui/AppShell';
+import { useAuthStore } from '@/lib/store';
 import toast from 'react-hot-toast';
-
 function EditableAmount({ value, onSave, enabled }: { value: number; onSave: (v: number) => void; enabled: boolean }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(value);
@@ -70,20 +70,104 @@ function DetailSubRow({ detailId }: { detailId: string }) {
   );
 }
 
+function LinkModal({ row, data, onClose, onApply }: { row: any; data: any; onClose: () => void; onApply?: (value: number) => void }) {
+  const employees = data?.employees || [];
+  const totalAll = data?.total_all || 0;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
+          <h3 className="font-bold text-lg">ربط بالرواتب — {row.name}</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+        </div>
+        <div className="px-6 py-4 overflow-y-auto space-y-4">
+          {!data ? (
+            <div className="text-center py-8 text-gray-400">جاري التحميل...</div>
+          ) : employees.length === 0 ? (
+            <div className="text-center py-8 text-gray-400">
+              لا توجد رواتب معتمدة لهذا الشهر
+              {data.status === null && ' (قم باعتماد كشف الرواتب أولاً)'}
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200 text-gray-600">
+                  <th className="px-3 py-2 text-right">الموظف</th>
+                  <th className="px-3 py-2 text-left w-24">الأساسي</th>
+                  <th className="px-3 py-2 text-left w-20">أيام</th>
+                  <th className="px-3 py-2 text-left w-20">السلف</th>
+                  <th className="px-3 py-2 text-left w-20">الخصم</th>
+                  <th className="px-3 py-2 text-left w-24">الصافي</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {employees.map((emp: any, i: number) => (
+                  <tr key={i} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 font-medium">{emp.name}</td>
+                    <td className="px-3 py-2 text-left tabular-nums">{emp.base_salary.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-left tabular-nums">{emp.work_days}</td>
+                    <td className="px-3 py-2 text-left tabular-nums">{emp.advance_amount.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-left tabular-nums">{emp.total_deductions.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-left tabular-nums font-bold">{emp.net_salary.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="bg-gray-50 font-bold border-t-2 border-gray-300">
+                  <td className="px-3 py-2">الإجمالي</td>
+                  <td className="px-3 py-2 text-left tabular-nums text-blue-700" colSpan={5}>{totalAll.toLocaleString()}</td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
+        </div>
+        <div className="px-6 py-3 border-t border-gray-100 flex items-center justify-between shrink-0">
+          <span className="text-sm text-gray-500">إجمالي الرواتب المعتمدة: <strong>{totalAll.toLocaleString()}</strong></span>
+          <div className="flex gap-2">
+            <button onClick={() => onApply?.(totalAll)} disabled={!totalAll}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">تطبيق القيمة</button>
+            <button onClick={onClose} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200">إغلاق</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FormulaModal({ detail, details, onClose, onSave }: { detail: any; details: any[]; onClose: () => void; onSave: (formula: any) => void }) {
   const [type, setType] = useState(detail?.formula_config?.type || 'sum');
   const [selectedKeys, setSelectedKeys] = useState<string[]>(
     detail?.formula_config?.keys || (detail?.formula_config?.a ? [detail.formula_config.a, detail.formula_config.b].filter(Boolean) : [])
   );
-  const available = details.filter((d: any) => d.id !== detail.id && d.row_type !== 'section_header' && d.line_type === detail.line_type);
+  const [customExpr, setCustomExpr] = useState(detail?.formula_config?.expression || '');
+  const availableAll = details.filter((d: any) => d.id !== detail.id && d.row_type !== 'section_header');
+  const available = type === 'custom' ? availableAll : availableAll.filter((d: any) => d.line_type === detail.line_type);
 
   function toggleKey(key: string) {
     setSelectedKeys((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
   }
 
+  function insertKey(key: string) {
+    setCustomExpr((prev) => {
+      const trimmed = prev.trim();
+      return trimmed ? trimmed + ' + ' + key : key;
+    });
+  }
+
+  function handleSave() {
+    if (type === 'custom') {
+      onSave({ type: 'custom', expression: customExpr });
+    } else if (type === 'sum') {
+      onSave({ type: 'sum', keys: selectedKeys });
+    } else if (type === 'subtract' && selectedKeys.length >= 2) {
+      onSave({ type: 'subtract', a: selectedKeys[0], b: selectedKeys[1] });
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <h3 className="font-bold text-lg">معادلة {detail.name}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
@@ -100,25 +184,53 @@ function FormulaModal({ detail, details, onClose, onSave }: { detail: any; detai
                 <input type="radio" name="ftype" value="subtract" checked={type === 'subtract'} onChange={() => setType('subtract')} />
                 <span>طرح (A - B)</span>
               </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="radio" name="ftype" value="custom" checked={type === 'custom'} onChange={() => setType('custom')} />
+                <span>نص مخصص</span>
+              </label>
             </div>
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-500 block mb-2">{type === 'sum' ? 'اختر البنود للجمع' : 'اختر A ثم B للطرح'}</label>
-            <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-lg p-2 space-y-1">
-              {available.map((d: any) => (
-                <label key={d.row_key || d.id} className={`flex items-center gap-2 px-3 py-2 rounded cursor-pointer ${selectedKeys.includes(d.row_key) ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50'}`}>
-                  <input type={type === 'subtract' ? 'radio' : 'checkbox'} name="f-row"
-                    checked={selectedKeys.includes(d.row_key)} onChange={() => toggleKey(d.row_key)} />
-                  <span>{d.name} ({d.amount.toLocaleString()})</span>
-                </label>
-              ))}
-              {available.length === 0 && <p className="text-gray-400 text-center py-4">لا توجد بنود متاحة</p>}
+          {type === 'custom' ? (
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-2">الصيغة (استخدم +, -, *, /)</label>
+                <input type="text" value={customExpr} onChange={(e) => setCustomExpr(e.target.value)}
+                  placeholder={'مثال: revenue - total_purchases'}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-2">اختر واضغط للإدراج</label>
+                <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-1.5 space-y-0.5">
+                  {available.map((d: any) => (
+                    <button key={d.row_key || d.id} type="button" onClick={() => insertKey(d.row_key)}
+                      className="w-full flex items-center justify-between px-3 py-1.5 rounded text-sm hover:bg-blue-50 hover:text-blue-700 text-right">
+                      <span className="font-medium">{d.name}</span>
+                      <span className="text-xs text-gray-400 font-mono mr-2">{d.row_key} ({d.amount.toLocaleString()})</span>
+                    </button>
+                  ))}
+                  {available.length === 0 && <p className="text-gray-400 text-center py-4 text-sm">لا توجد بنود متاحة</p>}
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div>
+              <label className="text-xs font-medium text-gray-500 block mb-2">{type === 'sum' ? 'اختر البنود للجمع' : 'اختر A ثم B للطرح'}</label>
+              <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-lg p-2 space-y-1">
+                {available.map((d: any) => (
+                  <label key={d.row_key || d.id} className={`flex items-center gap-2 px-3 py-2 rounded cursor-pointer ${selectedKeys.includes(d.row_key) ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50'}`}>
+                    <input type={type === 'subtract' ? 'radio' : 'checkbox'} name="f-row"
+                      checked={selectedKeys.includes(d.row_key)} onChange={() => toggleKey(d.row_key)} />
+                    <span>{d.name} ({d.amount.toLocaleString()})</span>
+                  </label>
+                ))}
+                {available.length === 0 && <p className="text-gray-400 text-center py-4">لا توجد بنود متاحة</p>}
+              </div>
+            </div>
+          )}
           <div className="flex gap-2 justify-end pt-2 border-t border-gray-100">
             <button onClick={onClose} className="px-4 py-2 text-gray-600 border border-gray-200 rounded-lg text-sm hover:bg-gray-50">إلغاء</button>
-            <button onClick={() => { if (type === 'sum') onSave({ type: 'sum', keys: selectedKeys }); else if (selectedKeys.length >= 2) onSave({ type: 'subtract', a: selectedKeys[0], b: selectedKeys[1] }); }}
-              disabled={selectedKeys.length < (type === 'subtract' ? 2 : 1)}
+            <button onClick={handleSave}
+              disabled={type === 'custom' ? !customExpr.trim() : selectedKeys.length < (type === 'subtract' ? 2 : 1)}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">حفظ المعادلة</button>
           </div>
         </div>
@@ -129,6 +241,7 @@ function FormulaModal({ detail, details, onClose, onSave }: { detail: any; detai
 
 export default function FinancialClosingPage() {
   const qc = useQueryClient();
+  const { currentClient } = useAuthStore();
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
@@ -138,6 +251,16 @@ export default function FinancialClosingPage() {
   const [addRowAmount, setAddRowAmount] = useState('0');
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [expandedDetails, setExpandedDetails] = useState<Set<string>>(new Set());
+  const [linkModal, setLinkModal] = useState<{ row: any; type: 'salaries' } | null>(null);
+  const [selectedDetailIds, setSelectedDetailIds] = useState<Set<string>>(new Set());
+
+  const toggleSelectedId = useCallback((id: string) => {
+    setSelectedDetailIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
 
   const toggleDetail = useCallback((id: string) => {
     setExpandedDetails((prev) => {
@@ -163,24 +286,42 @@ export default function FinancialClosingPage() {
   const details = report?.details || [];
   const status = report?.status || 'draft';
 
+  const allSelectable = details.filter((r: any) => r.category_id && r.row_type !== 'section_header');
+  const allSelected = allSelectable.length > 0 && allSelectable.every((r: any) => selectedDetailIds.has(r.id));
+
+  const toggleSelectAll = useCallback(() => {
+    if (allSelected) {
+      setSelectedDetailIds(new Set());
+    } else {
+      setSelectedDetailIds(new Set(allSelectable.map((r: any) => r.id)));
+    }
+  }, [allSelected, allSelectable]);
+
   const generateMutation = useMutation({
     mutationFn: () => financialApi.generateClosingReport(month, year),
     onSuccess: (res: any) => { toast.success('تم توليد التقرير'); qc.invalidateQueries({ queryKey: ['financial-closing', month, year] }); setSelectedReportId(res.report?.id || null); },
     onError: (e: any) => toast.error(e?.response?.data?.message || 'خطأ في التوليد'),
   });
 
-  const downloadExcel = async () => {
+  const monthNames = ['', 'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+
+  const downloadExport = async (format: 'excel' | 'pdf') => {
     if (!report) return;
     try {
       const token = localStorage.getItem('erp_token');
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'}/financial/closing-reports/${report.id}/export-excel`, {
+      const detailIds = Array.from(selectedDetailIds);
+      const params = new URLSearchParams();
+      if (detailIds.length > 0) params.set('detail_ids', detailIds.join(','));
+      const qs = params.toString();
+      const ext = format === 'excel' ? 'xlsx' : 'pdf';
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'}/financial/closing-reports/${report.id}/export-${format}${qs ? '?' + qs : ''}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) { toast.error('خطأ في التحميل'); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = `تقفيل_شهري_${report.month}_${report.year}.xlsx`;
+      a.href = url; a.download = `تقرير مالي ${currentClient?.name || ''} ${monthNames[report.month] || report.month} ${report.year}.${ext}`;
       a.click(); URL.revokeObjectURL(url);
     } catch { toast.error('خطأ في التحميل'); }
   };
@@ -203,9 +344,15 @@ export default function FinancialClosingPage() {
     onError: () => toast.error('خطأ في الحذف'),
   });
 
+  const resetToAutoMutation = useMutation({
+    mutationFn: (id: string) => financialApi.resetClosingDetailToAuto(id),
+    onSuccess: () => { toast.success('تم إعادة التعيين التلقائي'); qc.invalidateQueries({ queryKey: ['financial-closing', month, year] }); },
+    onError: () => toast.error('خطأ في إعادة التعيين'),
+  });
+
   const updateFormulaMutation = useMutation({
     mutationFn: ({ id, formula }: { id: string; formula: any }) => financialApi.updateClosingDetailFormula(id, formula),
-    onSuccess: () => { toast.success('تم حفظ المعادلة'); qc.invalidateQueries({ queryKey: ['financial-closing', month, year] }); setFormulaModal(null); },
+    onSuccess: () => { toast.success('تم حفظ المعادلة'); qc.invalidateQueries({ queryKey: ['financial-closing', month, year] }); if (selectedReportId) qc.invalidateQueries({ queryKey: ['financial-closing-report', selectedReportId] }); setFormulaModal(null); },
     onError: () => toast.error('خطأ في حفظ المعادلة'),
   });
 
@@ -227,12 +374,28 @@ export default function FinancialClosingPage() {
     onError: (e: any) => toast.error(e?.response?.data?.message || 'خطأ في إعادة الفتح'),
   });
 
+  const linkSalariesQuery = useQuery({
+    queryKey: ['link-salaries', report?.id],
+    queryFn: () => financialApi.linkSalaries(report!.id),
+    enabled: linkModal?.type === 'salaries' && !!report,
+  });
+
+  const applyLinkValueMutation = useMutation({
+    mutationFn: ({ detailId, value }: { detailId: string; value: number }) => financialApi.applyLinkValue(detailId, value),
+    onSuccess: () => { toast.success('تم تطبيق القيمة'); setLinkModal(null); qc.invalidateQueries({ queryKey: ['financial-closing', month, year] }); },
+    onError: () => toast.error('خطأ في تطبيق القيمة'),
+  });
+
   function isEditable(row: any) {
     return status === 'draft' && (row.row_type === 'manual' || (row.row_type === 'auto' && row.line_type !== 'revenue'));
   }
 
   function canDelete(row: any) {
-    return status === 'draft' && row.row_type === 'manual';
+    return status === 'draft' && row.row_type === 'manual' && !row.category_id;
+  }
+
+  function canResetToAuto(row: any) {
+    return status === 'draft' && row.row_type === 'manual' && row.category_id;
   }
 
   function isFormulaRow(row: any) {
@@ -240,10 +403,14 @@ export default function FinancialClosingPage() {
   }
 
   function showDetails(row: any): boolean {
-    if (row.row_type !== 'auto' || row.line_type === 'revenue' || !row.category_id) return false;
+    if (row.row_type === 'section_header' || row.line_type === 'revenue' || !row.category_id) return false;
     const noDetails = ['رواتب', 'إيجارات', 'إيجارات عاملين'];
     if (noDetails.includes(row.name)) return false;
     return true;
+  }
+
+  function shouldLinkSalaries(row: any): boolean {
+    return row.name.includes('راتب') || row.name.includes('رواتب');
   }
 
   function rowStyle(row: any) {
@@ -271,7 +438,8 @@ export default function FinancialClosingPage() {
             {report && status === 'draft' && <button onClick={() => approveMutation.mutate()} disabled={approveMutation.isPending} className="px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700 disabled:opacity-50">اعتماد</button>}
             {report && status === 'approved' && <button onClick={() => closeMutation.mutate()} disabled={closeMutation.isPending} className="px-3 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 disabled:opacity-50">إغلاق</button>}
             <button onClick={() => generateMutation.mutate()} disabled={generateMutation.isPending} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">{generateMutation.isPending ? 'جاري...' : 'توليد التقفيل'}</button>
-            {report && <button onClick={downloadExcel} className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">Excel</button>}
+            {report && <button onClick={() => downloadExport('excel')} className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">Excel</button>}
+            {report && <button onClick={() => downloadExport('pdf')} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700">PDF</button>}
           </div>
         }
       />
@@ -342,6 +510,10 @@ export default function FinancialClosingPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 text-gray-500 border-b border-gray-100">
+                  <th className="px-2 py-3 w-10 text-center">
+                    <input type="checkbox" checked={allSelected} onChange={toggleSelectAll}
+                      className="accent-blue-600 cursor-pointer" title="تحديد الكل للتصدير" />
+                  </th>
                   <th className="px-6 py-3 text-right">البيان</th>
                   <th className="px-6 py-3 text-left w-28">القيمة</th>
                   <th className="px-6 py-3 text-center w-20">%</th>
@@ -351,6 +523,13 @@ export default function FinancialClosingPage() {
               <tbody className="divide-y divide-gray-50">
                 {details.map((row: any) => (
                   <tr key={row.id} className={rowStyle(row)}>
+                    <td className="px-2 py-2.5 text-center">
+                      {row.row_type !== 'section_header' && row.category_id && (
+                        <input type="checkbox" checked={selectedDetailIds.has(row.id)}
+                          onChange={() => toggleSelectedId(row.id)}
+                          className="accent-blue-600 cursor-pointer" title="تصدير تفاصيل القيد" />
+                      )}
+                    </td>
                     <td className="px-6 py-2.5">
                       {row.row_type === 'section_header' ? (
                         <div className="flex items-center justify-between">
@@ -395,10 +574,20 @@ export default function FinancialClosingPage() {
                     <td className="px-6 py-2.5 text-left">
                       {row.row_type !== 'section_header' && (
                         <div className="flex items-center gap-1">
+                          {shouldLinkSalaries(row) && (
+                            <button onClick={() => setLinkModal({ row, type: 'salaries' })}
+                              className="text-indigo-600 hover:text-indigo-800 text-xs px-1.5 py-1 rounded hover:bg-indigo-50"
+                              title="ربط بالرواتب">📋</button>
+                          )}
                           {isFormulaRow(row) && (
                             <button onClick={() => setFormulaModal(row)}
                               className="text-purple-600 hover:text-purple-800 text-xs px-1.5 py-1 rounded hover:bg-purple-50"
                               title="تعديل المعادلة">∑</button>
+                          )}
+                          {canResetToAuto(row) && (
+                            <button onClick={() => resetToAutoMutation.mutate(row.id)}
+                              className="text-amber-600 hover:text-amber-800 text-xs px-1.5 py-1 rounded hover:bg-amber-50"
+                              title="إعادة التعيين التلقائي">↺</button>
                           )}
                           {canDelete(row) && (
                             <button onClick={() => { if (confirm('حذف هذا البند؟')) deleteDetailMutation.mutate(row.id); }}
@@ -461,8 +650,15 @@ export default function FinancialClosingPage() {
       </div>
 
       {formulaModal && (
-        <FormulaModal detail={formulaModal} details={details.filter((d: any) => d.line_type === formulaModal.line_type)}
+        <FormulaModal detail={formulaModal} details={details}
           onClose={() => setFormulaModal(null)} onSave={(formula: any) => updateFormulaMutation.mutate({ id: formulaModal.id, formula })} />
+      )}
+
+      {linkModal && (
+        <LinkModal row={linkModal.row}
+          data={linkSalariesQuery.data}
+          onClose={() => setLinkModal(null)}
+          onApply={(value) => applyLinkValueMutation.mutate({ detailId: linkModal.row.id, value })} />
       )}
     </div>
   );
