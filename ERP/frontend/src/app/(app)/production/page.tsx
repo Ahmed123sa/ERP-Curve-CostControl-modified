@@ -12,6 +12,11 @@ export default function DailyProductionPage() {
   const [warehouseSel, setWarehouseSel] = useState<Record<string, string>>({});
   const [showAddItem, setShowAddItem] = useState(false);
   const [addItemId, setAddItemId] = useState('');
+  const [manualRecipes, setManualRecipes] = useState<any[]>([]);
+  const [calcExpr, setCalcExpr] = useState('');
+  const [calcOpen, setCalcOpen] = useState(false);
+  const [editingManualId, setEditingManualId] = useState<string | null>(null);
+  const [changeToId, setChangeToId] = useState('');
 
   const { data, isLoading } = useQuery({
     queryKey: ['daily-production', month],
@@ -21,7 +26,7 @@ export default function DailyProductionPage() {
   const { data: allItems } = useQuery({
     queryKey: ['items-list'],
     queryFn: () => api.get('/items').then(r => r.data),
-    enabled: showAddItem,
+    enabled: showAddItem || editingManualId !== null,
   });
 
   const { data: deductionsData } = useQuery({
@@ -37,8 +42,27 @@ export default function DailyProductionPage() {
 
   const addManualItem = () => {
     if (!addItemId) return;
+    if ((data?.recipes || []).some((r: any) => String(r.id) === String(addItemId))) {
+      toast('هذا الصنف موجود بالفعل');
+      setAddItemId('');
+      setShowAddItem(false);
+      return;
+    }
     const item = itemsById[addItemId];
     if (!item) return;
+    setManualRecipes(prev => [...prev, {
+      id: item.id,
+      _manual: true,
+      name: item.name,
+      unit: item.unit,
+      outputItem: { id: item.id, name: item.name, unit: item.unit },
+      outputWarehouse: null,
+      is_size: false,
+      size_index: null,
+      grams: null,
+      item_id: item.id,
+      selectedWarehouse: null,
+    }]);
     setEditData(prev => ({ ...prev, [addItemId]: {} }));
     setAddItemId('');
     setShowAddItem(false);
@@ -54,17 +78,31 @@ export default function DailyProductionPage() {
           mapped[recipeId][parseInt(day)] = String(qty);
         }
       }
-      setEditData(mapped);
+      setEditData(prev => ({ ...prev, ...mapped }));
       const wh: Record<string, string> = {};
       for (const r of (data.recipes || [])) {
         if (r.selectedWarehouse) wh[r.id] = r.selectedWarehouse;
       }
-      setWarehouseSel(wh);
+      setWarehouseSel(prev => ({ ...prev, ...wh }));
     } else {
       setEditData({});
       setWarehouseSel({});
     }
+    if (data?.recipes) {
+      const apiIds = new Set(data.recipes.map((r: any) => r.id));
+      setManualRecipes(prev => prev.filter(r => !apiIds.has(r.id)));
+    }
   }, [data]);
+
+  const computeCalc = (expr: string): string | null => {
+    if (!expr.trim()) return null;
+    try {
+      const sanitized = expr.replace(/[^0-9+\-*/().%]/g, '');
+      const r = Function('"use strict"; return (' + sanitized + ')')();
+      if (isFinite(r)) return Number.isInteger(r) ? String(r) : r.toFixed(3);
+    } catch {}
+    return null;
+  };
 
   const saveMutation = useMutation({
     mutationFn: (entries: { recipe_id: string; day: number; qty: number; warehouse_id?: string }[]) =>
@@ -127,6 +165,73 @@ export default function DailyProductionPage() {
     return sum.toLocaleString('ar-EG', { maximumFractionDigits: 2 });
   };
 
+  const removeManualItem = (id: string) => {
+    setManualRecipes(prev => prev.filter(r => r.id !== id));
+    setEditData(prev => {
+      const next = { ...prev };
+      const oldData = prev[id];
+      if (oldData && Object.keys(oldData).length) {
+        const zeroed: Record<number, string> = {};
+        for (const day of Object.keys(oldData)) {
+          zeroed[parseInt(day)] = '0';
+        }
+        next[id] = zeroed;
+      } else {
+        delete next[id];
+      }
+      return next;
+    });
+    setWarehouseSel(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    toast.success('تم حذف الصنف');
+  };
+
+  const changeManualItem = (oldRecipe: any, newItem: any) => {
+    if (!newItem || !oldRecipe) return;
+    const newId = newItem.id;
+    setManualRecipes(prev => {
+      const alreadyInApi = (data?.recipes || []).some((r: any) => String(r.id) === String(newId));
+      if (alreadyInApi) {
+        return prev.filter(r => r.id !== oldRecipe.id);
+      }
+      return [
+        ...prev.filter(r => r.id !== oldRecipe.id),
+        { id: newId, _manual: true, name: newItem.name, unit: newItem.unit,
+          outputItem: { id: newItem.id, name: newItem.name, unit: newItem.unit },
+          outputWarehouse: null, is_size: false, size_index: null, grams: null,
+          item_id: newItem.id, selectedWarehouse: null },
+      ];
+    });
+    setEditData(prev => {
+      const next = { ...prev };
+      const oldData = prev[oldRecipe.id];
+      if (oldData) {
+        next[newId] = { ...oldData };
+        const zeroed: Record<number, string> = {};
+        for (const day of Object.keys(oldData)) {
+          zeroed[parseInt(day)] = '0';
+        }
+        next[oldRecipe.id] = zeroed;
+      } else {
+        next[newId] = {};
+        delete next[oldRecipe.id];
+      }
+      return next;
+    });
+    setWarehouseSel(prev => {
+      const next = { ...prev };
+      next[newId] = next[oldRecipe.id] || '';
+      delete next[oldRecipe.id];
+      return next;
+    });
+    setEditingManualId(null);
+    setChangeToId('');
+    toast.success(`تم تغيير الصنف إلى ${newItem.name}`);
+  };
+
   return (
     <div className="space-y-4" dir="rtl">
       <div className="flex items-center justify-between">
@@ -160,16 +265,42 @@ export default function DailyProductionPage() {
 
       {isLoading ? (
         <p className="text-gray-400">جاري التحميل...</p>
-      ) : !data?.recipes?.length && !Object.keys(editData).length ? (
+      ) : !data?.recipes?.length && !manualRecipes.length && !Object.keys(editData).length ? (
         <p className="text-gray-400 py-8 text-center">
           لا توجد وصفات أو أصناف — أضف وصفات من تبويب "إدارة الوصفات" أو استخدم زر "إضافة صنف"
         </p>
       ) : (
-        <div className="border border-gray-100 rounded-xl overflow-auto">
+        <>
+        {/* Quick Calculator */}
+        <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+          <button onClick={() => setCalcOpen(!calcOpen)} className="w-full px-5 py-2 flex items-center gap-2 hover:bg-gray-50 transition-colors text-sm text-gray-500">
+            <span className="text-lg">🧮</span> حاسبة
+            <span className="mr-auto text-gray-300">{calcOpen ? '▲' : '▼'}</span>
+          </button>
+          {calcOpen && (
+            <div className="px-5 py-3 border-t border-gray-100 bg-gray-50/50 flex flex-wrap items-center gap-3">
+              <input type="text" value={calcExpr} onChange={(e) => setCalcExpr(e.target.value)}
+                placeholder="أدخل العملية الحسابية مثل 150+200*3"
+                className="flex-1 min-w-[250px] border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-400 font-mono text-left" />
+              {(() => {
+                const result = computeCalc(calcExpr);
+                return result !== null ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-500">=</span>
+                    <span className="text-lg font-bold text-green-700 font-mono">{result}</span>
+                    <button onClick={() => { navigator.clipboard.writeText(result); toast.success('تم النسخ'); }}
+                      className="text-xs text-blue-500 hover:text-blue-700">نسخ</button>
+                  </div>
+                ) : null;
+              })()}
+            </div>
+          )}
+        </div>
+        <div className="border border-gray-100 rounded-xl overflow-auto max-h-[calc(100vh-280px)]">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-gray-50 text-right text-gray-500 text-xs">
-                <th className="px-3 py-2.5 font-medium sticky right-0 bg-gray-50 min-w-[200px]">الصنف</th>
+              <tr className="sticky top-0 z-10 bg-gray-50 text-right text-gray-500 text-xs shadow-sm">
+                <th className="px-3 py-2.5 font-medium sticky right-0 z-20 bg-gray-50 min-w-[200px]">الصنف</th>
                 <th className="px-3 py-2.5 font-medium min-w-[60px]">المخزن</th>
                 {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => (
                   <th key={d} className="px-2 py-2.5 font-medium text-center min-w-[50px]">{d}</th>
@@ -179,7 +310,7 @@ export default function DailyProductionPage() {
               </tr>
             </thead>
             <tbody>
-              {data.recipes.map((recipe: any) => (
+              {[...(data.recipes || []), ...manualRecipes].map((recipe: any) => (
                 <tr key={recipe.id}
                   className={`border-t border-gray-50 hover:bg-gray-50/50 ${recipe.is_size ? 'bg-purple-50/30 text-xs' : ''}`}>
                   <td className="px-3 py-1.5 sticky right-0 bg-white">
@@ -193,9 +324,38 @@ export default function DailyProductionPage() {
                           {recipe.grams} جم · {recipe.outputItem?.unit}
                         </div>
                       </>
+                    ) : recipe._manual && editingManualId === recipe.id ? (
+                      <div className="flex flex-col gap-1">
+                        <select value={changeToId} onChange={(e) => setChangeToId(e.target.value)}
+                          className="w-full border border-blue-200 rounded px-2 py-1 text-xs focus:outline-none">
+                          <option value="">اختر الصنف...</option>
+                          {(allItems || []).map((item: any) => (
+                            <option key={item.id} value={item.id}>{item.name} ({item.unit})</option>
+                          ))}
+                        </select>
+                        <div className="flex gap-1">
+                          <button onClick={() => {
+                            const found = (allItems || []).find((i: any) => String(i.id) === String(changeToId));
+                            if (found) changeManualItem(recipe, found);
+                          }} disabled={!changeToId}
+                            className="text-[10px] px-2 py-0.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40">حفظ</button>
+                          <button onClick={() => { setEditingManualId(null); setChangeToId(''); }}
+                            className="text-[10px] px-2 py-0.5 border border-gray-200 rounded hover:bg-gray-50">إلغاء</button>
+                        </div>
+                      </div>
                     ) : (
                       <>
-                        <div className="font-medium text-gray-800">{recipe.name}</div>
+                        <div className="font-medium text-gray-800 flex items-center gap-1.5">
+                          {recipe.name}
+                          {(manualRecipes.some(r => r.id === recipe.id) || recipe._manual) && (
+                            <span className="flex gap-0.5 mr-auto">
+                              <button onClick={() => { setEditingManualId(recipe.id); setChangeToId(''); }}
+                                className="text-[10px] text-blue-500 hover:text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded">تعديل</button>
+                              <button onClick={() => removeManualItem(recipe.id)}
+                                className="text-[10px] text-red-400 hover:text-red-600 border border-red-200 px-1.5 py-0.5 rounded">حذف</button>
+                            </span>
+                          )}
+                        </div>
                         <div className="text-xs text-gray-400">{recipe.outputItem?.unit} · {recipe.outputItem?.name}</div>
                       </>
                     )}
@@ -226,18 +386,17 @@ export default function DailyProductionPage() {
                     {totalRow(recipe.id)}
                   </td>
                   <td className="px-3 py-1.5 text-center">
-                    {!recipe.is_size && (
-                      <input type="checkbox"
-                        checked={!!deductionsData?.[recipe.id]}
-                        onChange={(e) => toggleDeduction.mutate({ recipe_id: recipe.id, deduct: e.target.checked })}
-                        className="w-4 h-4 accent-blue-600 cursor-pointer" />
-                    )}
+                    <input type="checkbox"
+                      checked={!!deductionsData?.[recipe.id]}
+                      onChange={(e) => toggleDeduction.mutate({ recipe_id: recipe.id, deduct: e.target.checked })}
+                      className="w-4 h-4 accent-blue-600 cursor-pointer" />
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        </>
       )}
       {showAddItem && (
         <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center" onClick={() => setShowAddItem(false)}>

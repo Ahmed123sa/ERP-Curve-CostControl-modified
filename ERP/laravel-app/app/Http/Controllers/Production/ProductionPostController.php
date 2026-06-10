@@ -253,7 +253,8 @@ class ProductionPostController extends Controller
                         voucherType:  'production'
                     );
 
-                    $this->maybeDeduct($request, $recipe->id, $variantItemId, $variantTotalCost, $order->id, $whId);
+                    $compositeRecipeId = $recipe->id . '::size::' . $idx;
+                    $this->maybeDeduct($request, $compositeRecipeId, $variantItemId, $variantTotalCost, $order->id, $whId);
 
                     $created[] = [
                         'voucher_id' => $order->id,

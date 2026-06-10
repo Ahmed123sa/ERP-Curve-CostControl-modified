@@ -44,22 +44,20 @@ class DailyProductionController extends Controller
 
             // سطور المقاسات
             $sizes = $recipe->sizes ?? [];
-            if (is_array($sizes)) {
-                foreach ($sizes as $idx => $size) {
-                    $sizeItem = $size['item_id'] ? Item::find($size['item_id']) : null;
-                    $expanded[] = [
-                        'id'          => $recipe->id . '::size::' . $idx,
-                        'name'        => $sizeItem?->name ?? $recipe->name . ' (' . ($size['grams'] ?? 0) . 'g)',
-                        'unit'        => 'قطعة',
-                        'outputItem'  => $sizeItem ? ['id' => $sizeItem->id, 'name' => $sizeItem->name, 'unit' => $sizeItem->unit] : null,
-                        'outputWarehouse' => $recipe->outputWarehouse,
-                        'is_size'     => true,
-                        'size_index'  => $idx,
-                        'grams'       => $size['grams'] ?? 0,
-                        'item_id'     => $size['item_id'] ?? $recipe->item_id,
-                        'recipe_id'   => $recipe->id,
-                    ];
-                }
+            foreach ($sizes as $idx => $size) {
+                $sizeItem = $size['item_id'] ? Item::find($size['item_id']) : null;
+                $expanded[] = [
+                    'id'          => $recipe->id . '::size::' . $idx,
+                    'name'        => $sizeItem?->name ?? $recipe->name . ' (' . ($size['grams'] ?? 0) . 'g)',
+                    'unit'        => 'قطعة',
+                    'outputItem'  => $sizeItem ? ['id' => $sizeItem->id, 'name' => $sizeItem->name, 'unit' => $sizeItem->unit] : null,
+                    'outputWarehouse' => $recipe->outputWarehouse,
+                    'is_size'     => true,
+                    'size_index'  => $idx,
+                    'grams'       => $size['grams'] ?? 0,
+                    'item_id'     => $size['item_id'] ?? $recipe->item_id,
+                    'recipe_id'   => $recipe->id,
+                ];
             }
         }
 
@@ -80,6 +78,7 @@ class DailyProductionController extends Controller
                 : null;
             $expanded[] = [
                 'id'          => $rid,
+                '_manual'     => true,
                 'name'        => $item->name,
                 'unit'        => $item->unit,
                 'outputItem'  => ['id' => $item->id, 'name' => $item->name, 'unit' => $item->unit],
@@ -103,12 +102,7 @@ class DailyProductionController extends Controller
         // إضافة selectedWarehouse لكل صف موسع
         foreach ($expanded as &$row) {
             $rid = $row['is_size'] ? $row['recipe_id'] : $row['id'];
-            if ($row['is_size']) {
-                // المقاسات تشارك نفس warehouse بتاع الوصفة الأم
-                $row['selectedWarehouse'] = $warehouseSelections[$rid] ?? $row['outputWarehouse']?->id ?? null;
-            } else {
-                $row['selectedWarehouse'] = $warehouseSelections[$rid] ?? $row['outputWarehouse']?->id ?? null;
-            }
+            $row['selectedWarehouse'] = $warehouseSelections[$rid] ?? $row['outputWarehouse']?->id ?? null;
         }
         unset($row);
 
@@ -168,26 +162,28 @@ class DailyProductionController extends Controller
                 $sizeIndex = (int) $parts[1];
             }
 
-            if ($entry['qty'] > 0) {
-                DailyProduction::updateOrCreate(
-                    [
-                        'client_id'  => $clientId,
-                        'recipe_id'  => $recipeId,
-                        'size_index' => $sizeIndex,
-                        'date'       => $date,
-                    ],
-                    [
-                        'qty' => $entry['qty'],
-                        'warehouse_id' => $entry['warehouse_id'] ?? null,
-                    ]
-                );
-            } else {
+            if ($entry['qty'] <= 0) {
                 DailyProduction::where('client_id', $clientId)
                     ->where('recipe_id', $recipeId)
                     ->where('size_index', $sizeIndex)
                     ->where('date', $date)
                     ->delete();
+
+                continue;
             }
+
+            DailyProduction::updateOrCreate(
+                [
+                    'client_id'  => $clientId,
+                    'recipe_id'  => $recipeId,
+                    'size_index' => $sizeIndex,
+                    'date'       => $date,
+                ],
+                [
+                    'qty' => $entry['qty'],
+                    'warehouse_id' => $entry['warehouse_id'] ?? null,
+                ]
+            );
         }
 
         return response()->json(['message' => 'تم حفظ الإنتاج اليومي']);
@@ -216,21 +212,23 @@ class DailyProductionController extends Controller
             'deduct'    => 'required|boolean',
         ]);
 
-        if ($data['deduct']) {
-            ProductionDeduction::updateOrCreate(
-                [
-                    'client_id' => $clientId,
-                    'recipe_id' => $data['recipe_id'],
-                    'month'     => $data['month'],
-                ],
-                ['deduct' => true]
-            );
-        } else {
+        if (! $data['deduct']) {
             ProductionDeduction::where('client_id', $clientId)
                 ->where('recipe_id', $data['recipe_id'])
                 ->where('month', $data['month'])
                 ->delete();
+
+            return response()->json(['message' => 'تم']);
         }
+
+        ProductionDeduction::updateOrCreate(
+            [
+                'client_id' => $clientId,
+                'recipe_id' => $data['recipe_id'],
+                'month'     => $data['month'],
+            ],
+            ['deduct' => true]
+        );
 
         return response()->json(['message' => 'تم']);
     }
