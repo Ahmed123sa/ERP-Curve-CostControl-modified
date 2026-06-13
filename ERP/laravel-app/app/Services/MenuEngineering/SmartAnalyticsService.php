@@ -624,7 +624,8 @@ class SmartAnalyticsService
         $purchaseCount = (int) StockLedger::where('client_id', $clientId)
             ->where('voucher_type', 'purchase')
             ->where('movement_type', 'in')
-            ->whereMonth('created_at', now()->month)
+            ->whereMonth('date', now()->month)
+            ->whereYear('date', now()->year)
             ->count('id');
 
         return [

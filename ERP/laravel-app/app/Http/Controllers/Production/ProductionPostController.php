@@ -19,7 +19,7 @@ class ProductionPostController extends Controller
 {
     public function __construct(private StockLedgerService $ledger) {}
 
-    private function maybeDeduct(Request $request, string $recipeId, string $itemId, float $totalCost, string $orderId, string $warehouseId): void
+    private function maybeDeduct(Request $request, string $recipeId, string $itemId, float $totalCost, string $orderId, string $warehouseId, string $postDate): void
     {
         $clientId = $request->user()->current_client_id;
         $month = $request->input('month', now()->format('Y-m'));
@@ -36,9 +36,9 @@ class ProductionPostController extends Controller
             'client_id'     => $clientId,
             'warehouse_id'  => $warehouseId,
             'item_id'       => $itemId,
-            'date'          => now()->toDateString(),
+            'date'          => $postDate,
             'movement_type' => 'in',
-            'voucher_type'  => 'purchase',
+            'voucher_type'  => 'production',
             'qty'           => 0,
             'unit_cost'     => 0,
             'total_cost'    => -$totalCost,
@@ -254,7 +254,7 @@ class ProductionPostController extends Controller
                     );
 
                     $compositeRecipeId = $recipe->id . '::size::' . $idx;
-                    $this->maybeDeduct($request, $compositeRecipeId, $variantItemId, $variantTotalCost, $order->id, $whId);
+                    $this->maybeDeduct($request, $compositeRecipeId, $variantItemId, $variantTotalCost, $order->id, $whId, $postDate);
 
                     $created[] = [
                         'voucher_id' => $order->id,
@@ -294,7 +294,7 @@ class ProductionPostController extends Controller
                     voucherType:  'production'
                 );
 
-                $this->maybeDeduct($request, $recipe->id, $recipe->item_id, $totalCost, $order->id, $whId);
+                $this->maybeDeduct($request, $recipe->id, $recipe->item_id, $totalCost, $order->id, $whId, $postDate);
 
                 $created[] = [
                     'voucher_id' => $order->id,

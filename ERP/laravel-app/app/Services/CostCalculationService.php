@@ -147,6 +147,12 @@ class CostCalculationService
             }
         }
 
+        // تأمين ضد الأرصدة الافتتاحية السالبة (النظري مش الفعلي)
+        if ($openingQty < 0) {
+            $openingQty   = 0;
+            $openingValue = 0;
+        }
+
         // مشتريات (خارجي)
         $purchasesQty = (float) $ledger->where('voucher_type', 'purchase')->where('movement_type', 'in')->sum('qty');
         $purchasesVal = (float) $ledger->where('voucher_type', 'purchase')->where('movement_type', 'in')->sum('total_cost');
