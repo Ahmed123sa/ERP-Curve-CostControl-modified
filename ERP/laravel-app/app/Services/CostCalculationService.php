@@ -158,15 +158,15 @@ class CostCalculationService
         $purchasesVal = (float) $ledger->where('voucher_type', 'purchase')->where('movement_type', 'in')->sum('total_cost');
 
         // استلامات داخلية (من مخازن أخرى)
-        $internalInQty = (float) $ledger->where('voucher_type', 'dispatch')->whereIn('movement_type', ['in', 'transfer_in'])->sum('qty');
-        $internalInVal = (float) $ledger->where('voucher_type', 'dispatch')->whereIn('movement_type', ['in', 'transfer_in'])->sum('total_cost');
+        $internalInQty = (float) $ledger->whereIn('voucher_type', ['dispatch', 'branch_return'])->whereIn('movement_type', ['in', 'transfer_in'])->sum('qty');
+        $internalInVal = (float) $ledger->whereIn('voucher_type', ['dispatch', 'branch_return'])->whereIn('movement_type', ['in', 'transfer_in'])->sum('total_cost');
 
         // إنتاج (وصفات) — المنتج النهائي يدخل المخزن
         $productionInQty = (float) $ledger->where('voucher_type', 'production')->where('movement_type', 'in')->sum('qty');
         $productionInVal = (float) $ledger->where('voucher_type', 'production')->where('movement_type', 'in')->sum('total_cost');
 
         // منصرف داخلي (لفروع/مخازن أخرى)
-        $dispatchOutEntries = $ledger->where('voucher_type', 'dispatch')
+        $dispatchOutEntries = $ledger->whereIn('voucher_type', ['dispatch', 'branch_return'])
             ->whereIn('movement_type', ['out', 'transfer_out']);
 
         $internalOutLedger = $dispatchOutEntries;
