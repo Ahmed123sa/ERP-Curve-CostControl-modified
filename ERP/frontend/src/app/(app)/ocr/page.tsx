@@ -10,7 +10,7 @@ import * as XLSX from 'xlsx';
 
 // ── Types ──
 interface Row { id: string; item: string; unit: string; qty: string; price: string; }
-interface Doc { id: string; file: File; imageUrl: string; rows: Row[]; }
+interface Doc { id: string; file: File; imageUrl: string; rows: Row[]; date: string; section: string; }
 interface MemoryItem { id: string; name: string; unit: string; category: string; default_cost: number; }
 
 const SESSION_KEY = 'ocr_session';
@@ -60,7 +60,7 @@ function findClosestVocabMatch(word: string, dict: string[]): string {
 function saveSession(docs: Doc[], activeId: string | null) {
   try {
     const data = docs.map(d => ({
-      id: d.id, imageUrl: d.imageUrl, fileName: d.file.name, rows: d.rows, fileSize: d.file.size, fileType: d.file.type,
+      id: d.id, imageUrl: d.imageUrl, fileName: d.file.name, rows: d.rows, fileSize: d.file.size, fileType: d.file.type, date: d.date, section: d.section,
     }));
     localStorage.setItem(SESSION_KEY, JSON.stringify({ docs: data, activeId }));
   } catch { /* quota exceeded */ }
@@ -74,7 +74,7 @@ function loadSession(): { docs: Doc[]; activeId: string | null } | null {
     const restored: Doc[] = docs.map((d: any) => ({
       id: d.id, imageUrl: d.imageUrl,
       file: new File([], d.fileName, { type: d.fileType }),
-      rows: d.rows,
+      rows: d.rows, date: d.date || '', section: d.section || '',
     }));
     return { docs: restored, activeId };
   } catch { return null; }
@@ -122,6 +122,7 @@ export default function OcrPage() {
   const [showMemory, setShowMemory] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropRef = useRef<HTMLDivElement>(null);
+  const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Restore session
   useEffect(() => {
@@ -213,7 +214,7 @@ export default function OcrPage() {
       if (!file.type.startsWith('image/')) { toast.error(`${file.name}: ليس ملف صورة`); continue; }
       const id = Math.random().toString(36).substr(2, 9);
       const url = URL.createObjectURL(file);
-      const newDoc: Doc = { id, file, imageUrl: url, rows: [] };
+      const newDoc: Doc = { id, file, imageUrl: url, rows: [], date: '', section: '' };
       setDocs(prev => [...prev, newDoc]);
       if (i === 0 && !activeDocId) setActiveDocId(id);
     }
@@ -222,7 +223,8 @@ export default function OcrPage() {
 
   const exportExcel = () => {
     if (!activeDoc || activeDoc.rows.length === 0) return toast.error('لا يوجد بيانات للتصدير');
-    const data: any[] = [{ 'م': `--- ${activeDoc.file.name} ---` }];
+    const data: any[] = [];
+    data.push({ 'م': `--- ${activeDoc.date || ''} | ${activeDoc.section || ''} ---` });
     activeDoc.rows.filter(r => r.item.trim().length > 0).forEach((r, i) => {
       data.push({ 'م': i + 1, 'الصنف': r.item, 'الوحدة': r.unit, 'الكمية': r.qty, 'السعر': r.price });
     });
@@ -231,7 +233,9 @@ export default function OcrPage() {
     ws['!cols'] = [{ wch: 6 }, { wch: 30 }, { wch: 10 }, { wch: 12 }, { wch: 12 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'الجرد');
-    XLSX.writeFile(wb, `جرد_${new Date().toLocaleDateString('ar-EG')}.xlsx`);
+    const section = activeDoc.section?.trim() || 'جرد';
+    const d = activeDoc.date?.trim() || new Date().toLocaleDateString('ar-EG');
+    XLSX.writeFile(wb, `${section}_${d}.xlsx`);
     toast.success('تم التصدير بنجاح');
   };
 
@@ -349,6 +353,20 @@ export default function OcrPage() {
                   )}
                 </div>
 
+                {/* Date & Section */}
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-lg px-3 py-1.5">
+                    <span className="text-xs text-gray-500">📅</span>
+                    <input value={activeDoc.date} onChange={e => updateDoc(activeDoc.id, { date: e.target.value })}
+                      className="w-28 text-sm outline-none bg-transparent" placeholder="التاريخ" />
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-lg px-3 py-1.5">
+                    <span className="text-xs text-gray-500">🏪</span>
+                    <input value={activeDoc.section} onChange={e => updateDoc(activeDoc.id, { section: e.target.value })}
+                      className="w-40 text-sm outline-none bg-transparent" placeholder="الفرع / المخزن" />
+                  </div>
+                </div>
+
                 {/* Table count */}
                 <div className="text-xs text-gray-500 mb-2 flex items-center gap-3">
                   <span className="bg-white px-3 py-1.5 rounded-lg border border-gray-200">
@@ -389,9 +407,9 @@ export default function OcrPage() {
                           </button>
                         </div>
                         <div className="col-span-5 p-1 relative">
-                          <input value={r.item} onFocus={() => setActiveDropdown(r.id)}
+                          <input value={r.item} onFocus={() => { if (blurTimerRef.current) clearTimeout(blurTimerRef.current); setActiveDropdown(r.id); }}
                             onChange={e => updateRow(activeDoc.id, r.id, { item: e.target.value })}
-                            onBlur={() => setTimeout(() => setActiveDropdown(null), 200)}
+                            onBlur={() => { blurTimerRef.current = setTimeout(() => setActiveDropdown(null), 200); }}
                             className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded outline-none focus:border-blue-400 bg-white"
                             placeholder="اكتب اسم الصنف..." />
                           {activeDropdown === r.id && r.item.trim().length > 0 && (

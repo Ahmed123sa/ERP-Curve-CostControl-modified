@@ -434,6 +434,117 @@ Older copy. Do NOT modify. Changes go into `ERP/laravel-app/`.
   4. Added `overrideKey()` helper function.
 - **Impact**: Professional searchable dropdown, clearer name display, correct handling of same-name-different-size items.
 
+## Client Portal — Phase 1 (2026-06-14)
+
+### Database
+1. **New table `client_modules`**: `id` (uuid PK), `client_id` (36), `module_key` (100), `is_active`, timestamps. Unique key on `(client_id, module_key)`.
+2. **`clients.primary_color`**: nullable string(7), default `#2563eb`, added after `logo`.
+
+### Models
+3. **`ClientModule`** (`app/Models/ClientModule.php`): BelongsTo Client, fillable `[id, client_id, module_key, is_active]`, casts `is_active => boolean`.
+4. **`Client.php`**: Added `primary_color` to `$fillable`, added `modules()` HasMany relationship.
+
+### Controller
+5. **`ClientModuleController`** (`app/Http/Controllers/ClientModuleController.php`):
+   - `index()` — GET `/api/client/modules` → returns current client's active module keys
+   - `settings()` — GET `/api/client/settings` → returns `{ id, name, logo, primary_color }`
+   - `allModules()` — GET `/api/client/all-modules` → returns all available modules with default flags
+
+### Routes
+6. **`api.php`**: Added 3 new routes under `auth:sanctum` (no specific permission — client-wide):
+   - `GET /client/modules`
+   - `GET /client/settings`
+   - `GET /client/all-modules`
+
+### Frontend — Dark/Light Mode
+7. **Installed `next-themes`** via npm (with `--legacy-peer-deps` due to date-fns conflict).
+8. **`ThemeProvider.tsx`** (`components/ui/`): Wraps `next-themes/ThemeProvider` with `attribute="class"`, `defaultTheme="light"`, `enableSystem`, `disableTransitionOnChange`.
+9. **`ThemeToggle.tsx`** (`components/ui/`): Sun/Moon icon button using `useTheme()`, with mount guard to prevent hydration mismatch.
+10. **`providers.tsx`**: Added `<ThemeProvider>` wrapper around `<QueryClientProvider>`.
+11. **`layout.tsx`**: Added `suppressHydrationWarning` to `<html>`.
+12. **`globals.css`**: Removed hardcoded `body { background: #f9fafb }` — dark mode now uses CSS variables correctly.
+
+### Frontend — Module-Aware Sidebar
+13. **`AppShell.tsx`**:
+    - Added `HREF_MODULE` map (href → module_key) for module-based filtering.
+    - Added `hasModule(href)` check to NAV items — items from unsubscribed modules are hidden.
+    - Admin-only sections (clients, users, settings, warehouses, branches, payroll, production) bypass module check.
+    - Fetches `/api/client/modules` and `/api/client/settings` on client change.
+    - Active link color uses `primary_color` from settings (inline style with opacity background).
+    - Added `<ThemeToggle>` in sidebar footer next to logout button.
+    - Added dark mode Tailwind classes (`dark:bg-gray-900`, `dark:text-gray-200`, etc.) to sidebar, header, and PageHeader.
+
+### Seeding
+14. **`ClientModuleSeeder`**: Seeds 13 default modules to all existing clients (MR MIX, Qasr EL3a'elat, ZAHRA).
+
+## Client Portal — Phase 1.5: Client Users & Auth (2026-06-14)
+
+### Database
+15. **Migration `add_client_role_to_users`**: Extended `users.role` ENUM to include `'client'` value: `['admin','cost_controller','viewer','client']`. Uses raw `DB::statement` (MySQL ENUM limitation).
+
+### Backend — User Model
+16. **`User.php`**: Added `isClient(): bool` and `isInternal(): bool` helper methods.
+
+### Backend — Auth
+17. **`AuthController.php`**:
+    - `login()` and `me()` responses now include `portal: 'internal' | 'client'` field based on `$user->role`.
+    - `switchClient()` now blocks client users with 403 (`العميل لا يمكنه تبديل الشركة`).
+
+### Backend — User Management
+18. **`UserController.php`**:
+    - `store()` and `update()` now accept `role: 'client'`.
+    - Client users require exactly ONE `client_id` (`size:1` validation).
+    - Client users are NOT assigned Spatie roles (no super-admin/cost-controller/viewer).
+    - Clearing roles when switching from internal to client (`syncRoles([])`).
+    - `index()` response includes `portal` field.
+
+### Frontend — Auth Store & Login
+19. **`store.ts`**: Added `portal?: 'internal' | 'client'` to User interface, widened `role` union to include `'client'`.
+20. **`login/page.tsx`**: After successful login, users with `portal === 'client'` are redirected to `/client/dashboard` instead of `/dashboard` or `/select-client`.
+
+### Frontend — Route Isolation
+21. **`(app)/layout.tsx`**: Added guard — client users are redirected to `/client/dashboard` if they land on admin routes.
+22. **`(client)/layout.tsx`** (NEW): Route group layout that:
+    - Waits for Zustand hydration.
+    - Redirects unauthenticated users to `/login`.
+    - Redirects non-client users to `/dashboard`.
+    - Wraps children with `ClientShell`.
+23. **`(client)/dashboard/page.tsx`** (NEW): Full dashboard with 4 KpiCard (purchases, stock, diffs, warehouses) + DiffPieChart + TopDiffItems + TrendChart + Inventory alerts card + Menu snapshot card + Recent activity card. Fetches from 8 `/api/client/dashboard/*` endpoints.
+24. **`(client)/stock/page.tsx`** (NEW): Current stock table — dropdown selects warehouse, displays items with qty, avg_cost, total value.
+25. **`(client)/stock/movement/page.tsx`** (NEW): Item movement history — search + dropdown pick item, shows ledger entries with +/- qty, unit cost, total.
+26. **`(client)/reports/financial-details/page.tsx`** (NEW): Warehouse financial summary table — opening, purchases, diffs per warehouse.
+27. **`(client)/reports/diffs/page.tsx`** (NEW): Diffs report — same warehouse summary data with color-coded diff values.
+28. **`(client)/reports/cost/page.tsx`** (NEW): Placeholder for cost analysis.
+
+### Backend — Client Endpoints (Phase 2)
+29. **`ClientDashboardController.php`** (UPDATED): Added 8 endpoints total:
+    - `kpis`, `stockDistribution`, `monthlyTrend`, `trends` (alias), `topDiffItems` — Dashboard core charts
+    - `alerts` — Low stock alerts (out of stock, below min, near threshold)
+    - `menuSnapshot` — Most/least profitable menu recipes by food cost %
+    - `recentActivity` — Last 5 stock ledger entries
+    - `warehouses` — Active warehouses for the client
+    - `currentStock` — Current stock per warehouse (uses CostCalculationService)
+    - `warehouseSummary` — Financial summary per warehouse from monthly_closings
+30. **`routes/api.php`** (UPDATED): 4 new routes (alerts, menu-snapshot, trends, recent-activity) + 3 stock/warehouse routes.
+
+### Frontend — Client Shell
+31. **`ClientShell.tsx`** (NEW — `components/ui/`):
+    - Lighter sidebar compared to `AppShell.tsx`:
+      - No client switcher (client belongs to ONE company).
+      - No admin sections (clients, users, settings, warehouses, payroll, production).
+      - Only module-filtered items: الرئيسية (Dashboard), المخزون, التقارير.
+    - Fetches `/api/client/modules` + `/api/client/settings`.
+    - Uses `primary_color` for active link styling.
+    - Has ThemeToggle + logout in footer.
+    - Dark mode ready.
+
+### Frontend — Users Page
+32. **`users/page.tsx`**:
+    - Added `'عميل'` (green badge) option in role dropdown.
+    - When `role=client` selected: company selector switches from multi-checkbox to single `<select>`.
+    - Table role cell shows green badge for client type.
+    - `portal` field preserved in UserItem interface.
+
 ### 21. `ProductionPostController` — Post date uses current date instead of month end
 - **File**: `ERP/laravel-app/app/Http/Controllers/Production/ProductionPostController.php:79`
 - **Root cause**: `$postDate = $end->toDateString()` (end of month, e.g., 2026-05-31). When today is before month-end (e.g., May 17), the DispatchOrder gets a future date. The `update()` form on the frontend validates `date <= today`, so editing/updating the posted production order fails with "The date field must be a date before or equal to today."

@@ -11,7 +11,7 @@ interface Client {
 
 interface UserItem {
   id: string; name: string; email: string; role: string;
-  roles: string[]; permissions: string[];
+  portal?: string; roles: string[]; permissions: string[];
   clients: Client[]; current_client_id: string | null;
 }
 
@@ -108,9 +108,10 @@ export default function UsersPage() {
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
                         u.role === 'admin' ? 'bg-purple-100 text-purple-700' :
                         u.role === 'cost_controller' ? 'bg-blue-100 text-blue-700' :
+                        u.role === 'client' ? 'bg-green-100 text-green-700' :
                         'bg-gray-100 text-gray-600'
                       }`}>
-                        {u.role === 'admin' ? 'مدير' : u.role === 'cost_controller' ? 'كوست كنترول' : 'مشاهد'}
+                        {u.role === 'admin' ? 'مدير' : u.role === 'cost_controller' ? 'كوست كنترول' : u.role === 'client' ? 'عميل' : 'مشاهد'}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-gray-600">
@@ -151,30 +152,41 @@ export default function UsersPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">الدور</label>
-                <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-400">
-                  <option value="admin">مدير (Super Admin)</option>
-                  <option value="cost_controller">كوست كنترول</option>
-                  <option value="viewer">مشاهد</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">الشركات المسموح بها</label>
-                <div className="space-y-2 max-h-40 overflow-y-auto border border-gray-200 rounded-xl p-3">
-                  {clients.map((c) => (
-                    <label key={c.id} className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={form.client_ids.includes(c.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) setForm({ ...form, client_ids: [...form.client_ids, c.id] });
-                          else setForm({ ...form, client_ids: form.client_ids.filter((id) => id !== c.id) });
-                        }}
-                        className="rounded border-gray-300" />
-                      {c.name}
-                    </label>
-                  ))}
-                  {clients.length === 0 && <p className="text-gray-400 text-xs">لا توجد شركات</p>}
+                  <select value={form.role} onChange={(e) => { setForm({ ...form, role: e.target.value, client_ids: [] }); }}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-400">
+                    <option value="admin">مدير (Super Admin)</option>
+                    <option value="cost_controller">كوست كنترول</option>
+                    <option value="viewer">مشاهد</option>
+                    <option value="client">عميل</option>
+                  </select>
                 </div>
-              </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    {form.role === 'client' ? 'الشركة' : 'الشركات المسموح بها'}
+                  </label>
+                  <div className="space-y-2 max-h-40 overflow-y-auto border border-gray-200 rounded-xl p-3">
+                    {form.role === 'client' ? (
+                      <select value={form.client_ids[0] || ''} onChange={(e) => setForm({ ...form, client_ids: [e.target.value] })}
+                        className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-400">
+                        <option value="">اختر الشركة</option>
+                        {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                    ) : (
+                      clients.map((c) => (
+                        <label key={c.id} className="flex items-center gap-2 text-sm">
+                          <input type="checkbox" checked={form.client_ids.includes(c.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) setForm({ ...form, client_ids: [...form.client_ids, c.id] });
+                              else setForm({ ...form, client_ids: form.client_ids.filter((id) => id !== c.id) });
+                            }}
+                            className="rounded border-gray-300" />
+                          {c.name}
+                        </label>
+                      ))
+                    )}
+                    {clients.length === 0 && <p className="text-gray-400 text-xs">لا توجد شركات</p>}
+                  </div>
+                </div>
               <div className="flex gap-2 pt-2">
                 <button type="submit" className="flex-1 py-2 bg-blue-600 text-white text-sm font-medium rounded-xl hover:bg-blue-700">
                   {editId ? 'تحديث' : 'إضافة'}

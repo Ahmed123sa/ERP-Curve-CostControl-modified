@@ -2,15 +2,14 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/lib/store';
-import { AppShell } from '@/components/ui/AppShell';
+import { ClientShell } from '@/components/ui/ClientShell';
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+export default function ClientLayout({ children }: { children: React.ReactNode }) {
   const { user } = useAuthStore();
-  const router   = useRouter();
+  const router = useRouter();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    // Wait for Zustand persist to rehydrate from localStorage
     const unsub = useAuthStore.persist.onFinishHydration(() => setReady(true));
     if (useAuthStore.persist.hasHydrated()) setReady(true);
     return unsub;
@@ -18,10 +17,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (ready && !user) router.replace('/login');
-    if (ready && user && user.portal === 'client') router.replace('/client/dashboard');
+    if (ready && user && user.portal !== 'client') router.replace('/dashboard');
   }, [ready, user, router]);
 
   if (!ready || !user) return null;
 
-  return <AppShell>{children}</AppShell>;
+  return <ClientShell>{children}</ClientShell>;
 }

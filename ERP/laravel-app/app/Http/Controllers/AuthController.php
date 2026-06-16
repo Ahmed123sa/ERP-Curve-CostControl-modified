@@ -23,9 +23,17 @@ class AuthController extends Controller
             throw ValidationException::withMessages(['email' => 'البريد أو كلمة المرور غلط']);
         }
 
-        // العميل الافتراضي = الأول في القائمة أو الـ primary
-        $primaryClient = $user->clients()->wherePivot('is_primary', true)->first()
-            ?? $user->clients()->first();
+        // للعميل: current_client_id مباشر. للموظف: من pivot
+        $primaryClient = null;
+        if ($user->isClient()) {
+            $clientId = $user->current_client_id;
+            if ($clientId) {
+                $primaryClient = \App\Models\Client::find($clientId);
+            }
+        } else {
+            $primaryClient = $user->clients()->wherePivot('is_primary', true)->first()
+                ?? $user->clients()->first();
+        }
 
         // حفظ العميل الحالي في قاعدة البيانات لضمان استقرار العزل
         if ($primaryClient) {
@@ -44,8 +52,9 @@ class AuthController extends Controller
                 'name'              => $user->name,
                 'email'             => $user->email,
                 'role'              => $user->role,
+                'portal'            => $user->role === 'client' ? 'client' : 'internal',
                 'permissions'       => $permissions,
-                'clients'           => $user->clients,
+                'clients'           => $user->isClient() ? [] : $user->clients,
                 'current_client_id' => $primaryClient?->id,
             ],
         ]);
@@ -65,6 +74,7 @@ class AuthController extends Controller
             : $user->getAllPermissions()->pluck('name');
         $data = $user->toArray();
         $data['permissions'] = $permissions;
+        $data['portal'] = $user->role === 'client' ? 'client' : 'internal';
         return response()->json($data);
     }
 
@@ -73,6 +83,8 @@ class AuthController extends Controller
         $user = $request->user();
 
         // تأكد إن الموظف ده عنده صلاحية على العميل ده
+        abort_if($user->isClient(), 403, 'العميل لا يمكنه تبديل الشركة');
+
         abort_unless(
             $user->clients()->where('clients.id', $clientId)->exists(),
             403,

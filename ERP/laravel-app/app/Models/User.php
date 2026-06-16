@@ -23,4 +23,14 @@ class User extends Authenticatable
         return $this->belongsToMany(Client::class, 'client_user')
             ->withPivot('is_primary');
     }
+
+    public function isClient(): bool
+    {
+        return $this->role === 'client';
+    }
+
+    public function isInternal(): bool
+    {
+        return $this->role !== 'client';
+    }
 }

@@ -7,7 +7,7 @@ class Client extends Model
 {
     protected $keyType = 'string';
     public $incrementing = false;
-    protected $fillable = ['id','name','slug','is_active','logo'];
+    protected $fillable = ['id','name','slug','is_active','logo','primary_color'];
 
     public function users(): BelongsToMany
     {
@@ -17,4 +17,8 @@ class Client extends Model
     public function warehouses(): HasMany { return $this->hasMany(Warehouse::class); }
     public function branches(): HasMany   { return $this->hasMany(Branch::class); }
     public function items(): HasMany      { return $this->hasMany(Item::class); }
+    public function modules(): HasMany
+    {
+        return $this->hasMany(ClientModule::class, 'client_id', 'id');
+    }
 }

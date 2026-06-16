@@ -18,6 +18,8 @@ const TYPE_LABELS: Record<string, string> = {
   closing:       'آخر المدة',
   adjustment:    'تسوية',
   return:        'مرتجع',
+  branch_return:   'مرتجع للمخزن',
+  branch_transfer: 'تحويل فرع',
 };
 
 export default function EditVoucherPage() {

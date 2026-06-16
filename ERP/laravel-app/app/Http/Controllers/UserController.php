@@ -18,6 +18,7 @@ class UserController extends Controller
                 'name' => $u->name,
                 'email' => $u->email,
                 'role' => $u->role,
+                'portal' => $u->isClient() ? 'client' : 'internal',
                 'roles' => $u->getRoleNames(),
                 'permissions' => $u->getAllPermissions()->pluck('name'),
                 'clients' => $u->clients,
@@ -29,12 +30,14 @@ class UserController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        $isClient = $request->role === 'client';
+
         $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
             'password' => 'required|string|min:6',
-            'role' => 'required|in:admin,cost_controller,viewer',
-            'client_ids' => 'required|array|min:1',
+            'role' => 'required|in:admin,cost_controller,viewer,client',
+            'client_ids' => $isClient ? 'required|array|size:1' : 'required|array|min:1',
             'client_ids.*' => 'exists:clients,id',
         ]);
 
@@ -47,20 +50,20 @@ class UserController extends Controller
             'current_client_id' => $request->client_ids[0],
         ]);
 
-        // Attach clients
         $sync = [];
         foreach ($request->client_ids as $i => $cid) {
             $sync[$cid] = ['is_primary' => $i === 0];
         }
         $user->clients()->sync($sync);
 
-        // Assign Spatie role based on legacy role
-        $spatieRole = match ($request->role) {
-            'admin' => 'super-admin',
-            'cost_controller' => 'cost-controller',
-            'viewer' => 'viewer',
-        };
-        $user->assignRole($spatieRole);
+        if (! $isClient) {
+            $spatieRole = match ($request->role) {
+                'admin' => 'super-admin',
+                'cost_controller' => 'cost-controller',
+                'viewer' => 'viewer',
+            };
+            $user->assignRole($spatieRole);
+        }
 
         return response()->json(['message' => 'تم إنشاء المستخدم', 'user' => $user->load('clients')]);
     }
@@ -69,12 +72,14 @@ class UserController extends Controller
     {
         $user = User::findOrFail($id);
 
+        $isClient = $request->role === 'client';
+
         $request->validate([
             'name' => 'sometimes|string|max:255',
             'email' => 'sometimes|email|unique:users,email,' . $id,
             'password' => 'sometimes|string|min:6',
-            'role' => 'sometimes|in:admin,cost_controller,viewer',
-            'client_ids' => 'sometimes|array|min:1',
+            'role' => 'sometimes|in:admin,cost_controller,viewer,client',
+            'client_ids' => $isClient ? 'sometimes|array|size:1' : 'sometimes|array|min:1',
             'client_ids.*' => 'exists:clients,id',
         ]);
 
@@ -83,12 +88,16 @@ class UserController extends Controller
         if ($request->has('password')) $user->password = Hash::make($request->password);
         if ($request->has('role')) {
             $user->role = $request->role;
-            $spatieRole = match ($request->role) {
-                'admin' => 'super-admin',
-                'cost_controller' => 'cost-controller',
-                'viewer' => 'viewer',
-            };
-            $user->syncRoles([$spatieRole]);
+            if ($isClient) {
+                $user->syncRoles([]);
+            } else {
+                $spatieRole = match ($request->role) {
+                    'admin' => 'super-admin',
+                    'cost_controller' => 'cost-controller',
+                    'viewer' => 'viewer',
+                };
+                $user->syncRoles([$spatieRole]);
+            }
         }
         if ($request->has('client_ids')) {
             $sync = [];

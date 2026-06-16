@@ -1,6 +1,9 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\ClientDashboardController;
+use App\Http\Controllers\ClientModuleController;
+use App\Http\Controllers\ClientReportController;
 use App\Http\Controllers\BackupSettingsController;
 use App\Http\Controllers\BranchController;
 use App\Http\Controllers\ClientController;
@@ -54,6 +57,45 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // تغيير العميل الحالي للموظف
     Route::post('/auth/switch-client/{clientId}', [AuthController::class, 'switchClient']);
+
+    // ── Client Portal ─────────────────────────────────────
+    Route::get('/client/modules', [ClientModuleController::class, 'index']);
+    Route::get('/client/settings', [ClientModuleController::class, 'settings']);
+    Route::get('/client/all-modules', [ClientModuleController::class, 'allModules']);
+    Route::prefix('client/dashboard')->group(function () {
+        Route::get('/kpis', [ClientDashboardController::class, 'kpis']);
+        Route::get('/stock-distribution', [ClientDashboardController::class, 'stockDistribution']);
+        Route::get('/monthly-trend', [ClientDashboardController::class, 'monthlyTrend']);
+        Route::get('/trends', [ClientDashboardController::class, 'trends']);
+        Route::get('/top-diff-items', [ClientDashboardController::class, 'topDiffItems']);
+        Route::get('/alerts', [ClientDashboardController::class, 'alerts']);
+        Route::get('/menu-snapshot', [ClientDashboardController::class, 'menuSnapshot']);
+        Route::get('/recent-activity', [ClientDashboardController::class, 'recentActivity']);
+    });
+    Route::get('/client/warehouses', [ClientDashboardController::class, 'warehouses']);
+    Route::get('/client/stock/current', [ClientDashboardController::class, 'currentStock']);
+    Route::get('/client/stock/warehouse-summary', [ClientDashboardController::class, 'warehouseSummary']);
+
+    Route::prefix('client/reports')->group(function () {
+        Route::get('/purchases', [ClientReportController::class, 'purchases']);
+        Route::get('/menu-engineering', [ClientReportController::class, 'menuEngineering']);
+        Route::get('/expenses', [ClientReportController::class, 'expenses']);
+        Route::get('/financial', [ClientReportController::class, 'financial']);
+    });
+
+    Route::prefix('client/menu-engineering')->group(function () {
+        Route::get('/menus', [ClientReportController::class, 'menus']);
+    });
+
+    Route::get('/client/dashboard/smart-summary', [DashboardController::class, 'smartSummary']);
+    Route::prefix('client/analytics')->group(function () {
+        Route::get('/inventory-alerts', [SmartAnalyticsController::class, 'inventoryAlerts']);
+        Route::get('/top-purchases', [SmartAnalyticsController::class, 'topPurchases']);
+        Route::get('/price-changes', [SmartAnalyticsController::class, 'priceChanges']);
+        Route::get('/cost-impact', [SmartAnalyticsController::class, 'costImpact']);
+        Route::get('/cost-contribution', [SmartAnalyticsController::class, 'costContribution']);
+        Route::get('/stock-value', [SmartAnalyticsController::class, 'stockValue']);
+    });
 
     // ── Dashboard ─────────────────────────────────────────
     Route::middleware('permission:dashboard')->group(function () {
@@ -112,6 +154,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/stock/movement', [StockController::class, 'movement']);
         Route::get('/stock/opening', [StockController::class, 'opening']);
         Route::get('/stock/warehouse-summary', [StockController::class, 'warehouseSummary']);
+        Route::get('/stock/branch-transfers', [\App\Http\Controllers\Stock\BranchTransferController::class, 'index']);
+        Route::post('/stock/branch-transfer', [\App\Http\Controllers\Stock\BranchTransferController::class, 'transfer']);
+        Route::post('/stock/branch-return', [\App\Http\Controllers\Stock\BranchTransferController::class, 'return']);
+        Route::delete('/stock/branch-transfers/{id}', [\App\Http\Controllers\Stock\BranchTransferController::class, 'destroy']);
     });
 
     // ── Closing (التقفيل الشهري) ──────────────────────────

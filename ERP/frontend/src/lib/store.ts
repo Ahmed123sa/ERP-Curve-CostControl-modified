@@ -15,7 +15,8 @@ interface User {
   id: string;
   name: string;
   email: string;
-  role: 'admin' | 'cost_controller' | 'viewer';
+  role: 'admin' | 'cost_controller' | 'viewer' | 'client';
+  portal?: 'internal' | 'client';
   permissions?: string[];
   clients: Client[];
   current_client_id: string;

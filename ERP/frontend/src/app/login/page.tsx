@@ -14,7 +14,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (user && token) {
-      if (user.clients && user.clients.length > 1) {
+      if (user.portal === 'client') {
+        router.replace('/client/dashboard');
+      } else if (user.clients && user.clients.length > 1) {
         router.replace('/select-client');
       } else {
         router.replace('/dashboard');
@@ -37,10 +39,14 @@ export default function LoginPage() {
     try {
       await login(email, password);
       const { user } = useAuthStore.getState();
-      if (user && user.clients && user.clients.length > 1) {
-        router.replace('/select-client');
-      } else {
-        router.replace('/dashboard');
+      if (user) {
+        if (user.portal === 'client') {
+          router.replace('/client/dashboard');
+        } else if (user.clients && user.clients.length > 1) {
+          router.replace('/select-client');
+        } else {
+          router.replace('/dashboard');
+        }
       }
     } catch {
       toast.error('بيانات الدخول غلط');

@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 * { box-sizing: border-box; }
-body { font-family: system-ui, -apple-system, sans-serif; background: #f9fafb; }
+body { font-family: system-ui, -apple-system, sans-serif; }
 
 @layer base {
   .theme { --font-heading: var(--font-sans); --font-sans: var(--font-sans); }
