@@ -12,7 +12,7 @@ class DispatchOrder extends Model
     public $incrementing = false;
     protected $fillable = [
         'id','client_id','type','date',
-        'warehouse_id','branch_id','created_by',
+        'warehouse_id','branch_id','source_order_id','created_by',
         'status','source','source_file','notes',
     ];
     protected $casts = ['date' => 'date:Y-m-d'];
