@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Financial;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\GenerateFinancialClosingReport;
 use App\Services\Financial\ClosingReportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -35,9 +36,9 @@ class ClosingReportController extends Controller
             'year' => 'required|integer|min:2020',
         ]);
 
-        $report = $this->service->generate($clientId, (int) $data['month'], (int) $data['year']);
+        GenerateFinancialClosingReport::dispatch($clientId, (int) $data['month'], (int) $data['year']);
 
-        return response()->json(['report' => $report, 'message' => 'تم توليد تقرير التقفيل']);
+        return response()->json(['message' => 'جاري إنشاء تقرير التقفيل']);
     }
 
     public function show(Request $request, string $id): JsonResponse

@@ -13,6 +13,7 @@ use App\Models\Financial\FinancialEmployee;
 use App\Models\Payroll\PayrollMonthly;
 use App\Models\Payroll\PayrollMonthlyDetail;
 use App\Models\Client;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
@@ -29,14 +30,17 @@ class ClosingReportService
 {
     public function list(string $clientId, ?int $month = null, ?int $year = null): array
     {
-        $query = FinancialClosingReport::where('client_id', $clientId)
-            ->with(['details' => fn($q) => $q->orderBy('sort_order'), 'details.items']);
+        $cacheKey = "fin_report_list:{$clientId}:" . ($month ?? 'any') . ":" . ($year ?? 'any');
+        return Cache::remember($cacheKey, 300, function () use ($clientId, $month, $year) {
+            $query = FinancialClosingReport::where('client_id', $clientId)
+                ->with(['details' => fn($q) => $q->orderBy('sort_order'), 'details.items']);
 
-        if ($month && $year) {
-            $query->where('month', $month)->where('year', $year);
-        }
+            if ($month && $year) {
+                $query->where('month', $month)->where('year', $year);
+            }
 
-        return $query->orderBy('year', 'desc')->orderBy('month', 'desc')->get()->toArray();
+            return $query->orderBy('year', 'desc')->orderBy('month', 'desc')->get()->toArray();
+        });
     }
 
     public function generate(string $clientId, int $month, int $year): FinancialClosingReport

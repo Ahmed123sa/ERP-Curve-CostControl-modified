@@ -11,6 +11,7 @@ use App\Models\Item;
 use App\Models\DispatchLine;
 use App\Models\DispatchOrder;
 use App\Models\StockLedger;
+use App\Jobs\ProcessMonthlyClosing;
 use App\Services\ActivityLogger;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -183,25 +184,16 @@ class ClosingController extends Controller
             abort(403, 'الشهر مقفول — لا يمكن إعادة توليد التقفيل');
         }
 
-        try {
-            if ($whId === 'all') {
-                $warehouses = Warehouse::where('client_id', $clientId)->where('is_active', true)->get();
-                foreach ($warehouses as $wh) {
-                    $this->calc->generateMonthlyClosing($clientId, $wh->id, $month);
-                }
-                return response()->json(['message' => 'تم توليد التقفيل لكل المخازن والفروع بنجاح']);
+        if ($whId === 'all') {
+            $warehouses = Warehouse::where('client_id', $clientId)->where('is_active', true)->get();
+            foreach ($warehouses as $wh) {
+                ProcessMonthlyClosing::dispatch($clientId, $wh->id, $month);
             }
-
-            $results = $this->calc->generateMonthlyClosing($clientId, $whId, $month);
-            return response()->json(['message' => 'تم توليد التقفيل بنجاح', 'count' => count($results)]);
-        } catch (\Exception $e) {
-            Log::error('Error generating monthly closing', [
-                'client_id' => $clientId, 'warehouse_id' => $whId, 'month' => $month, 'error' => $e->getMessage()
-            ]);
-            return response()->json([
-                'message' => 'خطأ في توليد التقفيل — تم تسجيل التفاصيل في سجل الأخطاء',
-            ], 500);
+            return response()->json(['message' => 'جاري إنشاء التقفيل لكل المخازن والفروع']);
         }
+
+        ProcessMonthlyClosing::dispatch($clientId, $whId, $month);
+        return response()->json(['message' => 'جاري إنشاء التقفيل']);
     }
 
     public function updateActual(UpdateActualRequest $request, MonthlyClosing $closing): JsonResponse

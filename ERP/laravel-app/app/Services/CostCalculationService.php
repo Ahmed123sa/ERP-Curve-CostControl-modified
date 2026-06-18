@@ -8,6 +8,7 @@ use App\Models\Item;
 use App\Models\Warehouse;
 use App\Models\Branch;
 use App\Models\DispatchOrder;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Carbon;
 
@@ -32,23 +33,26 @@ class CostCalculationService
         string $itemId,
         ?string $asOfDate = null
     ): float {
-        $query = StockLedger::where('client_id', $clientId)
-            ->where('warehouse_id', $warehouseId)
-            ->where('item_id', $itemId)
-            ->whereIn('movement_type', ['in', 'transfer_in']);
+        $cacheKey = "wac:{$clientId}:{$warehouseId}:{$itemId}:" . ($asOfDate ?? 'now');
+        return Cache::remember($cacheKey, 3600, function () use ($clientId, $warehouseId, $itemId, $asOfDate) {
+            $query = StockLedger::where('client_id', $clientId)
+                ->where('warehouse_id', $warehouseId)
+                ->where('item_id', $itemId)
+                ->whereIn('movement_type', ['in', 'transfer_in']);
 
-        if ($asOfDate) {
-            $query->where('date', '<=', $asOfDate);
-        }
+            if ($asOfDate) {
+                $query->where('date', '<=', $asOfDate);
+            }
 
-        $result = $query->selectRaw('SUM(qty) as total_qty, SUM(total_cost) as total_cost')
-            ->first();
+            $result = $query->selectRaw('SUM(qty) as total_qty, SUM(total_cost) as total_cost')
+                ->first();
 
-        if (!$result || $result->total_qty <= 0) {
-            return 0.0;
-        }
+            if (!$result || $result->total_qty <= 0) {
+                return 0.0;
+            }
 
-        return round($result->total_cost / $result->total_qty, 4);
+            return round($result->total_cost / $result->total_qty, 4);
+        });
     }
 
     /**
@@ -61,20 +65,23 @@ class CostCalculationService
         string $itemId,
         ?string $asOfDate = null
     ): float {
-        $query = StockLedger::where('client_id', $clientId)
-            ->where('warehouse_id', $warehouseId)
-            ->where('item_id', $itemId);
+        $cacheKey = "stock:{$clientId}:{$warehouseId}:{$itemId}:" . ($asOfDate ?? 'now');
+        return Cache::remember($cacheKey, 300, function () use ($clientId, $warehouseId, $itemId, $asOfDate) {
+            $query = StockLedger::where('client_id', $clientId)
+                ->where('warehouse_id', $warehouseId)
+                ->where('item_id', $itemId);
 
-        if ($asOfDate) {
-            $query->where('date', '<=', $asOfDate);
-        }
+            if ($asOfDate) {
+                $query->where('date', '<=', $asOfDate);
+            }
 
-        $result = $query->selectRaw("
-            SUM(CASE WHEN movement_type IN ('in','transfer_in')  THEN qty ELSE 0 END) -
-            SUM(CASE WHEN movement_type IN ('out','transfer_out') THEN qty ELSE 0 END) AS balance
-        ")->value('balance');
+            $result = $query->selectRaw("
+                SUM(CASE WHEN movement_type IN ('in','transfer_in')  THEN qty ELSE 0 END) -
+                SUM(CASE WHEN movement_type IN ('out','transfer_out') THEN qty ELSE 0 END) AS balance
+            ")->value('balance');
 
-        return round(max(0, (float) $result), 3);
+            return round(max(0, (float) $result), 3);
+        });
     }
 
     /**
