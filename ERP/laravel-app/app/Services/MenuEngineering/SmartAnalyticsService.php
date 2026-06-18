@@ -626,7 +626,8 @@ class SmartAnalyticsService
             ->where('movement_type', 'in')
             ->whereMonth('date', now()->month)
             ->whereYear('date', now()->year)
-            ->count('id');
+            ->distinct('ref_id')
+            ->count('ref_id');
 
         return [
             'critical_alerts' => array_slice($alerts['critical'], 0, 5),

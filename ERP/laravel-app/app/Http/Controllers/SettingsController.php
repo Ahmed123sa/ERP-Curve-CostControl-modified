@@ -1,6 +1,7 @@
 <?php
 namespace App\Http\Controllers;
 
+use App\Models\Setting;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -9,19 +10,20 @@ class SettingsController extends Controller
 {
     public function logo(Request $request): JsonResponse
     {
-        $user = $request->user();
-        $client = $user->clients()->findOrFail($user->current_client_id);
-
         $request->validate([
             'logo' => 'required|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
         ]);
 
-        if ($client->logo) {
-            Storage::disk('public')->delete($client->logo);
+        $current = Setting::where('key', 'system_logo')->first();
+        if ($current && $current->value) {
+            Storage::disk('public')->delete($current->value);
         }
 
-        $path = $request->file('logo')->store('logos', 'public');
-        $client->update(['logo' => $path]);
+        $path = $request->file('logo')->store('system-logo', 'public');
+        Setting::updateOrCreate(
+            ['key' => 'system_logo'],
+            ['value' => $path]
+        );
 
         return response()->json([
             'message' => 'تم رفع الشعار بنجاح',
@@ -29,24 +31,23 @@ class SettingsController extends Controller
         ]);
     }
 
-    public function getLogo(Request $request): JsonResponse
+    public function getLogo(): JsonResponse
     {
-        $user = $request->user();
-        $client = $user->clients()->findOrFail($user->current_client_id);
+        $setting = Setting::where('key', 'system_logo')->first();
+        $path = $setting?->value;
 
         return response()->json([
-            'logo_url' => $client->logo ? Storage::url($client->logo) : null,
+            'logo_url' => $path ? Storage::url($path) : null,
         ]);
     }
 
-    public function deleteLogo(Request $request): JsonResponse
+    public function deleteLogo(): JsonResponse
     {
-        $user = $request->user();
-        $client = $user->clients()->findOrFail($user->current_client_id);
+        $setting = Setting::where('key', 'system_logo')->first();
 
-        if ($client->logo) {
-            Storage::disk('public')->delete($client->logo);
-            $client->update(['logo' => null]);
+        if ($setting && $setting->value) {
+            Storage::disk('public')->delete($setting->value);
+            $setting->update(['value' => null]);
         }
 
         return response()->json(['message' => 'تم حذف الشعار']);

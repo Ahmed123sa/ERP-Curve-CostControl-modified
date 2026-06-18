@@ -11,7 +11,7 @@ import {
 } from '@/app/(app)/dashboard/components/DashboardCharts';
 import { PageContainer } from '@/components/ui/PageContainer';
 import { motion } from 'framer-motion';
-import { ShoppingCart, Package, AlertTriangle, Warehouse, UtensilsCrossed, Activity } from 'lucide-react';
+import { ShoppingCart, Package, AlertTriangle, Warehouse, UtensilsCrossed, Activity, Sparkles, TrendingUp, Bell } from 'lucide-react';
 
 const badge = (type: string) => {
   const m: Record<string, string> = {
@@ -92,12 +92,21 @@ export default function ClientDashboardPage() {
         className="relative mb-8 overflow-hidden rounded-2xl bg-gradient-to-l from-[var(--client-primary)] via-[var(--client-primary)]/80 to-blue-50 dark:to-gray-900 p-6 shadow-lg"
       >
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(255,255,255,0.15),transparent_60%)]" />
-        <h1 className="text-2xl font-bold text-white relative">
-          {currentClient?.name ?? 'لوحة المعلومات'}
-        </h1>
-        <p className="text-sm text-white/80 mt-1 relative">
-          ملخص الأداء الشهري
-        </p>
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_right,rgba(255,255,255,0.08),transparent_50%)]" />
+        <div className="absolute -top-6 -left-6 w-32 h-32 rounded-full bg-white/5 blur-2xl" />
+        <div className="absolute -bottom-8 -right-8 w-40 h-40 rounded-full bg-white/5 blur-3xl" />
+        <div className="relative">
+          <h1 className="text-2xl font-bold text-white">
+            {currentClient?.name ?? 'لوحة المعلومات'}
+          </h1>
+          <p className="text-sm text-white/80 mt-1">
+            ملخص الأداء الشهري
+          </p>
+          <div className="flex items-center gap-4 mt-3 text-white/60 text-xs">
+            <span className="flex items-center gap-1"><Sparkles size={12} /> تحديث مباشر</span>
+            <span className="flex items-center gap-1"><Activity size={12} /> {new Date().toLocaleDateString('ar-EG')}</span>
+          </div>
+        </div>
       </motion.div>
 
       <motion.div
@@ -181,21 +190,24 @@ export default function ClientDashboardPage() {
         className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6"
       >
         {[
-          { href: '/client/analytics', label: 'إنذارات المخزون', value: smart?.critical_count ?? 0, sub: 'صنف حرج', color: '#ef4444', bg: 'from-red-500/10 to-red-600/5' },
-          { href: '/client/analytics', label: 'قيمة المخزون', value: `${(smart?.stock_value ?? 0).toLocaleString()} ج`, sub: 'إجمالي', color: '#10b981', bg: 'from-emerald-500/10 to-emerald-600/5' },
-          { href: '/client/analytics', label: 'تغيرات الأسعار', value: smart?.recent_price_changes?.length ?? 0, sub: 'تغيير حديث', color: '#f59e0b', bg: 'from-amber-500/10 to-amber-600/5' },
-          { href: '/client/analytics', label: 'المشتريات', value: smart?.monthly_purchase_count ?? 0, sub: 'فاتورة هذا الشهر', color: '#3b82f6', bg: 'from-blue-500/10 to-blue-600/5' },
+          { href: '/client/analytics', label: 'إنذارات المخزون', value: smart?.critical_count ?? 0, sub: 'صنف حرج', color: '#ef4444', bg: 'from-red-500/10 to-red-600/5', icon: <Bell size={16} /> },
+          { href: '/client/analytics', label: 'قيمة المخزون', value: `${(smart?.stock_value ?? 0).toLocaleString()} ج`, sub: 'إجمالي', color: '#10b981', bg: 'from-emerald-500/10 to-emerald-600/5', icon: <Package size={16} /> },
+          { href: '/client/analytics', label: 'تغيرات الأسعار', value: smart?.recent_price_changes?.length ?? 0, sub: 'تغيير حديث', color: '#f59e0b', bg: 'from-amber-500/10 to-amber-600/5', icon: <TrendingUp size={16} /> },
+          { href: '/client/analytics', label: 'المشتريات', value: smart?.monthly_purchase_count ?? 0, sub: 'فاتورة هذا الشهر', color: '#3b82f6', bg: 'from-blue-500/10 to-blue-600/5', icon: <ShoppingCart size={16} /> },
         ].map((card) => (
           <motion.div key={card.label} variants={itemVariants}>
             <Link
               href={card.href}
-              className={`relative block rounded-xl border border-gray-100 dark:border-gray-800 p-4 shadow-sm hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5 overflow-hidden bg-gradient-to-br ${card.bg} backdrop-blur-sm`}
+              className={`relative block rounded-xl border border-gray-100 dark:border-gray-700/50 p-4 shadow-sm hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5 overflow-hidden bg-gradient-to-br ${card.bg} backdrop-blur-sm`}
             >
-              <div className="absolute inset-0 bg-white/70 dark:bg-gray-900/70 backdrop-blur-sm" />
+              <div className="absolute inset-0 bg-white/70 dark:bg-gray-950/80 backdrop-blur-sm" />
               <div className="relative">
-                <div className="text-xs text-gray-400 mb-1">{card.label}</div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs text-gray-400 dark:text-gray-500">{card.label}</div>
+                  <span style={{ color: card.color }} className="opacity-60">{card.icon}</span>
+                </div>
                 <div className="text-lg font-bold" style={{ color: card.color }}>{card.value}</div>
-                <div className="text-xs text-gray-400 mt-0.5">{card.sub}</div>
+                <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{card.sub}</div>
               </div>
             </Link>
           </motion.div>
@@ -223,35 +235,52 @@ export default function ClientDashboardPage() {
         className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-6"
       >
         <motion.div variants={itemVariants}>
-          <div className="rounded-2xl border border-gray-100 dark:border-gray-800 p-4 shadow-sm backdrop-blur-sm bg-white/80 dark:bg-gray-900/80">
-            <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3 flex items-center gap-2">
-              <AlertTriangle size={16} className="text-red-500" />
+          <div className="rounded-2xl border border-gray-100 dark:border-gray-700/50 p-4 shadow-sm backdrop-blur-sm bg-white/80 dark:bg-gray-900/90">
+            <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100 mb-3 flex items-center gap-2">
+              <AlertTriangle size={15} className="text-red-500" />
               إنذارات المخزون
+              {alerts?.summary && (
+                <span className="mr-auto text-[10px] text-gray-400 dark:text-gray-500 font-normal">
+                  {alerts.summary.out_of_stock_count + alerts.summary.critical_count + alerts.summary.warning_count} تنبيه
+                </span>
+              )}
             </h3>
             {!alerts ? (
               <div className="text-gray-400 text-sm">جاري التحميل...</div>
             ) : (
-              <div className="space-y-2 text-sm">
+              <div className="space-y-1.5 text-sm">
                 {alerts.summary?.out_of_stock_count > 0 && (
-                  <div className="flex items-center justify-between p-2 bg-red-50 dark:bg-red-900/20 rounded-xl">
-                    <span className="text-red-700 dark:text-red-300">نفد بالكامل</span>
-                    <span className="font-bold text-red-600">{alerts.summary.out_of_stock_count}</span>
+                  <div className="flex items-center justify-between p-2.5 bg-gradient-to-l from-red-50 to-red-50/50 dark:from-red-950/60 dark:to-red-950/30 rounded-xl border border-red-100 dark:border-red-900/40">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                      <span className="text-red-700 dark:text-red-300 text-xs font-medium">نفد بالكامل</span>
+                    </div>
+                    <span className="font-bold text-red-600 dark:text-red-400 text-sm">{alerts.summary.out_of_stock_count}</span>
                   </div>
                 )}
                 {alerts.summary?.critical_count > 0 && (
-                  <div className="flex items-center justify-between p-2 bg-amber-50 dark:bg-amber-900/20 rounded-xl">
-                    <span className="text-amber-700 dark:text-amber-300">أقل من الحد الأدنى</span>
-                    <span className="font-bold text-amber-600">{alerts.summary.critical_count}</span>
+                  <div className="flex items-center justify-between p-2.5 bg-gradient-to-l from-amber-50 to-amber-50/50 dark:from-amber-950/60 dark:to-amber-950/30 rounded-xl border border-amber-100 dark:border-amber-900/40">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-amber-500" />
+                      <span className="text-amber-700 dark:text-amber-300 text-xs font-medium">أقل من الحد الأدنى</span>
+                    </div>
+                    <span className="font-bold text-amber-600 dark:text-amber-400 text-sm">{alerts.summary.critical_count}</span>
                   </div>
                 )}
                 {alerts.summary?.warning_count > 0 && (
-                  <div className="flex items-center justify-between p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded-xl">
-                    <span className="text-yellow-700 dark:text-yellow-300">يقترب من الحد</span>
-                    <span className="font-bold text-yellow-600">{alerts.summary.warning_count}</span>
+                  <div className="flex items-center justify-between p-2.5 bg-gradient-to-l from-yellow-50 to-yellow-50/50 dark:from-yellow-950/60 dark:to-yellow-950/30 rounded-xl border border-yellow-100 dark:border-yellow-900/40">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-yellow-500" />
+                      <span className="text-yellow-700 dark:text-yellow-300 text-xs font-medium">يقترب من الحد</span>
+                    </div>
+                    <span className="font-bold text-yellow-600 dark:text-yellow-400 text-sm">{alerts.summary.warning_count}</span>
                   </div>
                 )}
                 {(!alerts.summary || (alerts.summary.out_of_stock_count + alerts.summary.critical_count + alerts.summary.warning_count) === 0) && (
-                  <div className="text-emerald-600 dark:text-emerald-400">جميع الأصناف ضمن الحدود الآمنة</div>
+                  <div className="flex items-center gap-2 p-3 text-emerald-600 dark:text-emerald-400 text-xs bg-emerald-50/50 dark:bg-emerald-950/40 rounded-xl border border-emerald-100 dark:border-emerald-900/30">
+                    <Package size={14} />
+                    جميع الأصناف ضمن الحدود الآمنة
+                  </div>
                 )}
               </div>
             )}
@@ -259,25 +288,41 @@ export default function ClientDashboardPage() {
         </motion.div>
 
         <motion.div variants={itemVariants}>
-          <div className="rounded-2xl border border-gray-100 dark:border-gray-800 p-4 shadow-sm backdrop-blur-sm bg-white/80 dark:bg-gray-900/80">
-            <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3 flex items-center gap-2">
-              <UtensilsCrossed size={16} className="text-emerald-500" />
+          <div className="rounded-2xl border border-gray-100 dark:border-gray-700/50 p-4 shadow-sm backdrop-blur-sm bg-white/80 dark:bg-gray-900/90">
+            <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100 mb-3 flex items-center gap-2">
+              <UtensilsCrossed size={15} className="text-emerald-500" />
               قائمة الطعام
+              {menu?.total_recipes > 0 && (
+                <span className="mr-auto text-[10px] text-gray-400 dark:text-gray-500 font-normal bg-gray-100 dark:bg-gray-800/60 px-2 py-0.5 rounded-full">
+                  {menu.total_recipes} وصفة
+                </span>
+              )}
             </h3>
             {!menu ? (
               <div className="text-gray-400 text-sm">جاري التحميل...</div>
             ) : menu.total_recipes === 0 ? (
-              <div className="text-gray-400 text-sm">لا توجد وصفات نشطة</div>
+              <div className="flex items-center gap-2 p-3 text-gray-400 dark:text-gray-500 text-xs bg-gray-50 dark:bg-gray-800/40 rounded-xl border border-gray-100 dark:border-gray-700/30">
+                <UtensilsCrossed size={14} />
+                لا توجد وصفات نشطة
+              </div>
             ) : (
-              <div className="space-y-2 text-sm">
-                <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400">
-                  <span>الأعلى ربحية</span>
-                  <span className="text-xs text-gray-400">تكلفة</span>
+              <div className="space-y-1.5 text-sm">
+                <div className="flex items-center justify-between px-1 py-1">
+                  <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                    <Sparkles size={12} />
+                    الأعلى ربحية
+                  </span>
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500">تكلفة</span>
                 </div>
                 {menu.most_profitable?.slice(0, 3).map((r: any, i: number) => (
-                  <div key={i} className="flex items-center justify-between p-1.5 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg">
-                    <span className="truncate max-w-[160px]">{r.name}</span>
-                    <span className="font-mono text-xs">{r.fc_pct}%</span>
+                  <div key={i} className="flex items-center justify-between p-2 bg-gradient-to-l from-emerald-50/80 to-transparent dark:from-emerald-950/50 dark:to-transparent rounded-xl border border-emerald-100/50 dark:border-emerald-900/30">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-5 h-5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex-shrink-0">
+                        {i + 1}
+                      </span>
+                      <span className="truncate max-w-[140px] text-gray-700 dark:text-gray-300 text-xs">{r.name}</span>
+                    </div>
+                    <span className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">{r.fc_pct}%</span>
                   </div>
                 ))}
               </div>
@@ -286,26 +331,40 @@ export default function ClientDashboardPage() {
         </motion.div>
 
         <motion.div variants={itemVariants}>
-          <div className="rounded-2xl border border-gray-100 dark:border-gray-800 p-4 shadow-sm backdrop-blur-sm bg-white/80 dark:bg-gray-900/80">
-            <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3 flex items-center gap-2">
-              <Activity size={16} className="text-blue-500" />
+          <div className="rounded-2xl border border-gray-100 dark:border-gray-700/50 p-4 shadow-sm backdrop-blur-sm bg-white/80 dark:bg-gray-900/90">
+            <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100 mb-3 flex items-center gap-2">
+              <Activity size={15} className="text-blue-500" />
               آخر النشاطات
+              {recent?.length > 0 && (
+                <span className="mr-auto text-[10px] text-gray-400 dark:text-gray-500 font-normal">{recent.length} حركة</span>
+              )}
             </h3>
             {!recent ? (
               <div className="text-gray-400 text-sm">جاري التحميل...</div>
             ) : recent.length === 0 ? (
-              <div className="text-gray-400 text-sm">لا توجد نشاطات</div>
+              <div className="flex items-center gap-2 p-3 text-gray-400 dark:text-gray-500 text-xs bg-gray-50 dark:bg-gray-800/40 rounded-xl border border-gray-100 dark:border-gray-700/30">
+                <Activity size={14} />
+                لا توجد نشاطات
+              </div>
             ) : (
-              <div className="space-y-2 text-sm">
+              <div className="space-y-1 text-sm">
                 {recent.map((r: any, i: number) => (
-                  <div key={i} className="flex items-center justify-between p-1.5 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                    <div className="flex items-center gap-2 min-w-0">
+                  <div key={i} className="relative flex items-center gap-3 p-2 hover:bg-gray-50 dark:hover:bg-gray-800/40 rounded-xl transition-colors">
+                    {i < recent.length - 1 && (
+                      <div className="absolute right-[19px] top-8 bottom-0 w-px bg-gray-100 dark:bg-gray-700/30" />
+                    )}
+                    <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 mt-0.5 ring-2 ring-white dark:ring-gray-900/95 ${
+                      r.voucher_type === 'purchase' ? 'bg-blue-400' :
+                      r.voucher_type === 'dispatch' ? 'bg-amber-400' :
+                      r.voucher_type === 'production' ? 'bg-emerald-400' : 'bg-gray-400'
+                    }`} />
+                    <div className="flex-1 min-w-0 flex items-center gap-2">
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${badge(r.voucher_type)}`}>
                         {typeLabel[r.voucher_type] ?? r.voucher_type}
                       </span>
-                      <span className="truncate max-w-[100px] text-gray-700 dark:text-gray-300">{r.item_name}</span>
+                      <span className="truncate max-w-[100px] text-gray-700 dark:text-gray-300 text-xs">{r.item_name}</span>
                     </div>
-                    <span className="font-mono text-xs text-gray-500">{r.date}</span>
+                    <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 flex-shrink-0">{r.date}</span>
                   </div>
                 ))}
               </div>

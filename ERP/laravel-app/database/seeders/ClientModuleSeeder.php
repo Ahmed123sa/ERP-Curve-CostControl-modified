@@ -13,7 +13,8 @@ class ClientModuleSeeder extends Seeder
             'dashboard', 'vouchers.purchase', 'vouchers.dispatch',
             'vouchers.upload', 'vouchers.history', 'closing',
             'inventory', 'items', 'mappings', 'menu-engineering',
-            'reports.financial', 'reports.diffs', 'reports.food-cost', 'analytics',
+            'reports.financial', 'reports.diffs', 'reports.food-cost',
+            'analytics', 'expenses',
         ];
 
         $clients = DB::table('clients')->get();

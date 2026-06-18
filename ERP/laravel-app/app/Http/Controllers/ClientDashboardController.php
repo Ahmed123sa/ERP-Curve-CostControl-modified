@@ -45,6 +45,7 @@ class ClientDashboardController extends Controller
         $monthlyPurchases = (float) StockLedger::where('client_id', $clientId)
             ->whereBetween('date', [$start, $end])
             ->where('voucher_type', 'purchase')->where('movement_type', 'in')
+            ->where('total_cost', '>', 0)
             ->sum('total_cost');
 
         $totalDiffs = (float) MonthlyClosing::where('client_id', $clientId)
@@ -59,6 +60,7 @@ class ClientDashboardController extends Controller
                 now()->parse($prevMonth . '-01')->toDateString(),
                 now()->parse($prevMonth . '-01')->endOfMonth()->toDateString(),
             ])->where('voucher_type', 'purchase')->where('movement_type', 'in')
+            ->where('total_cost', '>', 0)
             ->sum('total_cost');
 
         return response()->json([
@@ -115,6 +117,7 @@ class ClientDashboardController extends Controller
                 'purchases' => (float) StockLedger::where('client_id', $clientId)
                     ->whereBetween('date', [$start, $end])
                     ->where('voucher_type', 'purchase')->where('movement_type', 'in')
+                    ->where('total_cost', '>', 0)
                     ->sum('total_cost'),
                 'diffs' => (float) MonthlyClosing::where('client_id', $clientId)
                     ->whereIn('warehouse_id', $warehouseIds)->where('month', $m)

@@ -5,6 +5,7 @@ use App\Models\Client;
 use App\Models\ClientModule;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class ClientModuleController extends Controller
 {
@@ -27,6 +28,8 @@ class ClientModuleController extends Controller
             return response()->json(['message' => 'Client not found'], 404);
         }
 
+        $client->logo_url = $client->logo ? (str_starts_with($client->logo, 'http') ? $client->logo : Storage::url($client->logo)) : null;
+
         return response()->json($client);
     }
 
@@ -47,6 +50,7 @@ class ClientModuleController extends Controller
             ['key' => 'mappings',                'label' => 'ربط الأسماء',          'default' => true],
             ['key' => 'menu-engineering',        'label' => 'هندسة القائمة',        'default' => true],
             ['key' => 'analytics',               'label' => 'التحليلات الذكية',     'default' => true],
+            ['key' => 'expenses',                'label' => 'المصروفات',            'default' => true],
             ['key' => 'financial.daily',         'label' => 'اليومية',              'default' => false],
             ['key' => 'financial.monthly',       'label' => 'التجميع الشهري',       'default' => false],
             ['key' => 'financial.closing',       'label' => 'التقفيل المالي',       'default' => false],

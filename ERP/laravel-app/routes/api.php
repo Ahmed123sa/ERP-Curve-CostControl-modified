@@ -113,6 +113,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ── Clients ───────────────────────────────────────────
     Route::middleware('permission:clients')->group(function () {
         Route::apiResource('clients', ClientController::class);
+        Route::post('/clients/{client}/logo', [ClientController::class, 'uploadLogo']);
     });
 
     // ── Items (الأصناف) ───────────────────────────────────

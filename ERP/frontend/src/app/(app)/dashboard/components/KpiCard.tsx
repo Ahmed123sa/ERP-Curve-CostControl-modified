@@ -24,7 +24,7 @@ export default function KpiCard({
   const isUp = changeVal >= 0;
 
   return (
-    <Card className="overflow-hidden border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+    <Card className="overflow-hidden border-gray-100 dark:border-gray-700/50 shadow-sm hover:shadow-md transition-shadow">
       <CardContent className="p-4">
         <div className="flex items-start justify-between">
           <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${iconBg} ${iconColor}`}>
@@ -32,7 +32,7 @@ export default function KpiCard({
           </div>
           {change !== undefined && change !== null && (
             <span className={`flex items-center gap-0.5 text-xs font-medium px-2 py-0.5 rounded-full ${
-              isUp ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'
+              isUp ? 'bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400'
             }`}>
               <span className="text-[10px]">{isUp ? '▲' : '▼'}</span>
               {Math.abs(changeVal).toFixed(1)}%
@@ -40,12 +40,12 @@ export default function KpiCard({
           )}
         </div>
         <div className="mt-3">
-          <div className="text-xs text-gray-500">{label}</div>
-          <div className="text-xl font-bold mt-0.5 font-mono tracking-tight">
+          <div className="text-xs text-gray-500 dark:text-gray-400">{label}</div>
+          <div className="text-xl font-bold mt-0.5 font-mono tracking-tight text-gray-900 dark:text-gray-100">
             {isLoading ? (
-              <span className="text-gray-300">...</span>
+              <span className="text-gray-300 dark:text-gray-600">...</span>
             ) : (
-              <>{val} <span className="text-xs font-normal text-gray-400 mr-0.5">{unit}</span></>
+              <>{val} <span className="text-xs font-normal text-gray-400 dark:text-gray-500 mr-0.5">{unit}</span></>
             )}
           </div>
         </div>

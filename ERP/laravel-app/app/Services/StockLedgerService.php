@@ -26,7 +26,7 @@ class StockLedgerService
         float  $unitCost,
         string $refType,
         string $refId,
-        ?string $voucherType = null
+        string $voucherType
     ): StockLedger {
         return StockLedger::create([
             'client_id'     => $clientId,
@@ -34,7 +34,7 @@ class StockLedgerService
             'item_id'       => $itemId,
             'date'          => $date,
             'movement_type' => $movementType,
-            'voucher_type'  => $voucherType ?: $movementType,
+            'voucher_type'  => $voucherType,
             'qty'           => abs($qty),
             'unit_cost'     => $unitCost,
             'total_cost'    => $totalCost,

@@ -7,9 +7,20 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class ClientController extends Controller
 {
+    /**
+     * عرض شركة واحدة
+     */
+    public function show(Client $client): JsonResponse
+    {
+        $client->loadCount('users');
+        $client->logo_url = $client->logo ? (str_starts_with($client->logo, 'http') ? $client->logo : Storage::url($client->logo)) : null;
+        return response()->json($client);
+    }
+
     /**
      * عرض الشركات التي يمتلك المستخدم صلاحية الوصول إليها
      */
@@ -24,6 +35,10 @@ class ClientController extends Controller
             $clients = $user->clients()->withCount('users')->get();
         }
 
+        $clients->each(function ($c) {
+            $c->logo_url = $c->logo ? (str_starts_with($c->logo, 'http') ? $c->logo : Storage::url($c->logo)) : null;
+        });
+
         return response()->json($clients);
     }
 
@@ -33,18 +48,23 @@ class ClientController extends Controller
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'name' => 'required|string|max:255',
-            'slug' => 'required|string|max:100|unique:clients,slug',
+            'name'          => 'required|string|max:255',
+            'slug'          => 'required|string|max:100|unique:clients,slug',
+            'logo'          => 'sometimes|nullable|string|max:255',
+            'primary_color' => 'sometimes|nullable|string|max:9',
+            'is_active'     => 'sometimes|boolean',
         ]);
 
         $clientId = (string) Str::uuid();
 
         return DB::transaction(function () use ($request, $clientId) {
             $client = Client::create([
-                'id'        => $clientId,
-                'name'      => $request->name,
-                'slug'      => Str::slug($request->slug),
-                'is_active' => true,
+                'id'            => $clientId,
+                'name'          => $request->name,
+                'slug'          => Str::slug($request->slug),
+                'is_active'     => $request->boolean('is_active', true),
+                'logo'          => $request->input('logo'),
+                'primary_color' => $request->input('primary_color'),
             ]);
 
             // ربط المستخدم الحالي بالشركة الجديدة كشركة أساسية له
@@ -61,22 +81,54 @@ class ClientController extends Controller
     public function update(Request $request, Client $client): JsonResponse
     {
         $request->validate([
-            'name'      => 'sometimes|string|max:255',
-            'is_active' => 'sometimes|boolean',
+            'name'          => 'sometimes|string|max:255',
+            'slug'          => 'sometimes|string|max:100|unique:clients,slug,'.$client->id,
+            'is_active'     => 'sometimes|boolean',
+            'logo'          => 'sometimes|nullable|string|max:255',
+            'primary_color' => 'sometimes|nullable|string|max:9',
         ]);
 
-        $client->update($request->only(['name', 'is_active']));
+        $client->update($request->only(['name', 'slug', 'is_active', 'logo', 'primary_color']));
 
         return response()->json($client);
     }
 
     /**
-     * حذف الشركة (يجب الحذر هنا لأنه سيحذف كل البيانات المرتبطة)
+     * رفع شعار الشركة
+     */
+    public function uploadLogo(Request $request, Client $client): JsonResponse
+    {
+        $request->validate([
+            'logo' => 'required|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
+        ]);
+
+        if ($client->logo) {
+            Storage::disk('public')->delete($client->logo);
+        }
+
+        $path = $request->file('logo')->store('logos', 'public');
+        $client->update(['logo' => $path]);
+
+        return response()->json([
+            'message' => 'تم رفع الشعار بنجاح',
+            'logo_url' => Storage::url($path),
+            'logo'     => $path,
+        ]);
+    }
+
+    /**
+     * حذف الشركة — شرط: لا يكون للشركة أي أصناف أو مخازن أو فروع مرتبطة
      */
     public function destroy(Client $client): JsonResponse
     {
-        // يفضل هنا عمل Soft Delete أو منع الحذف لو في حركات مخزنية
+        $hasData = $client->items()->exists() || $client->warehouses()->exists() || $client->branches()->exists();
+        if ($hasData) {
+            return response()->json([
+                'message' => 'لا يمكن حذف الشركة لأنها تحتوي على أصناف، مخازن أو فروع. قم بحذفها أولاً.'
+            ], 409);
+        }
+
         $client->delete();
-        return response()->json(['message' => 'تم حذف الشركة وكافة بياناتها']);
+        return response()->json(['message' => 'تم حذف الشركة']);
     }
 }

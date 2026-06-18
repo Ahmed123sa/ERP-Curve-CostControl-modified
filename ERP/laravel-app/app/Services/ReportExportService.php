@@ -397,8 +397,9 @@ class ReportExportService
         $closingColLetter = Coordinate::stringFromColumnIndex($closingIdx + 1);
 
         // Logo
-        $logoPath = storage_path('app/public/logos/03EtHUemFuued8zOYvxSjmjflq3XR1cny1bjAYD6.png');
-        if (file_exists($logoPath)) {
+        $systemLogo = \App\Models\Setting::where('key', 'system_logo')->value('value');
+        $logoPath = $systemLogo ? storage_path('app/public/' . $systemLogo) : null;
+        if ($logoPath && file_exists($logoPath)) {
             $drawing = new \PhpOffice\PhpSpreadsheet\Worksheet\Drawing();
             $drawing->setName('Curve Logo');
             $drawing->setDescription('Logo');
@@ -559,9 +560,10 @@ class ReportExportService
         [$rows, $wh, $daysInMonth] = $this->locationRows($clientId, $warehouseId, $month);
         $isBranch = $wh->type === 'branch';
 
-        $logoPath = storage_path('app/public/logos/03EtHUemFuued8zOYvxSjmjflq3XR1cny1bjAYD6.png');
+        $systemLogo = \App\Models\Setting::where('key', 'system_logo')->value('value');
+        $logoPath = $systemLogo ? storage_path('app/public/' . $systemLogo) : null;
         $logoHtml = '';
-        if (file_exists($logoPath)) {
+        if ($logoPath && file_exists($logoPath)) {
             $logoHtml = '<img src="' . $logoPath . '" style="max-height:50px;margin-bottom:4px;">';
         }
 

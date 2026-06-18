@@ -183,15 +183,20 @@ class VoucherParserService
             return 'opening';
         }
 
-        // 2. Purchase keywords (most specific inbound type)
+        // 2. Production — checked before purchase because production output
+        //    is often in a sheet named e.g. "وارد إنتاج" or "مشتريات إنتاج"
+        if (Str::contains($lower, ['انتاج', 'إنتاج'])) {
+            return 'production';
+        }
+
+        // 3. Purchase keywords (most specific inbound type)
         if (Str::contains($lower, ['وارد', 'مشتريات', 'شراء'])) {
             return 'purchase';
         }
 
-        // 3. Other specific types
+        // 4. Other specific types
         $typeMap = [
             'withdrawal'    => ['مسحوبات', 'سحب'],
-            'production'    => ['انتاج', 'إنتاج'],
             'return'        => ['مرتجع', 'إرجاع'],
             'adjustment'    => ['تسوية', 'تعديل', 'جرد'],
             'opening'       => ['افتتاحي', 'بداية', 'opening'],
@@ -201,7 +206,7 @@ class VoucherParserService
             if (Str::contains($lower, $keywords)) return $type;
         }
 
-        // 4. Dispatch keywords — last (broadest, catch-all for branch names)
+        // 6. Dispatch keywords — last (broadest, catch-all for branch names)
         if (Str::contains($lower, ['صرف', 'منصرف', 'فرع', 'تحويل', 'نقل', 'صادر'])) {
             return 'dispatch';
         }
