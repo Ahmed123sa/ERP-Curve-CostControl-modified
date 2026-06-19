@@ -8,9 +8,8 @@ use App\Http\Requests\VoucherUploadRequest;
 use App\Services\VoucherParserService;
 use App\Services\MappingService;
 use App\Services\StockLedgerService;
-use App\Services\ActivityLogger;
 use App\Services\CostCalculationService;
-use App\Models\ActivityLog;
+use App\Services\VoucherProcessingService;
 use App\Models\DispatchOrder;
 use App\Models\DispatchLine;
 use App\Models\Warehouse;
@@ -31,10 +30,11 @@ use Illuminate\Support\Facades\Storage;
 class VoucherController extends Controller
 {
     public function __construct(
-        private VoucherParserService   $parser,
-        private MappingService         $mapper,
-        private StockLedgerService     $ledger,
-        private CostCalculationService $calc,
+        private VoucherParserService      $parser,
+        private MappingService            $mapper,
+        private StockLedgerService        $ledger,
+        private CostCalculationService    $calc,
+        private VoucherProcessingService  $voucherProcessing,
     ) {}
 
     // ── رفع Excel وتحليله (Preview قبل الحفظ) ───────────────
@@ -118,8 +118,9 @@ class VoucherController extends Controller
         $saved      = [];
         $skipped    = [];
         $priceSkips = [];
+        $processedPerMonth = [];
 
-        DB::transaction(function () use ($request, $clientId, $userId, &$saved, &$skipped, &$priceSkips) {
+        DB::transaction(function () use ($request, $clientId, $userId, &$saved, &$skipped, &$priceSkips, &$processedPerMonth) {
             foreach ($request->vouchers as $voucherIndex => $voucherData) {
                 // استخراج المخزن أو الفرع من كائن location
                 $loc = $voucherData['location'] ?? [];
@@ -136,6 +137,9 @@ class VoucherController extends Controller
                 }
 
                 $orderDate = \Illuminate\Support\Carbon::parse($voucherData['date'])->toDateString();
+                $closingMonth = substr($orderDate, 0, 7);
+                $closingItemIds = [];
+                $closingWhIds = [];
 
                 $validLines = [];
                 foreach (($voucherData['lines'] ?? []) as $lineIndex => $line) {
@@ -195,13 +199,7 @@ class VoucherController extends Controller
                 foreach ($validLines as $line) {
                     $qty      = (float) $line['qty'];
                     $cost     = (float) ($line['cost'] ?? 0);
-                    // للتوزيع (dispatch) بدون تكلفة — نحسب تلقائياً من default_cost
-                    if ($voucherData['type'] === 'dispatch' && $cost <= 0) {
-                        $item = Item::where('id', $line['item_id'])->where('client_id', $clientId)->first();
-                        if ($item && $item->default_cost > 0) {
-                            $cost = round(abs($qty) * $item->default_cost, 2);
-                        }
-                    }
+                    $cost = $this->voucherProcessing->calculateLineCost($voucherData['type'], $clientId, $line['item_id'], $qty, $cost);
                     $unitCost = $qty != 0 && $cost > 0 ? round(abs($cost / $qty), 4) : 0;
 
                     $sourceWhId = null;
@@ -260,43 +258,15 @@ class VoucherController extends Controller
                         $finalWhId = $mainWh ? $mainWh->id : null;
                     }
 
-                    DispatchLine::create([
-                        'order_id'     => $order->id,
-                        'item_id'      => $line['item_id'],
-                        'warehouse_id' => $finalWhId,
-                        'qty'          => $qty,
-                        'total_cost'   => $cost,
-                        'unit_cost'    => $unitCost,
-                        'date'         => $line['date'] ?? null,
-                    ]);
+                    $this->voucherProcessing->createDispatchLine($order->id, $line['item_id'], $finalWhId, $qty, $cost, $unitCost, $line['date'] ?? null);
 
-                    // تحديث default_cost بمتوسط السعر المرجح بعد ترحيل الحركة
                     if ($voucherData['type'] === 'purchase' && $unitCost > 0) {
-                        $item = Item::where('id', $line['item_id'])
-                            ->where('client_id', $clientId)
-                            ->first();
-                        if ($item) {
-                            $oldCost = $item->default_cost;
-                            $calc = app(\App\Services\CostCalculationService::class);
-                            $whId = ($line['warehouse_id'] ?? null) ?: ($warehouseId ?? $branchId);
-                            if (!$whId) {
-                                $wh = Warehouse::where('client_id', $clientId)->where('type', 'main')->first();
-                                $whId = $wh ? $wh->id : null;
-                            }
-                            $avgCost = $whId ? $calc->weightedAverageCost($clientId, $whId, $item->id) : 0;
-                            $newCost = $avgCost > 0 ? $avgCost : $unitCost;
-                            $item->default_cost = $newCost;
-                            $item->save();
-                            if ((float) $oldCost !== $newCost) {
-                                ActivityLogger::log(
-                                    action:     'price_updated',
-                                    entityType: 'Item',
-                                    entityId:   $item->id,
-                                    oldValues:  ['default_cost' => $oldCost],
-                                    newValues:  ['default_cost' => $newCost, 'avg_cost' => $avgCost, 'unit_cost' => $unitCost, 'source' => 'purchase_voucher', 'voucher_id' => $order->id],
-                                );
-                            }
+                        $whId = ($line['warehouse_id'] ?? null) ?: ($warehouseId ?? $branchId);
+                        if (!$whId) {
+                            $wh = Warehouse::where('client_id', $clientId)->where('type', 'main')->first();
+                            $whId = $wh ? $wh->id : null;
                         }
+                        $this->voucherProcessing->updateItemCostAfterPurchase($clientId, $line['item_id'], $unitCost, $whId, $order->id, 'purchase_voucher');
                     }
 
                     // حفظ الـ mapping عشان المرة الجاية
@@ -308,6 +278,11 @@ class VoucherController extends Controller
                             $voucherData['location_raw'] ?? null
                         );
                     }
+
+                    $closingItemIds[] = $line['item_id'];
+                    $closingWhIds[] = $finalWhId;
+                    if ($sourceWhId) $closingWhIds[] = $sourceWhId;
+                    if ($destWhId) $closingWhIds[] = $destWhId;
                 }
 
                 // التوجيه المباشر — لو وارد مخزن وفيه أصناف مرتبطة بفروع
@@ -316,8 +291,25 @@ class VoucherController extends Controller
                 }
 
                 $saved[] = $order->id;
+
+                if (!empty($closingItemIds)) {
+                    $processedPerMonth[$closingMonth]['items'] = array_values(array_unique(array_merge(
+                        $processedPerMonth[$closingMonth]['items'] ?? [],
+                        $closingItemIds
+                    )));
+                    $processedPerMonth[$closingMonth]['warehouses'] = array_values(array_unique(array_merge(
+                        $processedPerMonth[$closingMonth]['warehouses'] ?? [],
+                        $closingWhIds
+                    )));
+                }
             }
         });
+
+        foreach ($processedPerMonth as $month => $data) {
+            $this->voucherProcessing->recalculateMonthlyClosing(
+                $clientId, $month, $data['items'], $data['warehouses']
+            );
+        }
 
         if (empty($saved)) {
             return response()->json([
@@ -469,7 +461,10 @@ class VoucherController extends Controller
         $dispatchBranchLoc = $isBranchDispatch ? ['type' => 'branch', 'id' => $dispatchBranchId] : null;
         $branchTargetWhId = $isBranchDispatch ? $this->resolveBranchTargetWhId($clientId, $dispatchBranchId) : null;
 
-        $order = DB::transaction(function () use ($request, $clientId, $userId, $warehouseId, $branchId, $dispatchBranchLoc, $branchTargetWhId) {
+        $closingItemIds = [];
+        $closingWhIds = [];
+
+        $order = DB::transaction(function () use ($request, $clientId, $userId, $warehouseId, $branchId, $dispatchBranchLoc, $branchTargetWhId, &$closingItemIds, &$closingWhIds) {
             // للأرصدة الافتتاحية — حذف القديم بالكامل (أمر + خطوط + كشف حساب) قبل إنشاء الجديد
             if ($request->type === 'opening') {
                 $monthPrefix = substr($request->date, 0, 7);
@@ -504,13 +499,7 @@ class VoucherController extends Controller
             foreach ($request->lines as $line) {
                 $qty      = (float) $line['qty'];
                 $cost     = (float) ($line['cost'] ?? 0);
-                // للتوزيع (dispatch) أو أول المدة (opening) بدون تكلفة — نحسب تلقائياً من default_cost
-                if (in_array($request->type, ['dispatch', 'opening']) && $cost <= 0) {
-                    $item = Item::where('id', $line['item_id'])->where('client_id', $clientId)->first();
-                    if ($item && $item->default_cost > 0) {
-                        $cost = round(abs($qty) * $item->default_cost, 2);
-                    }
-                }
+                    $cost = $this->voucherProcessing->calculateLineCost($request->type, $clientId, $line['item_id'], $qty, $cost);
                 $unitCost = $qty != 0 && $cost > 0 ? round(abs($cost / $qty), 4) : 0;
 
                 if ($request->type === 'dispatch' && $dispatchBranchLoc) {
@@ -520,18 +509,9 @@ class VoucherController extends Controller
                     $lineWhId = ($line['warehouse_id'] ?? null) ?: $warehouseId;
                 }
 
-                DispatchLine::create([
-                    'order_id'     => $order->id,
-                    'item_id'      => $line['item_id'],
-                    'warehouse_id' => $lineWhId,
-                    'qty'          => $qty,
-                    'total_cost'   => $cost,
-                    'unit_cost'    => $unitCost,
-                    'date'         => $line['date'] ?? null,
-                ]);
+                $this->voucherProcessing->createDispatchLine($order->id, $line['item_id'], $lineWhId, $qty, $cost, $unitCost, $line['date'] ?? null);
 
                 if ($qty >= 0) {
-                    // موجب → مسار عادي
                     $baseMovement = in_array($request->type, ['purchase', 'opening', 'adjustment', 'return']) ? 'in' : 'out';
                     $this->ledger->post(
                         clientId:     $clientId,
@@ -598,37 +578,28 @@ class VoucherController extends Controller
                     }
                 }
 
-                // تحديث default_cost للصنف بعد ترحيل المشتريات
                 if ($request->type === 'purchase' && $unitCost > 0) {
-                    $item = Item::where('id', $line['item_id'])
-                        ->where('client_id', $clientId)
-                        ->first();
-                    if ($item) {
-                        $oldCost = $item->default_cost;
-                        $avgCost = $lineWhId ? $this->calc->weightedAverageCost($clientId, $lineWhId, $item->id) : 0;
-                        $newCost = $avgCost > 0 ? $avgCost : $unitCost;
-                        $item->default_cost = $newCost;
-                        $item->save();
-                        if ((float) $oldCost !== $newCost) {
-                            ActivityLogger::log(
-                                action:     'price_updated',
-                                entityType: 'Item',
-                                entityId:   $item->id,
-                                oldValues:  ['default_cost' => $oldCost],
-                                newValues:  ['default_cost' => $newCost, 'avg_cost' => $avgCost, 'unit_cost' => $unitCost, 'source' => 'purchase_voucher', 'voucher_id' => $order->id],
-                            );
-                        }
-                    }
+                    $this->voucherProcessing->updateItemCostAfterPurchase($clientId, $line['item_id'], $unitCost, $lineWhId, $order->id, 'purchase_voucher');
                 }
+
+                $closingItemIds[] = $line['item_id'];
+                $closingWhIds[] = $warehouseId;
+                if ($lineWhId && $lineWhId !== $warehouseId) $closingWhIds[] = $lineWhId;
+                if ($branchTargetWhId) $closingWhIds[] = $branchTargetWhId;
             }
 
             return $order;
         });
 
-        // auto-generate MonthlyClosing after opening balance save
-        if ($request->type === 'opening' && $warehouseId && $request->date) {
+        // auto-generate MonthlyClosing for all affected items/warehouses
+        if (!empty($closingItemIds)) {
             $month = substr($request->date, 0, 7);
-            $this->calc->generateMonthlyClosing($clientId, $warehouseId, $month);
+            $this->voucherProcessing->recalculateMonthlyClosing(
+                $clientId,
+                $month,
+                array_values(array_unique($closingItemIds)),
+                array_values(array_unique($closingWhIds))
+            );
         }
 
         // التوجيه المباشر — لو وارد مخزن وفيه أصناف مرتبطة بفروع
@@ -735,56 +706,11 @@ class VoucherController extends Controller
                 return $order;
             });
 
-            // تحديث التقفيل للمخزن — خلينا نحسب من تاني عشان الـ out_qty اتغير
             $month = substr($date, 0, 7);
-            $calc = app(\App\Services\CostCalculationService::class);
-            foreach ($branchItems as $itemData) {
-                $summary = $calc->itemMonthSummary($clientId, $warehouseId, $itemData['item_id'], $month);
-                MonthlyClosing::updateOrCreate(
-                    ['client_id' => $clientId, 'warehouse_id' => $warehouseId, 'item_id' => $itemData['item_id'], 'month' => $month],
-                    [
-                        'opening_qty'             => $summary['opening_qty'],
-                        'opening_value'           => $summary['opening_value'],
-                        'purchases_qty'           => $summary['purchases_qty'],
-                        'purchases_value'         => $summary['purchases_value'],
-                        'internal_in_qty'         => $summary['internal_in_qty'],
-                        'in_qty'                  => $summary['in_qty'],
-                        'in_value'                => $summary['in_value'],
-                        'internal_out_qty'        => $summary['internal_out_qty'],
-                        'consumption_qty'         => $summary['consumption_qty'],
-                        'out_qty'                 => $summary['out_qty'],
-                        'avg_cost'                => $summary['avg_cost'],
-                        'closing_qty_theoretical' => $summary['closing_qty_theoretical'],
-                        'closing_value'           => $summary['closing_value'],
-                        'branch_dispatches'       => $summary['branch_dispatches'],
-                    ]
-                );
-
-                // كمان للفرع
-                $targetWhId = $this->resolveBranchTargetWhId($clientId, $branchId);
-                if ($targetWhId && $targetWhId !== $warehouseId) {
-                    $branchSummary = $calc->itemMonthSummary($clientId, $targetWhId, $itemData['item_id'], $month);
-                    MonthlyClosing::updateOrCreate(
-                        ['client_id' => $clientId, 'warehouse_id' => $targetWhId, 'item_id' => $itemData['item_id'], 'month' => $month],
-                        [
-                            'opening_qty'             => $branchSummary['opening_qty'],
-                            'opening_value'           => $branchSummary['opening_value'],
-                            'purchases_qty'           => $branchSummary['purchases_qty'],
-                            'purchases_value'         => $branchSummary['purchases_value'],
-                            'internal_in_qty'         => $branchSummary['internal_in_qty'],
-                            'in_qty'                  => $branchSummary['in_qty'],
-                            'in_value'                => $branchSummary['in_value'],
-                            'internal_out_qty'        => $branchSummary['internal_out_qty'],
-                            'consumption_qty'         => $branchSummary['consumption_qty'],
-                            'out_qty'                 => $branchSummary['out_qty'],
-                            'avg_cost'                => $branchSummary['avg_cost'],
-                            'closing_qty_theoretical' => $branchSummary['closing_qty_theoretical'],
-                            'closing_value'           => $branchSummary['closing_value'],
-                            'branch_dispatches'       => $branchSummary['branch_dispatches'],
-                        ]
-                    );
-                }
-            }
+            $itemIds = collect($branchItems)->pluck('item_id')->unique()->toArray();
+            $targetWhId = $this->resolveBranchTargetWhId($clientId, $branchId);
+            $whIds = array_unique(array_filter([$warehouseId, $targetWhId]));
+            $this->voucherProcessing->recalculateMonthlyClosing($clientId, $month, $itemIds, $whIds);
         }
     }
 
@@ -930,12 +856,7 @@ class VoucherController extends Controller
             foreach ($request->lines as $line) {
                 $qty      = (float) $line['qty'];
                 $cost     = (float) ($line['cost'] ?? 0);
-                if ($request->type === 'dispatch' && $cost <= 0) {
-                    $item = Item::where('id', $line['item_id'])->where('client_id', $clientId)->first();
-                    if ($item && $item->default_cost > 0) {
-                        $cost = round(abs($qty) * $item->default_cost, 2);
-                    }
-                }
+                $cost = $this->voucherProcessing->calculateLineCost($request->type, $clientId, $line['item_id'], $qty, $cost);
                 $unitCost = $qty != 0 && $cost > 0 ? round(abs($cost / $qty), 4) : 0;
 
                 if ($request->type === 'dispatch') {
@@ -965,15 +886,7 @@ class VoucherController extends Controller
                     $lineWhId = ($line['warehouse_id'] ?? null) ?: $dispatchLineWhFallback;
                 }
 
-                DispatchLine::create([
-                    'order_id'     => $order->id,
-                    'item_id'      => $line['item_id'],
-                    'warehouse_id' => $lineWhId,
-                    'qty'          => $qty,
-                    'total_cost'   => $cost,
-                    'unit_cost'    => $unitCost,
-                    'date'         => $line['date'] ?? null,
-                ]);
+                $this->voucherProcessing->createDispatchLine($order->id, $line['item_id'], $lineWhId, $qty, $cost, $unitCost, $line['date'] ?? null);
 
                 if ($qty >= 0) {
                     $baseMovement = in_array($request->type, ['purchase', 'opening', 'adjustment', 'return']) ? 'in' : 'out';
@@ -1041,46 +954,8 @@ class VoucherController extends Controller
                 }
 
                 if ($request->type === 'purchase' && $unitCost > 0) {
-                    $item = Item::where('id', $line['item_id'])->where('client_id', $clientId)->first();
-                    if ($item) {
-                        $oldCost = $item->default_cost;
-                        $calc = app(\App\Services\CostCalculationService::class);
-                        $whId = $lineWhId;
-                        $avgCost = $whId ? $calc->weightedAverageCost($clientId, $whId, $item->id) : 0;
-                        $newCost = $avgCost > 0 ? $avgCost : $unitCost;
-                        $item->default_cost = $newCost;
-                        $item->save();
-
-                        // البحث عن لوج سابق لنفس الصنف + الفاتورة وتحديثه
-                        $existingLog = ActivityLog::where('entity_type', 'Item')
-                            ->where('entity_id', $item->id)
-                            ->where('action', 'price_updated')
-                            ->where('new_values->voucher_id', $order->id)
-                            ->latest()
-                            ->first();
-
-                        if ($existingLog) {
-                            $existingLog->update([
-                                'new_values' => [
-                                    'default_cost' => $newCost,
-                                    'avg_cost' => $avgCost,
-                                    'unit_cost' => $unitCost,
-                                    'source' => 'voucher_confirm',
-                                    'voucher_id' => $order->id,
-                                    'corrected' => true,
-                                ],
-                            ]);
-                        } elseif ((float) $oldCost !== $newCost) {
-                            ActivityLogger::log(
-                                action:     'price_updated',
-                                entityType: 'Item',
-                                entityId:   $item->id,
-                                oldValues:  ['default_cost' => $oldCost],
-                                newValues:  ['default_cost' => $newCost, 'avg_cost' => $avgCost, 'unit_cost' => $unitCost, 'source' => 'voucher_confirm', 'voucher_id' => $order->id],
-                            );
-                        }
-                    }
-            }
+                    $this->voucherProcessing->updateItemCostAfterPurchase($clientId, $line['item_id'], $unitCost, $lineWhId, $order->id, 'voucher_confirm');
+                }
 
             // التوجيه المباشر — لو ورد مخزن مع أصناف مرتبطة بفروع
             if ($request->type === 'purchase') {
@@ -1097,45 +972,7 @@ class VoucherController extends Controller
         }
         });
 
-        // 4. تحديث التقفيل للأصناف والمخازن المتأثرة (قديمة وجديدة)
-        $calc = app(\App\Services\CostCalculationService::class);
-        foreach ($allWarehouseIds as $whId) {
-            foreach ($allItemIds as $itemId) {
-                $summary = $calc->itemMonthSummary($clientId, $whId, $itemId, $month);
-                if ($summary['opening_qty'] == 0 && $summary['in_qty'] == 0 && $summary['out_qty'] == 0) {
-                    MonthlyClosing::where('client_id', $clientId)
-                        ->where('warehouse_id', $whId)
-                        ->where('item_id', $itemId)
-                        ->where('month', $month)
-                        ->delete();
-                } else {
-                    MonthlyClosing::updateOrCreate(
-                        [
-                            'client_id'    => $clientId,
-                            'warehouse_id' => $whId,
-                            'item_id'      => $itemId,
-                            'month'        => $month,
-                        ],
-                        [
-                            'opening_qty'             => $summary['opening_qty'],
-                            'opening_value'           => $summary['opening_value'],
-                            'purchases_qty'           => $summary['purchases_qty'],
-                            'purchases_value'         => $summary['purchases_value'],
-                            'internal_in_qty'         => $summary['internal_in_qty'],
-                            'in_qty'                  => $summary['in_qty'],
-                            'in_value'                => $summary['in_value'],
-                            'internal_out_qty'        => $summary['internal_out_qty'],
-                            'consumption_qty'         => $summary['consumption_qty'],
-                            'out_qty'                 => $summary['out_qty'],
-                            'avg_cost'                => $summary['avg_cost'],
-                            'closing_qty_theoretical' => $summary['closing_qty_theoretical'],
-                            'closing_value'           => $summary['closing_value'],
-                            'branch_dispatches'       => $summary['branch_dispatches'],
-                        ]
-                    );
-                }
-            }
-        }
+        $this->voucherProcessing->recalculateMonthlyClosing($clientId, $month, $allItemIds, $allWarehouseIds);
 
         return response()->json(['message' => 'تم تعديل الإذن وتحديث النظام بالكامل']);
     }
@@ -1225,45 +1062,7 @@ class VoucherController extends Controller
             $order->delete();
         });
 
-        // تحديث التقفيل فقط للأصناف والمخازن المتأثرة (بدون مسح باقي الأصناف)
-        $calc = app(\App\Services\CostCalculationService::class);
-        foreach ($warehouseIds as $whId) {
-            foreach ($itemIds as $itemId) {
-                $summary = $calc->itemMonthSummary($clientId, $whId, $itemId, $month);
-                if ($summary['opening_qty'] == 0 && $summary['in_qty'] == 0 && $summary['out_qty'] == 0) {
-                    MonthlyClosing::where('client_id', $clientId)
-                        ->where('warehouse_id', $whId)
-                        ->where('item_id', $itemId)
-                        ->where('month', $month)
-                        ->delete();
-                } else {
-                    MonthlyClosing::updateOrCreate(
-                        [
-                            'client_id'    => $clientId,
-                            'warehouse_id' => $whId,
-                            'item_id'      => $itemId,
-                            'month'        => $month,
-                        ],
-                        [
-                            'opening_qty'             => $summary['opening_qty'],
-                            'opening_value'           => $summary['opening_value'],
-                            'purchases_qty'           => $summary['purchases_qty'],
-                            'purchases_value'         => $summary['purchases_value'],
-                            'internal_in_qty'         => $summary['internal_in_qty'],
-                            'in_qty'                  => $summary['in_qty'],
-                            'in_value'                => $summary['in_value'],
-                            'internal_out_qty'        => $summary['internal_out_qty'],
-                            'consumption_qty'         => $summary['consumption_qty'],
-                            'out_qty'                 => $summary['out_qty'],
-                            'avg_cost'                => $summary['avg_cost'],
-                            'closing_qty_theoretical' => $summary['closing_qty_theoretical'],
-                            'closing_value'           => $summary['closing_value'],
-                            'branch_dispatches'       => $summary['branch_dispatches'],
-                        ]
-                    );
-                }
-            }
-        }
+        $this->voucherProcessing->recalculateMonthlyClosing($clientId, $month, $itemIds, $warehouseIds);
 
         return response()->json(['message' => 'تم حذف الإذن وعكس حركات المخزون وتحديث التقفيل بنجاح']);
     }

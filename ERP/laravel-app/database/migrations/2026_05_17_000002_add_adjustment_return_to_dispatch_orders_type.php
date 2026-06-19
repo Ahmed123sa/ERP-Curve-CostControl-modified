@@ -23,6 +23,8 @@ return new class extends Migration
 
         if ($driver === 'mysql') {
             DB::statement("ALTER TABLE dispatch_orders MODIFY COLUMN type ENUM('purchase', 'dispatch', 'transfer', 'withdrawal', 'production', 'external_sale', 'opening', 'final') DEFAULT 'purchase'");
+        } elseif ($driver === 'sqlite') {
+            // no-op
         }
     }
 };

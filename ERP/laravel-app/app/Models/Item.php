@@ -1,13 +1,14 @@
 <?php
 namespace App\Models;
 use App\Traits\HasTenant;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use App\Models\Financial\FinancialExpenseCategory;
 use Illuminate\Database\Eloquent\Relations\{BelongsTo, HasMany};
 
 class Item extends Model
 {
-    use HasTenant;
+    use HasFactory, HasTenant;
     protected $keyType = 'string';
     public $incrementing = false;
     protected $fillable = ['id','client_id','default_warehouse_id','name','unit','category','expense_category_id','is_active', 'default_cost', 'sort_order', 'min_stock_level', 'linked_branch_id'];

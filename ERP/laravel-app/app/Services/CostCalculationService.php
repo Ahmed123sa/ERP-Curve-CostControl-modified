@@ -130,17 +130,13 @@ class CostCalculationService
             $openingQty   = $openingQtyThisMonth;
             $openingValue = $openingValThisMonth;
         } else {
-            // لو الشهر السابق مش مقفّل → أول المدة = صفر (عشان المستخدم ما يشتغلش على بيانات ناقصة)
             $prevMonthStr = $startOfMonth->copy()->subMonth()->format('Y-m');
             $prevClosing = MonthlyClosing::where('client_id', $clientId)
                 ->where('warehouse_id', $warehouseId)
                 ->where('item_id', $itemId)
                 ->where('month', $prevMonthStr)
-                ->where('is_locked', true)
                 ->first();
             if ($prevClosing) {
-                // نستخدم الرصيد الفعلي (closing_qty_actual) من الشهر السابق
-                // مش الرصيد النظري — عشان الجرد الفعلي هو اللي يحدد أول المدة
                 $openingQty = (float) (
                     $prevClosing->closing_qty_actual
                     ?? $prevClosing->closing_qty_theoretical

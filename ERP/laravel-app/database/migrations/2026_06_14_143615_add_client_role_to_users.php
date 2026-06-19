@@ -7,11 +7,17 @@ return new class extends Migration
 {
     public function up(): void
     {
-        DB::statement("ALTER TABLE `users` MODIFY `role` ENUM('admin','cost_controller','viewer','client') NOT NULL DEFAULT 'cost_controller'");
+        $driver = DB::connection()->getDriverName();
+        if ($driver === 'mysql') {
+            DB::statement("ALTER TABLE `users` MODIFY `role` ENUM('admin','cost_controller','viewer','client') NOT NULL DEFAULT 'cost_controller'");
+        }
     }
 
     public function down(): void
     {
-        DB::statement("ALTER TABLE `users` MODIFY `role` ENUM('admin','cost_controller','viewer') NOT NULL DEFAULT 'cost_controller'");
+        $driver = DB::connection()->getDriverName();
+        if ($driver === 'mysql') {
+            DB::statement("ALTER TABLE `users` MODIFY `role` ENUM('admin','cost_controller','viewer') NOT NULL DEFAULT 'cost_controller'");
+        }
     }
 };

@@ -6,24 +6,27 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
-        DB::statement("ALTER TABLE dispatch_orders MODIFY COLUMN type ENUM(
-            'purchase','dispatch','transfer','withdrawal','production',
-            'external_sale','opening','final','adjustment','return',
-            'branch_transfer','branch_return','closing'
-        ) DEFAULT 'purchase'");
+        $driver = DB::connection()->getDriverName();
+        if ($driver === 'mysql') {
+            DB::statement("ALTER TABLE dispatch_orders MODIFY COLUMN type ENUM(
+                'purchase','dispatch','transfer','withdrawal','production',
+                'external_sale','opening','final','adjustment','return',
+                'branch_transfer','branch_return','closing'
+            ) DEFAULT 'purchase'");
+        }
     }
 
     public function down(): void
     {
-        DB::statement("ALTER TABLE dispatch_orders MODIFY COLUMN type ENUM(
-            'purchase','dispatch','transfer','withdrawal','production',
-            'external_sale','opening','final','adjustment','return',
-            'branch_transfer','branch_return'
-        ) DEFAULT 'purchase'");
+        $driver = DB::connection()->getDriverName();
+        if ($driver === 'mysql') {
+            DB::statement("ALTER TABLE dispatch_orders MODIFY COLUMN type ENUM(
+                'purchase','dispatch','transfer','withdrawal','production',
+                'external_sale','opening','final','adjustment','return',
+                'branch_transfer','branch_return'
+            ) DEFAULT 'purchase'");
+        }
     }
 };
