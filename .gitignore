@@ -46,3 +46,7 @@ laravel-app/bootstrap/cache/*.php
 
 # Coverage
 coverage/
+
+# Scratch
+_scratch/
+laravel-app/_scratch/

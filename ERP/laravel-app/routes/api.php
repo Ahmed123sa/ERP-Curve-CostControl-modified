@@ -47,7 +47,7 @@ use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
 // ── Auth (بدون login) ─────────────────────────────────────
-Route::post('/auth/login', [AuthController::class, 'login']);
+Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
 
 // ── Protected Routes ──────────────────────────────────────
 Route::middleware('auth:sanctum')->group(function () {

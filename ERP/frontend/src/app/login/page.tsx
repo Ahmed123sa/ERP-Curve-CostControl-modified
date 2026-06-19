@@ -5,8 +5,8 @@ import { useAuthStore } from '@/lib/store';
 import toast from 'react-hot-toast';
 
 export default function LoginPage() {
-  const [email, setEmail]       = useState('admin@erp.local');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail]       = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading]   = useState(false);
   const [logoUrl, setLogoUrl]   = useState<string | null>(null);
   const { user, token, login }  = useAuthStore();
