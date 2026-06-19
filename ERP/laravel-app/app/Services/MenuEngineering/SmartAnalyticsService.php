@@ -53,6 +53,19 @@ class SmartAnalyticsService
             $consumptionMap[$row->item_id . '_' . $row->warehouse_id] = (float) $row->total_out;
         }
 
+        // Batch load all stock balances to avoid N+1
+        $itemIds = $items->pluck('id');
+        $stockBalances = StockLedger::select('item_id', 'warehouse_id', DB::raw("
+            SUM(CASE WHEN movement_type IN ('in','transfer_in') THEN qty ELSE 0 END) -
+            SUM(CASE WHEN movement_type IN ('out','transfer_out') THEN qty ELSE 0 END) AS balance
+        "))
+            ->where('client_id', $clientId)
+            ->whereIn('warehouse_id', $whIds)
+            ->whereIn('item_id', $itemIds)
+            ->groupBy('item_id', 'warehouse_id')
+            ->get()
+            ->keyBy(fn($r) => $r->item_id . '_' . $r->warehouse_id);
+
         $outOfStock = [];
         $critical = [];
         $warning = [];
@@ -64,7 +77,7 @@ class SmartAnalyticsService
                 : $allWarehouses;
 
             foreach ($targetWh as $wh) {
-                $qty = $this->calc->currentStock($clientId, $wh->id, $item->id);
+                $qty = (float) ($stockBalances[$item->id . '_' . $wh->id]->balance ?? 0);
                 $min = (float) $item->min_stock_level;
                 $totalOut = $consumptionMap[$item->id . '_' . $wh->id] ?? 0;
                 $avgDaily = $totalOut / 30;
@@ -555,6 +568,28 @@ class SmartAnalyticsService
             ->where('is_active', true)
             ->pluck('id');
 
+        // Batch load all stock quantities and avg costs to avoid N+1
+        $whIds = $warehouses->pluck('id');
+        $qtyBalances = StockLedger::select('item_id', 'warehouse_id', DB::raw("
+            SUM(CASE WHEN movement_type IN ('in','transfer_in') THEN qty ELSE 0 END) -
+            SUM(CASE WHEN movement_type IN ('out','transfer_out') THEN qty ELSE 0 END) AS balance
+        "))
+            ->where('client_id', $clientId)
+            ->whereIn('warehouse_id', $whIds)
+            ->whereIn('item_id', $items)
+            ->groupBy('item_id', 'warehouse_id')
+            ->get()
+            ->keyBy(fn($r) => $r->item_id . '_' . $r->warehouse_id);
+
+        $avgCostData = StockLedger::select('item_id', 'warehouse_id', DB::raw('SUM(qty) as total_qty'), DB::raw('SUM(total_cost) as total_cost'))
+            ->where('client_id', $clientId)
+            ->whereIn('warehouse_id', $whIds)
+            ->whereIn('item_id', $items)
+            ->whereIn('movement_type', ['in', 'transfer_in'])
+            ->groupBy('item_id', 'warehouse_id')
+            ->get()
+            ->keyBy(fn($r) => $r->item_id . '_' . $r->warehouse_id);
+
         $warehouseData = [];
         $totalValue = 0;
 
@@ -563,7 +598,10 @@ class SmartAnalyticsService
             $whCount = 0;
 
             foreach ($items as $itemId) {
-                $val = $this->calc->currentStockValue($clientId, $wh->id, $itemId);
+                $qty = (float) ($qtyBalances[$itemId . '_' . $wh->id]->balance ?? 0);
+                $avgEntry = $avgCostData[$itemId . '_' . $wh->id] ?? null;
+                $avg = $avgEntry && $avgEntry->total_qty > 0 ? round($avgEntry->total_cost / $avgEntry->total_qty, 4) : 0;
+                $val = round($qty * $avg, 2);
                 if ($val > 0) {
                     $whValue += $val;
                     $whCount++;
