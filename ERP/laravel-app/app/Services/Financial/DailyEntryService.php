@@ -88,6 +88,46 @@ class DailyEntryService
         });
     }
 
+    public function update(string $clientId, string $id, array $data): FinancialDailyEntry
+    {
+        return DB::transaction(function () use ($clientId, $id, $data) {
+            $entry = FinancialDailyEntry::where('client_id', $clientId)
+                ->lockForUpdate()
+                ->findOrFail($id);
+
+            $totalExpenses = collect($data['details'] ?? [])->sum('amount');
+            $netDaily = ($data['total_sales'] ?? 0) - $totalExpenses;
+
+            $entry->update([
+                'total_sales' => $data['total_sales'] ?? 0,
+                'total_expenses' => $totalExpenses,
+                'net_daily' => $netDaily,
+                'notes' => $data['notes'] ?? null,
+            ]);
+
+            $entry->details()->delete();
+
+            if (!empty($data['details'])) {
+                foreach ($data['details'] as $detail) {
+                    if (($detail['amount'] ?? 0) > 0) {
+                        $entry->details()->create([
+                            'client_id' => $clientId,
+                            'expense_category_id' => $detail['expense_category_id'],
+                            'amount' => $detail['amount'],
+                            'description' => $detail['description'] ?? null,
+                            'quantity' => $detail['quantity'] ?? null,
+                            'item_id' => $detail['item_id'] ?? null,
+                        ]);
+                    }
+                }
+
+                $entry->load('details.category', 'details.item');
+            }
+
+            return $entry;
+        });
+    }
+
     public function destroy(string $clientId, string $id): bool
     {
         $entry = FinancialDailyEntry::where('client_id', $clientId)

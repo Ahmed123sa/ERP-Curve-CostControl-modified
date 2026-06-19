@@ -34,6 +34,7 @@ class DailyEntryController extends Controller
         ]);
 
         $category = FinancialExpenseCategory::create([
+            'client_id' => $request->user()->current_client_id,
             'name' => $data['name'],
             'code' => $data['code'] ?? null,
             'sort_order' => $data['sort_order'] ?? 0,
@@ -138,11 +139,7 @@ class DailyEntryController extends Controller
             'details.*.item_id' => 'nullable|uuid|exists:items,id',
         ]);
 
-        $entry = \App\Models\Financial\FinancialDailyEntry::where('client_id', $clientId)
-            ->findOrFail($id);
-
-        $data['date'] = $entry->date;
-        $updated = $this->service->store($clientId, $data);
+        $updated = $this->service->update($clientId, $id, $data);
 
         return response()->json(['entry' => $updated, 'message' => 'تم تحديث اليومية']);
     }
