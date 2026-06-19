@@ -34,7 +34,7 @@ class InventoryUploadController extends Controller
     public function parse(Request $request): JsonResponse
     {
         $request->validate([
-            'file' => 'required|file|mimes:xlsx,xls,csv,txt,ods',
+            'file' => 'required|file|mimes:xlsx,xls,csv,txt,ods|max:10240',
         ]);
 
         $clientId = $request->user()->current_client_id;

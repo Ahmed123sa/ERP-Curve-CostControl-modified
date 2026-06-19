@@ -1,11 +1,13 @@
 <?php
 namespace App\Models\MenuEngineering;
 
+use App\Traits\HasTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 
 class MenuReconciliation extends Model
 {
+    use HasTenant;
     protected $table = 'menu_engineering_reconciliations';
     protected $keyType = 'string';
     public $incrementing = false;

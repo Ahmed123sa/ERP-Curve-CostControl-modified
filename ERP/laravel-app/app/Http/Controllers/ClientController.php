@@ -102,6 +102,14 @@ class ClientController extends Controller
             'logo' => 'required|image|mimes:jpeg,png,jpg,gif,svg,webp|max:2048',
         ]);
 
+        if (!$request->user()->isClient()) {
+            abort_unless(
+                $request->user()->clients()->where('clients.id', $client->id)->exists(),
+                403,
+                'ليس لديك صلاحية الوصول لهذه الشركة'
+            );
+        }
+
         if ($client->logo) {
             Storage::disk('public')->delete($client->logo);
         }

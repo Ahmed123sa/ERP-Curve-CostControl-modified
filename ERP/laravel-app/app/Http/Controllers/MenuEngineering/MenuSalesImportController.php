@@ -9,6 +9,7 @@ use App\Models\MenuEngineering\MenuSale;
 use App\Services\MenuEngineering\MenuMatchingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
 class MenuSalesImportController extends Controller
@@ -37,7 +38,7 @@ class MenuSalesImportController extends Controller
     public function upload(Request $request): JsonResponse
     {
         $request->validate([
-            'file' => 'required|file|mimes:xlsx,xls',
+            'file' => 'required|file|mimes:xlsx,xls|max:10240',
             'branch_id' => 'required|string',
             'sale_date' => 'required|date',
         ]);
@@ -215,7 +216,7 @@ class MenuSalesImportController extends Controller
     public function previewColumns(Request $request): JsonResponse
     {
         $request->validate([
-            'file' => 'required|file|mimes:xlsx,xls',
+            'file' => 'required|file|mimes:xlsx,xls|max:10240',
         ]);
 
         $file = $request->file('file');
@@ -255,7 +256,7 @@ class MenuSalesImportController extends Controller
     public function process(Request $request): JsonResponse
     {
         $request->validate([
-            'file' => 'required|file|mimes:xlsx,xls',
+            'file' => 'required|file|mimes:xlsx,xls|max:10240',
             'branch_id' => 'required|string',
             'sale_date' => 'required|date',
             'mapping' => 'required|array',
@@ -454,19 +455,22 @@ class MenuSalesImportController extends Controller
 
     public function confirm(Request $request): JsonResponse
     {
+        $clientId = $request->user()->current_client_id;
+
         $request->validate([
             'branch_id' => 'required|string',
             'sale_date' => 'required|date',
             'items' => 'required|array|min:1',
-            'items.*.recipe_id' => 'required|string|exists:menu_engineering_recipes,id',
+            'items.*.recipe_id' => [
+                'required', 'string',
+                Rule::exists('menu_engineering_recipes', 'id')->where('client_id', $clientId),
+            ],
             'items.*.qty_sold' => 'required|numeric|min:0',
             'items.*.category' => 'nullable|string',
             'items.*.source_name' => 'nullable|string',
             'half_categories' => 'nullable|array',
             'half_categories.*' => 'boolean',
         ]);
-
-        $clientId = $request->user()->current_client_id;
         $branchId = $request->branch_id;
         $saleDate = $request->sale_date;
         $halfCategories = $request->half_categories ?? [];
@@ -541,8 +545,13 @@ class MenuSalesImportController extends Controller
     {
         $item = MenuImportSessionItem::where('session_id', $sessionId)->findOrFail($itemId);
 
+        $clientId = $request->user()->current_client_id;
+
         $request->validate([
-            'recipe_id' => 'nullable|string|exists:menu_engineering_recipes,id',
+            'recipe_id' => [
+                'nullable', 'string',
+                Rule::exists('menu_engineering_recipes', 'id')->where('client_id', $clientId),
+            ],
         ]);
 
         $recipeId = $request->recipe_id;

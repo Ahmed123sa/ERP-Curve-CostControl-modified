@@ -13,6 +13,7 @@ use App\Services\MenuEngineering\MenuReconciliationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Conditional;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -44,8 +45,13 @@ class MenuReconciliationController extends Controller
 
     public function storeSale(Request $request): JsonResponse
     {
+        $clientId = $request->user()->current_client_id;
+
         $data = $request->validate([
-            'recipe_id' => 'required|string|exists:menu_engineering_recipes,id',
+            'recipe_id' => [
+                'required', 'string',
+                Rule::exists('menu_engineering_recipes', 'id')->where('client_id', $clientId),
+            ],
             'branch_id' => 'required|string',
             'qty_sold' => 'required|numeric|min:0',
             'selling_price' => 'nullable|numeric|min:0',
@@ -53,7 +59,7 @@ class MenuReconciliationController extends Controller
             'notes' => 'nullable|string',
         ]);
 
-        $data['client_id'] = $request->user()->current_client_id;
+        $data['client_id'] = $clientId;
 
         $sale = MenuSale::create($data);
 

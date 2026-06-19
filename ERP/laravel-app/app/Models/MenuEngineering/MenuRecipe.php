@@ -2,13 +2,14 @@
 namespace App\Models\MenuEngineering;
 
 use App\Models\Item;
+use App\Traits\HasTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
 class MenuRecipe extends Model
 {
-    use SoftDeletes;
+    use HasTenant, SoftDeletes;
 
     protected $table = 'menu_engineering_recipes';
     protected $keyType = 'string';

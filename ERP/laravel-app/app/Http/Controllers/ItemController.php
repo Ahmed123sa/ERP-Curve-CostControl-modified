@@ -123,8 +123,8 @@ class ItemController extends Controller
 
     public function import(Request $request): JsonResponse
     {
-        $request->validate(['file' => 'required|file']);
-        
+        $request->validate(['file' => 'required|file|mimes:xlsx,xls,csv|max:10240']);
+
         $clientId = $request->user()->current_client_id;
         $path     = $request->file('file')->getRealPath();
         $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($path);
@@ -216,7 +216,7 @@ class ItemController extends Controller
 
     public function importStockLevels(Request $request): JsonResponse
     {
-        $request->validate(['file' => 'required|file']);
+        $request->validate(['file' => 'required|file|mimes:xlsx,xls,csv|max:10240']);
 
         $clientId = $request->user()->current_client_id;
         $path     = $request->file('file')->getRealPath();

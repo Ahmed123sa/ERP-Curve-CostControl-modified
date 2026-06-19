@@ -1,11 +1,13 @@
 <?php
 namespace App\Models\Production;
 
+use App\Traits\HasTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 
 class MarketPrice extends Model
 {
+    use HasTenant;
     protected $table = 'production_market_prices';
     protected $keyType = 'string';
     public $incrementing = false;
