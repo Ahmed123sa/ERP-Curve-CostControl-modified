@@ -11,6 +11,7 @@ use App\Models\DispatchOrder;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 
 /**
  * CostCalculationService
@@ -106,18 +107,22 @@ class CostCalculationService
         string $clientId,
         string $warehouseId,
         string $itemId,
-        string $month // 2024-04
+        string $month,
+        ?Collection $ledger = null,
+        ?MonthlyClosing $prevClosing = null,
+        ?Item $item = null,
     ): array {
         $startOfMonth = Carbon::parse($month . '-01');
         $endOfMonth   = $startOfMonth->copy()->endOfMonth();
         $prevMonth    = $startOfMonth->copy()->subDay()->toDateString();
 
-        // 2. تجميع الحركات في الشهر الحالي
-        $ledger = StockLedger::where('client_id', $clientId)
-            ->where('warehouse_id', $warehouseId)
-            ->where('item_id', $itemId)
-            ->whereBetween('date', [$startOfMonth->toDateString(), $endOfMonth->toDateString()])
-            ->get();
+        if ($ledger === null) {
+            $ledger = StockLedger::where('client_id', $clientId)
+                ->where('warehouse_id', $warehouseId)
+                ->where('item_id', $itemId)
+                ->whereBetween('date', [$startOfMonth->toDateString(), $endOfMonth->toDateString()])
+                ->get();
+        }
 
         // أرصدة افتتاحية مسجلة في هذا الشهر (مهمة جداً للبداية)
         $openingQtyThisMonth = (float) $ledger->where('voucher_type', 'opening')->sum('qty');
@@ -131,11 +136,13 @@ class CostCalculationService
             $openingValue = $openingValThisMonth;
         } else {
             $prevMonthStr = $startOfMonth->copy()->subMonth()->format('Y-m');
-            $prevClosing = MonthlyClosing::where('client_id', $clientId)
-                ->where('warehouse_id', $warehouseId)
-                ->where('item_id', $itemId)
-                ->where('month', $prevMonthStr)
-                ->first();
+            if ($prevClosing === null) {
+                $prevClosing = MonthlyClosing::where('client_id', $clientId)
+                    ->where('warehouse_id', $warehouseId)
+                    ->where('item_id', $itemId)
+                    ->where('month', $prevMonthStr)
+                    ->first();
+            }
             if ($prevClosing) {
                 $openingQty = (float) (
                     $prevClosing->closing_qty_actual
@@ -194,7 +201,9 @@ class CostCalculationService
         $totalValue   = $openingValue + $inValueTotal;
 
         // 3. سعر الصنف الافتراضي هو الأساس (بيتحدث من الوصفات أو من وارد المخزن)
-        $item = \App\Models\Item::find($itemId);
+        if ($item === null) {
+            $item = Item::find($itemId);
+        }
         $defaultCost = (float) ($item->default_cost ?? 0);
         $calcAvg = $totalQty > 0 ? round($totalValue / $totalQty, 4) : 0;
 
@@ -285,14 +294,33 @@ class CostCalculationService
         string $warehouseId,
         string $month
     ): array {
-        $items   = Item::where('client_id', $clientId)->where('is_active', true)->get();
-        $results = [];
+        $items      = Item::where('client_id', $clientId)->where('is_active', true)->get();
+        $itemsById  = $items->keyBy('id');
+        $results    = [];
 
-        DB::transaction(function () use ($clientId, $warehouseId, $month, $items, &$results) {
+        $startOfMonth  = Carbon::parse($month . '-01');
+        $endOfMonth    = $startOfMonth->copy()->endOfMonth();
+        $prevMonthStr  = $startOfMonth->copy()->subMonth()->format('Y-m');
+
+        $allLedgers = StockLedger::where('client_id', $clientId)
+            ->where('warehouse_id', $warehouseId)
+            ->whereBetween('date', [$startOfMonth->toDateString(), $endOfMonth->toDateString()])
+            ->get()
+            ->groupBy('item_id');
+
+        $allPrevClosings = MonthlyClosing::where('client_id', $clientId)
+            ->where('warehouse_id', $warehouseId)
+            ->where('month', $prevMonthStr)
+            ->get()
+            ->keyBy('item_id');
+
+        DB::transaction(function () use ($clientId, $warehouseId, $month, $items, $itemsById, $allLedgers, $allPrevClosings, &$results) {
             // ملاحظة: لا نحذف السجلات (delete) لكي لا نفقد الجرد الفعلي (closing_qty_actual) الذي أدخله المستخدم يدويًا
             
             foreach ($items as $item) {
-                $summary = $this->itemMonthSummary($clientId, $warehouseId, $item->id, $month);
+                $ledger = $allLedgers->get($item->id, collect());
+                $prevClosing = $allPrevClosings->get($item->id);
+                $summary = $this->itemMonthSummary($clientId, $warehouseId, $item->id, $month, $ledger, $prevClosing, $itemsById[$item->id] ?? null);
 
 // لو الصنف مش active — نمسح التقفيل
                 if (!$item->is_active) {
