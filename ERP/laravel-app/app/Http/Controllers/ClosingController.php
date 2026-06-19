@@ -11,7 +11,6 @@ use App\Models\Item;
 use App\Models\DispatchLine;
 use App\Models\DispatchOrder;
 use App\Models\StockLedger;
-use App\Jobs\ProcessMonthlyClosing;
 use App\Services\ActivityLogger;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -187,13 +186,13 @@ class ClosingController extends Controller
         if ($whId === 'all') {
             $warehouses = Warehouse::where('client_id', $clientId)->where('is_active', true)->get();
             foreach ($warehouses as $wh) {
-                ProcessMonthlyClosing::dispatch($clientId, $wh->id, $month);
+                $this->calc->generateMonthlyClosing($clientId, $wh->id, $month);
             }
-            return response()->json(['message' => 'جاري إنشاء التقفيل لكل المخازن والفروع']);
+            return response()->json(['message' => 'تم إنشاء التقفيل لكل المخازن والفروع']);
         }
 
-        ProcessMonthlyClosing::dispatch($clientId, $whId, $month);
-        return response()->json(['message' => 'جاري إنشاء التقفيل']);
+        $this->calc->generateMonthlyClosing($clientId, $whId, $month);
+        return response()->json(['message' => 'تم إنشاء التقفيل']);
     }
 
     public function updateActual(UpdateActualRequest $request, MonthlyClosing $closing): JsonResponse
